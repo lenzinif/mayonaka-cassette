@@ -1,0 +1,306 @@
+f you had to associate the music genre "future funk" to a video game genre, what would it be? What comes to your mind?
+
+Future funk naturally pairs with arcade extreme sports and stylish street-racing games—specifically the late-1990s and early-2000s Sega Dreamcast era.
+
+Because future funk combines 1980s Japanese City Pop samples, slap bass, and upbeat French house filters with 90s anime visuals, several specific video game genres and aesthetics immediately come to mind:
+
+    Cel-Shaded Arcade Action & Skating (Jet Set Radio, Bomb Rush Cyberfunk): Future funk is kinetic, rebellious, and relentlessly upbeat. It fits the exact rhythm of grinding rails, spraying graffiti, and dodging authorities in sun-drenched, neon-accented urban sandboxes.
+
+    Retro-Futuristic Arcade Racers (Ridge Racer Type 4, OutRun, Slipstream): The genre's driving four-on-the-floor house beats and nostalgic synth brass evoke drifting a 1990s JDM sports car down a coastal highway or through a Tokyo tunnel at midnight.
+
+    Flashy Arcade Rhythm Games (Space Channel 5, Bust a Groove, Dance Dance Revolution): With its heavy reliance on chopped vocal hooks, disco loops, and infectious grooves, future funk feels built for combo-based rhythm mechanics and vibrant, Y2K-era character select screens.
+
+    Anime-Inspired Cyberpunk Visual Novels (VA-11 Hall-A, Read Only Memories): Visually, future funk is inseparable from 80s and 90s OVA anime aesthetics (Sailor Moon, Macross). While slower in gameplay, narrative pixel-art games set in neon-lit bars capture the nostalgic, late-night metropolitan vibe of the genre.
+
+Do you think making an Outrun clone is doable for a full-stack developer with almost no game dev experience?
+
+Building an OutRun clone is not only doable for a full-stack developer—it is arguably one of the best bridge projects into game development.
+
+Classic 1980s Sega racers don't use true 3D environments, complex physics engines, or 3D modeling pipelines. They use pseudo-3D (2.5D raster projection), which is essentially an optical illusion built on array manipulation, state management, and 2D canvas drawing—skills that map directly to full-stack engineering.
+
+Why the architecture fits a full-stack brain
+
+    The road is just a 1D array of objects: Instead of modeling a 3D world, the entire track is a flat list of road segments. Each segment is a simple JSON-like object holding a curve value, an elevation value, a color palette (alternating light/dark strips to create the illusion of speed), and an array of sprites (palm trees, neon signs, or traffic cars) anchored to that slice of road.
+
+    Perspective is a simple math function: To render a frame, you slice the array of segments currently in front of the player and project their coordinates onto a 2D screen using basic perspective division (dividing the X and Y coordinates by depth Z). Every segment of the road, its rumble strips, and the grass beside it is just a flat 2D trapezoid drawn onto the screen from the bottom up.
+
+    Curves and hills are screen-space tricks: You never actually rotate a camera in 3D space. To render a curve, your loop simply shifts the horizontal center of each stacked trapezoid increasingly to the left or right as it draws closer to the horizon line.
+
+    The "physics" are faked: You don't need rigid-body collisions, suspension math, or tire friction. Speed is a single float variable. Steering just shifts your car sprite's X offset, and driving through a curve applies a simple centrifugal offset that pushes you toward the roadside based on your current speed and the segment's curve value.
+
+Two ways to build it
+
+    The Web Stack Route (TypeScript + HTML5 Canvas or PixiJS): This is the fastest way to get a playable prototype running in a weekend. You stay in your native language and IDE while only having to learn one new mental model: the requestAnimationFrame game loop. There are two famous, gold-standard resources written specifically for web developers tackling this exact project: Lou's Pseudo 3D Page (which explains the math visually) and Jake Gordon's "JavaScript Racer" (an open-source tutorial and codebase that builds an OutRun clone in four incremental steps: straight roads, curves, hills, and sprites).
+
+    The Game Engine Route (Phaser or Godot): If you want more out-of-the-box tooling for audio, controller input, and sprite animation while staying in TypeScript, Phaser is an easy transition. If you want to learn a dedicated engine like Godot, you can either write the classic 2D raster math or "cheat" the OutRun look the way modern indie games do—using a simple 3D road mesh paired with 2D billboard sprites and a pixelation shader.
+
+What will actually trip you up
+
+    Shifting from event-driven to continuous loop thinking: In web dev, state changes when a user clicks or an API responds. In a game loop, state updates 60 to 144 times per second. You have to multiply all movement by deltaTime (the exact time elapsed since the last frame) so your car doesn't drive twice as fast on a 120Hz monitor as it does on a 60Hz laptop.
+
+    Depth sorting and hill clipping: Drawing roadside palm trees and rival cars from back to front (the Painter's Algorithm) is straightforward on flat ground, but clipping the bottom half of a sprite when it sits just over the crest of a hill takes careful bounding-box logic.
+
+    Sourcing art assets: You can code a curving, hilly road in a couple of evenings, but making it feel like OutRun or future funk requires parallax background layers, roadside props, and a car sprite sheet with multiple turning and uphill frames. Grabbing placeholder retro arcade sprite packs from Itch.io or OpenGameArt early on will keep you from stalling out on art.
+
+Would you rather build this directly in the browser with TypeScript/JavaScript to stay in familiar territory, or use it as an excuse to pick up a dedicated game engine?
+
+Now start thinking like a game designer: how would you tie future funk with a game that has a Outrun as the prototype?
+
+To make a Future Funk OutRun game feel cohesive, the music cannot just be an MP3 playing in the background—the music has to drive the game state, and the driving has to manipulate the music.
+
+Yu Suzuki famously described OutRun not as a racing game, but as a "driving game" about the fantasy of cruising with good music. Future Funk is built on a very specific set of DJ techniques (low-pass filter sweeps, sidechain pumping, chopped vocal loops) and visual tropes (90s anime OVAs, late-night Tokyo expressways, VHS nostalgia).
+
+Here is how you tie those directly into the mechanics of a pseudo-3D prototype without blowing up your development scope:
+1. Turn the "French House Filter" into Your Core Speed Mechanic
+
+The signature sound of Future Funk is the muffled low-pass filter sweep that suddenly opens up into crisp, punchy highs and slap bass when the beat drops. You can tie that directly to your car's telemetry:
+
+    Speed-Linked Audio Filtering: When you are driving slowly, spin out, or hit traffic, apply a low-pass filter to the music so it sounds muffled—like hearing a club track through a wall. Once you hit top gear or hold a clean drift around a curve, sweep the filter completely open so the full bassline and vocals hit at maximum clarity.
+
+    The "Turntable Scrape" Collision: Instead of a generic metal crash sound when clipping a roadside billboard or kei truck, trigger a vinyl record scratch or cassette tape warble that momentarily drops the track's pitch before ramping back up as you accelerate.
+
+    Dev bonus: If you build this in the browser, you don't need audio engineering software to do this. The native Web Audio API has a BiquadFilterNode where you can map filter.frequency.value directly to your player.speed variable in three lines of code.
+
+2. Replace the Stress Timer with a "Groove / Hype Meter"
+
+Traditional OutRun uses a strict countdown clock where mistakes cost you time. Future Funk is upbeat and hedonistic, so swap pure time-trial anxiety for a Groove Meter (similar to OutRun 2's Heart Attack mode or Jet Set Radio):
+
+    Building the Groove: Drifting through long curves, weaving closely past midnight highway traffic, and driving over beat-synced boost pads on the road fills a cassette-styled Groove bar.
+
+    Fever Mode (The Sample Drop): When the meter hits 100%, the game enters "Fever Mode." Mechanically, your top speed increases by 15% and your drift grip tightens. Visually, the dark night skybox swaps to an animated 90s anime loop or vaporwave sunset grid, and the roadside sprites start pulsing aggressively to the BPM.
+
+    BPM-Synced Road Rendering: Because an OutRun road is just an array of alternating colored trapezoids, you can run a simple math check against the song's BPM (60 / bpm) to make every 4th road segment's rumble strips or neon guardrails flash on the downbeat.
+
+3. Reimagine the "Fork in the Road" as a Live DJ Mix
+
+OutRun's most iconic design feature is the branching fork at the end of every stage that lets you pick your next biome. In a Future Funk game, every fork in the road is a track transition:
+Fork Element	Classic OutRun	Future Funk Twist
+Signage	Geographical names (Coconut Beach, Devil's Canyon)	Radio stations or cassette B-sides (98.4 FM: Shibuya Midnight vs. 102.1 FM: Bayshore Marina)
+Audio Transition	Hard cut or silence between stages	A 4-bar DJ crossfade with a filter sweep as you drive through the highway interchange
+Visual Shift	Grass color changes from green to sand	Road palette and parallax skyline shift from neon purple Tokyo tunnels to pastel orange coastal bridges
+4. Put the 90s Anime Aesthetic in the Cockpit UI
+
+Since a pseudo-3D engine relies on flat 2D sprites, you can get massive visual mileage out of a minimal art budget by leaning into 90s anime OVA and VHS interfaces:
+
+    The Rear-View / Passenger Cam: OutRun had a passenger in the seat next to you reacting to the drive. Place a small, cel-shaded 90s anime portrait box in the top corner of the HUD (styled like a camcorder viewfinder). You only need 4 looping sprite states for the character: bopping their head to the BPM (cruising), wind-blown excitement (drifting/Fever mode), wincing (collision), and popping in a new cassette tape (hitting a stage fork).
+
+    Curated Roadside Clutter: Instead of trees and rocks, populate your roadside sprite array with glowing vending machines, overhead green Japanese highway signs, giant holographic soda cans, and palm trees lit in magenta and cyan. Because the engine duplicates and scales the same sprite down the road array, drawing just 5 or 6 high-contrast props is enough to make a track feel dense and alive.
+
+> Yu Suzuki famously described OutRun not as a racing game, but as a "driving game"
+
+This is exactly it. Can you give me more info about what he said? He sounds like someone I should learn from. I want to learn how to think like a game designer
+Ricerca nel web in corso…
+
+Alright, let's make this game happen. I need your guidance on how to configure this project, without discussing the nitty gritty of design and implementation. Let's start broad. I know nothing of music making and I can't have this become my day job. Answer with a well structured prompt.
+
+Treating this project like a lightweight web application—where you write the state logic and outsource the heavy creative lifting (music and art) to pre-existing assets—is the key to shipping it in your spare time without burning out.
+1. The Zero-Friction Tech Stack
+
+Avoid heavy game engines (Unity, Unreal, Godot) that require weeks of learning bespoke UI workflows. Stick to tools that mirror your day-to-day full-stack environment so you can go from git init to drawing on screen in five minutes.
+Layer	Recommended Choice	Why It Fits Your Constraints
+Language & Bundler	TypeScript + Vite	Instant hot-module reloading (npm run dev), familiar strict typing, and zero build configuration.
+Rendering	Native HTML5 <canvas> (or PixiJS)	Pseudo-3D OutRun rendering only needs basic 2D polygon drawing and sprite scaling. Native Canvas has zero dependencies; PixiJS adds easy WebGL shaders (like VHS/CRT filters) if you want extra visual polish later.
+Audio Control	Native Web Audio API (or Howler.js)	Built into every browser. Gives you out-of-the-box access to low-pass filters, playback speed/pitch shifting, and precise audio timestamps without third-party audio middleware.
+Hosting & CI/CD	Vercel / Netlify / GitHub Pages	Push to main and play your build immediately on a live URL. Sharing a link with friends for feedback is effortless.
+2. The "Zero Music Skill" Audio Pipeline
+
+You do not need to learn music theory, Digital Audio Workstations (DAWs), or complex audio engineering to build a music-driven game. Treat audio files the exact same way you treat external API data:
+
+    License Pre-Made Tracks (Don't Compose): Browse Itch.io, Bandcamp, or Ovani Sound for royalty-free "Future Funk," "City Pop," or "French House" music packs ($10–$30 for a full album of game-ready tracks). Alternatively, small independent Future Funk producers on SoundCloud are often thrilled to let indie web projects feature two or three of their existing tracks in exchange for prominent credits and links to their socials.
+
+    Hardcode Beat Metadata as JSON: Do not waste weeks coding real-time audio frequency analysis to detect beats. When you pick an MP3, spend 30 seconds tapping along to it on a free browser BPM finder, then create a companion JSON config for that track:
+
+        {"title": "Midnight Shibuya", "bpm": 122, "firstBeatOffsetSec": 0.42, "dropTimestampSec": 31.5}
+
+    Let Simple Math Drive the Sync: Once you know a song is 122 BPM, your code knows a beat happens every 0.491 seconds (60 / 122). You simply check the audio player's current timestamp against that interval to trigger visual pulses.
+
+3. The "Buy & Borrow" Art Strategy
+
+Game projects most commonly die when developers stop coding to spend months learning pixel art. Protect your time by separating functionality from aesthetics:
+
+    Start in "Greybox" Mode: For the first half of the project, your road is made of flat hex colors, your car is a red rectangle, and roadside palm trees are green triangles. If the driving feels good as basic shapes, it will feel great with sprites.
+
+    Use Off-the-Shelf Asset Packs: Grab 16-bit arcade racing sprite sheets, parallax city skylines, and anime UI frames from Itch.io or OpenGameArt.
+
+    Unify Mismatched Art with Code: If you buy a car sprite from one artist and a background from another, unify them using code—apply a consistent CSS/Canvas color overlay (magenta/cyan tinting) and drop a ready-made CRT scanline overlay across the entire viewport.
+
+4. The "Keep Your Day Job" Milestone Roadmap
+
+Structure your repository and task board around four strict phases, designed for 3 to 5 hours of casual work per week. Each phase ends with a playable build you can walk away from at any time.
+
+    Phase 1: The Silent Cruiser (Weeks 1–2)
+
+        Goal: A playable, curving, hilly road in the browser using only colored shapes and placeholder boxes.
+
+        Definition of Done: You can steer left/right, accelerate, and feel fake centrifugal force pushing you on corners at a steady 60 FPS.
+
+    Phase 2: The Audio Hook (Week 3)
+
+        Goal: Connect a single licensed Future Funk MP3 and its JSON metadata file to the game loop.
+
+        Definition of Done: Road stripes flash on the BPM downbeat, and driving below top speed muffles the music via a low-pass filter.
+
+    Phase 3: The Arcade Loop (Weeks 4–5)
+
+        Goal: Add game state (start screen, Groove Meter, obstacle collisions, and a single fork in the road that crossfades into a second MP3).
+
+        Definition of Done: A complete 3-minute gameplay loop from start to finish.
+
+    Phase 4: The Aesthetic Swap (Weeks 6–7)
+
+        Goal: Swap placeholder rectangles for downloaded sprite sheets, add a parallax skybox, and apply a retro VHS screen filter.
+
+        Definition of Done: Ready to share on a public URL.
+
+5. Folder Architecture Blueprint
+
+Keep your repository flat and modular so you can jump back in after a busy week at work without forgetting where things live:
+Plaintext
+
+future-funk-racer/
+├── public/
+│   ├── audio/          # Licensed .mp3 files + companion .json beat configs
+│   └── sprites/        # Downloaded sprite sheets (cars, props, skyboxes)
+├── src/
+│   ├── core/           # Game loop (requestAnimationFrame) & input listeners
+│   ├── road/           # Pseudo-3D projection math & segment arrays
+│   ├── audio/          # Web Audio API wrapper & BPM clock calculator
+│   ├── entities/       # Player car state, Groove Meter logic, traffic
+│   └── ui/             # HUD overlays & CRT post-processing effects
+├── index.html
+└── package.json
+
+Would you like to set up the boilerplate project structure and package.json first, or start by outlining the pseudo-3D road architecture for Phase 1?
+
+Now answer the message you skipped previously:
+
+> Yu Suzuki famously described OutRun not as a racing game, but as a "driving game"
+
+This is exactly it. Can you give me more info about what he said? He sounds like someone I should learn from. I want to learn how to think like a game designer
+
+And tell me: is typescript and pixi, knowing that I mostly ai code backend these days and used to do react with heavy ai use still the right way or should I consider other alternatives?
+
+Yu Suzuki’s distinction between a "racing game" and a "driving game" is one of the best masterclasses in game design because it separates what the player is mechanically doing (steering a car) from why the player actually cares (living out a fantasy).
+1. How Yu Suzuki Thought About OutRun (And How to Think Like a Designer)
+
+Before OutRun launched in 1986, arcade car games like Namco's Pole Position were stressful, unforgiving Formula 1 simulations: if you clipped a rival tire or a roadside sign, your car immediately exploded. Suzuki hated the idea of cars crashing into each other like bumper cars and wanted to build something inspired by his favorite road-trip movie, The Cannonball Run.
+
+He took a research trip through Europe with a camera duct-taped to his car's hood. Outside a casino in Monaco, he saw a red Ferrari Testarossa convertible gleaming under a bright blue sky and realized: "There’s no car more exciting, no car with more presence, no other car more enviable!" That realization led to three core design rules you can steal directly for your game:
+
+    Design for the emotional fantasy, not the simulation: Suzuki realized regular people don't fantasize about the stress of shaving 0.2 seconds off a lap time—they fantasize about cruising down the Riviera in a convertible Ferrari with the wind in their hair and a companion in the passenger seat. When he later built the fighter-jet game After Burner, he openly laughed at people calling his games "simulations," revealing that enemy jets actually flew backward until you locked onto them because realistic speeds made dogfighting impossible. Designer Lesson: Never let realistic physics ruin a cool feeling. Fake whatever math you need to make the player feel smooth.
+
+    Spend development budget on "Vibe Agency": In a strict racing game, letting the player pick a radio station on the dashboard or choose left/right at a scenic highway fork adds zero competitive depth. In a driving game, those two features are everything. They transform the player from someone reacting to an obstacle course into someone curating their own road trip. Designer Lesson: Give the player choices that change the mood (the music, the lighting, the skyline), not just the difficulty.
+
+    Protect the flow state when the player fails: Instead of punishing a collision with a fiery explosion and a dead stop, OutRun spins your car around or tumbles it melodramatically while your passenger scolds you, then drops you right back onto the asphalt. Designer Lesson: In your Future Funk game, hitting traffic shouldn't kill the vibe—it should feel like a DJ momentarily muffling the track before dropping the beat again.
+
+2. Re-Evaluating Your Stack for an "AI-First + Backend/React" Workflow
+
+Knowing that you primarily write backend code with AI and have heavy experience prompting React changes the calculus significantly.
+
+First, staying in web tech instead of a GUI engine (Godot/Unity) is 100% the right call for an AI workflow. Traditional game engines split logic across binary scene files, visual inspector checkboxes, and node trees that LLMs cannot easily read or edit in one pass. When your entire game lives in plain .ts and .tsx files, an AI coding assistant (Cursor, Claude Code, Copilot) has full context over the entire project.
+
+However, given how LLMs work, you should swap PixiJS for a hybrid "Vanilla HTML5 <canvas> + React UI" architecture:
+Stack Option	AI-Coding Ergonomics	Fit for Your Background	Verdict
+1. Vanilla 2D <canvas> (Road Engine) + React (HUD/Menus)	10/10. The HTML5 2D Canvas API (ctx.fill(), ctx.drawImage()) hasn't changed in 15 years. LLMs never hallucinate deprecated methods, and Jake Gordon’s open-source JS Racer math is baked deep into every LLM's training weights.	Perfect. You treat the pseudo-3D road engine like a pure TypeScript backend service (state arrays + math functions), and build all menus, cassette selectors, and anime HUDs as standard React + Tailwind components layered on top.	Best Choice. Fastest path to vibe-coding a working prototype.
+2. TypeScript + PixiJS	6/10. PixiJS introduced major breaking API changes between v7 and v8. AI models frequently mix v7 and v8 syntax unless you constantly feed documentation into the prompt context.	Moderate. Since pseudo-3D OutRun redraws flat trapezoids every frame, Pixi's scene graph adds boilerplate without solving the core road math.	Skip Pixi unless you specifically need complex WebGL particle systems later.
+3. React Three Fiber (R3F / Three.js)	8/10. LLMs are very strong at writing declarative Three.js inside React components, and @react-three/postprocessing gives you instant 1-line CRT/bloom shaders.	High. Everything is a React component (<mesh>, <EffectComposer>). However, curving a true 3D road mesh along a spline is much harder to debug with AI than 2D array projection.	Good alternative only if you abandon 2.5D OutRun projection for true 3D.
+Why the "Vanilla Canvas + React Overlay" Hybrid is Your Secret Weapon
+
+If you structure the app with a fullscreen <canvas> at z-index: 1 and a transparent React app over it at z-index: 2, you play entirely to your strengths and your AI's strengths:
+
+    The Road Loop is Pure "Backend" TypeScript: You can prompt your AI as if you are writing a backend simulation—"Write a pure TypeScript class RoadEngine with zero dependencies that holds an array of 500 road segments, updates player X/Z position based on deltaTime, and renders projected 2D polygons to a passed CanvasRenderingContext2D." Because it's pure math and arrays, AI models one-shot this cleanly and you can read/debug the state logic effortlessly.
+
+    The Aesthetic Polish Lives in React/CSS: Instead of fighting canvas coordinate math to draw a 90s anime camcorder HUD, a cassette-tape song switcher, or a Groove Meter, you just vibe-code them in React with CSS animations and Tailwind—something both you and AI can iterate on in minutes. Even a retro VHS scanline effect can just be a pointer-events-none CSS overlay div sitting on top of the canvas.
+
+Write an Antigravity architectural spec file I can drop into my repo so my AI coding assistant understands the Vanilla Canvas + React Future Funk OutRun architecture.
+
+In Google Antigravity, workspace-wide architectural rules live in GEMINI.md (or AGENTS.md) at the root of your repository, which Antigravity automatically loads as an always_on context rule without needing YAML frontmatter. (If you prefer modular rules inside .agents/rules/architecture.md, prepend ---\ntrigger: always_on\n--- to the top of the file.)
+
+Save the following specification as GEMINI.md in your project root. It uses Antigravity’s native @path syntax so the agent resolves canonical workspace paths automatically:
+Markdown
+
+# Future Funk OutRun — Architecture & Agent Rules
+
+## 1. Project Vision & Design Pillars (The Yu Suzuki Ethos)
+This is a **driving game** (emotional fantasy and flow state), not a hardcore racing simulation. Every implementation decision must obey three core design pillars:
+1. **Feel Over Simulation:** All physics (centrifugal curve pull, drift slide, hill cresting) are faked via simple tunable formulas. Never introduce rigid-body physics engines.
+2. **Music Drives State, Driving Manipulates Music:** The soundtrack and road rendering are tightly coupled. High speeds and clean drifts open the Web Audio low-pass filter; slow speeds and collisions muffle the track and trigger turntable pitch dips.
+3. **Protect the Flow State:** Collisions with roadside props or traffic must never cause a game-over explosion or dead stop. They deduct Groove, momentarily dip speed, muffle the audio filter, and keep the player moving.
+
+---
+
+## 2. Tech Stack & Strict Layer Separation
+- **Bundler & Language:** Vite + TypeScript (strict mode).
+- **Game View (`z-index: 1`):** Fullscreen HTML5 2D `<canvas>` (`CanvasRenderingContext2D`). Do NOT install PixiJS, Three.js, or Phaser.
+- **HUD & Overlays (`z-index: 2`):** React + Tailwind CSS layered above the canvas (`pointer-events-none` on HUD containers; `pointer-events-auto` only on interactive menus).
+- **Audio:** Native browser `Web Audio API` (`AudioContext`, `BiquadFilterNode`, `GainNode`).
+
+### Architectural Boundaries (CRITICAL INVARIANTS)
+- **`@src/engine/` & `@src/road/` (Pure TypeScript Core):** Must have **ZERO React imports**. Treat the engine like a standalone backend state machine that exposes `.update(dt)` and `.render(ctx)`.
+- **`@src/audio/` (Web Audio & Beat Clock):** Wraps `AudioContext`. Reads static companion JSON metadata (`bpm`, `firstBeatOffsetSec`) rather than running expensive real-time FFT beat detection.
+- **`@src/ui/` (React Overlay):** Subscribes to engine telemetry via a throttled pub/sub bridge (max 10–15 Hz updates or discrete state changes like Groove milestones/stage forks). **NEVER trigger React state updates on every `requestAnimationFrame` tick.**
+
+---
+
+## 3. Canonical Directory Structure
+```text
+/
+├── public/
+│   ├── audio/                 # .mp3 tracks + companion .json beat configs
+│   └── sprites/               # Sprite sheets (cars, roadside props, parallax layers)
+├── src/
+│   ├── core/
+│   │   ├── GameLoop.ts        # requestAnimationFrame loop with deltaTime clamping
+│   │   ├── InputManager.ts    # Keyboard/Gamepad polling state (no per-frame DOM events)
+│   │   └── TelemetryBridge.ts # Throttled event emitter syncing Engine -> React HUD
+│   ├── road/
+│   │   ├── RoadSegment.ts     # Segment types (curve, y-elevation, palette, sprites[])
+│   │   ├── RoadProjection.ts  # 3D-to-2D camera projection & trapezoid raster helpers
+│   │   └── TrackBuilder.ts    # Procedural/declarative builders for straight, hill, curve, fork
+│   ├── audio/
+│   │   ├── FunkAudioEngine.ts # Web Audio graph (Source -> BiquadFilter -> Gain -> Destination)
+│   │   └── BeatClock.ts       # Deterministic BPM beat/bar calculator
+│   ├── entities/
+│   │   ├── PlayerCar.ts       # Speed, X-offset, drift state, Groove meter math
+│   │   └── TrafficAndProps.ts # Roadside billboards, palm trees, AI kei trucks
+│   ├── ui/
+│   │   ├── HUD.tsx            # Speedometer, Groove cassette bar, 90s anime passenger cam
+│   │   ├── RadioSelector.tsx  # Stage fork station prompt & track title toast
+│   │   └── CRTOverlay.tsx     # Pure CSS scanline / VHS vignette overlay
+│   ├── App.tsx                # Mounts <CanvasStage/> and <HUD/>
+│   └── main.tsx
+└── GEMINI.md
+
+4. Implementation Guardrails & Invariants
+
+    Pseudo-3D Math Standard: Follow Jake Gordon's JavaScript Racer / Lou's Pseudo-3D raster model:
+
+        The road is a flat 1D array of RoadSegment objects (index, p1, p2, curve, color, sprites, cars).
+
+        Render segments from front-to-back to track maxy (horizon clipping for hills), and render sprites/traffic back-to-front (Painter's Algorithm) clipped against each segment's clip height.
+
+    Frame-Rate Independence: Multiply all movement, steering, and Groove decay by dt (in seconds). Clamp dt to Math.min(rawDt, 0.1) inside @src/core/GameLoop.ts so backgrounded browser tabs do not catapult the player off-track.
+
+    Zero Garbage Collection in Render Loop: Do not allocate new objects, arrays, or closures inside render() or project(). Mutate pre-allocated screen-coordinate structs on each RoadSegment.
+
+    Greybox-First Rendering: Every sprite or background layer must implement a procedural Canvas polygon fallback (e.g., neon magenta/cyan trapezoids, vector grid lines, colored bounding boxes). The game must be 100% playable and visually legible with zero external image assets loaded.
+
+    Web Audio Autoplay Compliance: Never instantiate or resume AudioContext on page load. Always initialize/resume inside the user's first keydown or "Insert Coin / Start Drive" click handler.
+
+5. Phased Development Milestones
+
+When asked to implement features, stay strictly within the active phase:
+
+    Phase 1 (Silent Cruiser): @src/core/, @src/road/, and @src/entities/PlayerCar.ts. Greybox polygon road with curves, hills, centrifugal force, and keyboard steering at 60+ FPS.
+
+    Phase 2 (Audio Hook): @src/audio/FunkAudioEngine.ts and @src/audio/BeatClock.ts. Speed-linked low-pass filter (200Hz muffled when slow/colliding -> 20000Hz open at top speed/drifting) and BPM-pulsing road rumble strips.
+
+    Phase 3 (Arcade Loop & React HUD): @src/ui/ components, Groove Meter fever state, roadside obstacle collisions (turntable pitch-drop effect), and branching road forks that crossfade tracks.
+
+    Phase 4 (Aesthetic Polish): Sprite sheet integration, parallax city/coastal skyboxes, anime passenger reaction states, and CSS CRT post-processing.
+
+
+<ElicitationsGroup message="With your Antigravity spec ready, how would you like to kick off Phase 1?">
+  <Elicitation label="Generate the Phase 1 greybox road engine and Vite setup" query="Give me the Phase 1 starter code following this spec: the Vite + React + TypeScript scaffolding and the pure TypeScript pseudo-3D road engine rendering a curving, hilly neon road on Canvas."/>
+  <Elicitation label="Create an Antigravity skill for adding new tracks and stages" query="Write an Antigravity SKILL.md file for `.agents/skills/add-track/SKILL.md` that automates adding a new Future Funk MP3, beat config JSON, and stage palette."/>
+</ElicitationsGroup>
