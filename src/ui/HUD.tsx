@@ -11,7 +11,6 @@ export interface HUDProps {
 interface ToastState {
   id: number;
   text: string;
-  accent: 'cyan' | 'pink';
 }
 
 function formatLapTime(seconds: number): string {
@@ -32,20 +31,11 @@ export function HUD({ bridge, debugOpen, onToggleDebug }: HUDProps) {
   useEffect(() => {
     let timerId = 0;
     const unsub = bridge.onEvent((event) => {
-      if (event.type === 'driftEnd' && event.clean) {
-        window.clearTimeout(timerId);
-        setToast({
-          id: Date.now(),
-          text: `CLEAN DRIFT! +BOOST (${event.duration.toFixed(1)}s)`,
-          accent: 'cyan',
-        });
-        timerId = window.setTimeout(() => setToast(null), 1400);
-      } else if (event.type === 'lapCompleted') {
+      if (event.type === 'lapCompleted') {
         window.clearTimeout(timerId);
         setToast({
           id: Date.now(),
           text: `LAP ${event.lap} // ${formatLapTime(event.lapTime)}`,
-          accent: 'pink',
         });
         timerId = window.setTimeout(() => setToast(null), 2000);
       }
@@ -59,7 +49,6 @@ export function HUD({ bridge, debugOpen, onToggleDebug }: HUDProps) {
   const speedKmh = snap?.speedKmh ?? 0;
   const speedPct = Math.min(100, Math.round((snap?.speedRatio ?? 0) * 100));
   const isDrifting = snap?.isDrifting ?? false;
-  const driftCleanCandidate = snap?.driftCleanCandidate ?? false;
   const isOffRoad = snap?.isOffRoad ?? false;
   const lap = snap?.lap ?? 1;
   const lapTime = snap?.lapTime ?? 0;
@@ -107,11 +96,7 @@ export function HUD({ bridge, debugOpen, onToggleDebug }: HUDProps) {
         {toast && (
           <div
             key={toast.id}
-            className={`rounded border px-4 py-1.5 text-sm font-bold tracking-widest uppercase shadow-lg ${
-              toast.accent === 'cyan'
-                ? 'border-cyan-300 bg-cyan-950/85 text-cyan-200 shadow-cyan-500/30'
-                : 'border-pink-400 bg-fuchsia-950/85 text-pink-200 shadow-pink-500/30'
-            }`}
+            className="rounded border border-pink-400 bg-fuchsia-950/85 px-4 py-1.5 text-sm font-bold tracking-widest text-pink-200 uppercase shadow-lg shadow-pink-500/30"
           >
             {toast.text}
           </div>
@@ -139,14 +124,8 @@ export function HUD({ bridge, debugOpen, onToggleDebug }: HUDProps) {
               </span>
             )}
             {isDrifting && (
-              <span
-                className={`rounded border px-2.5 py-0.5 text-xs font-bold tracking-widest uppercase ${
-                  driftCleanCandidate
-                    ? 'border-cyan-300 bg-cyan-950/90 text-cyan-200 shadow-[0_0_12px_rgba(5,217,232,0.5)]'
-                    : 'border-pink-400 bg-pink-950/90 text-pink-200'
-                }`}
-              >
-                {driftCleanCandidate ? 'DRIFT // BOOST READY' : 'DRIFTING'}
+              <span className="rounded border border-cyan-300 bg-cyan-950/90 px-2.5 py-0.5 text-xs font-bold tracking-widest text-cyan-200 uppercase shadow-[0_0_12px_rgba(5,217,232,0.5)]">
+                DRIFTING
               </span>
             )}
           </div>

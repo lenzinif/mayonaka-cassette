@@ -22,7 +22,6 @@ export interface TelemetrySnapshot {
   isDrifting: boolean;
   driftDirection: -1 | 0 | 1;
   driftTime: number;
-  driftCleanCandidate: boolean;
   isOffRoad: boolean;
   lap: number;
   lapTime: number;
@@ -167,8 +166,6 @@ export class Game {
     isDrifting: this.car.isDrifting,
     driftDirection: this.car.driftDir,
     driftTime: this.car.driftTime,
-    driftCleanCandidate:
-      this.car.isDrifting && !this.car.driftDirty && this.car.driftTime >= tuning.driftCleanMinTime,
     isOffRoad: this.car.isOffRoad,
     lap: this.lap,
     lapTime: this.lapTime,

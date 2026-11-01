@@ -28,47 +28,46 @@ describe('PlayerCar', () => {
     expect(car.speed).toBe(0);
   });
 
-  it('applies centrifugal force outward on curves at speed', () => {
+  it('throws the car off-road on curves if the player does not counter-steer', () => {
     const car = new PlayerCar();
-    car.speed = tuning.maxSpeed * 0.8;
-    // Right-hand curve (positive curve) pushes the car toward the left shoulder (negative x)
-    car.update(0.1, { ...IDLE, accelerate: true }, 4);
-    expect(car.x).toBeLessThan(0);
+    car.speed = tuning.maxSpeed;
+    // Medium right-hand curve (curve = 4) for 1 second without steering
+    for (let i = 0; i < 60; i++) {
+      car.update(1 / 60, { ...IDLE, accelerate: true }, 4);
+    }
+    expect(car.x).toBeLessThan(-1);
+    expect(car.isOffRoad).toBe(true);
   });
 
-  it('bleeds speed when off-road without stopping the car (Design Pillar 3)', () => {
+  it('bleeds speed when off-road even with throttle held, without stopping the car', () => {
     const car = new PlayerCar();
     car.x = 1.6; // off-road
     car.speed = tuning.maxSpeed;
-    for (let i = 0; i < 300; i++) {
+    for (let i = 0; i < 180; i++) {
       car.update(1 / 60, { ...IDLE, accelerate: true }, 0);
     }
     expect(car.speed).toBeGreaterThan(0);
     expect(car.speed).toBeLessThanOrEqual(tuning.maxSpeed * tuning.offRoadMaxSpeedRatio + 1);
   });
 
-  it('triggers a clean drift exit boost when held on-road past driftCleanMinTime', () => {
+  it('enters and exits drift when holding drift + steer above min speed', () => {
     const car = new PlayerCar();
     car.speed = tuning.maxSpeed * 0.85;
     const events: CarEvent[] = [];
 
-    // Hold drift + right steer for 0.9s on-road
-    for (let i = 0; i < 90; i++) {
-      car.x = 0; // keep well on-road for test determinism
-      car.update(0.01, { ...IDLE, accelerate: true, right: true, drift: true }, 2, 0, (e) =>
+    for (let i = 0; i < 60; i++) {
+      car.update(0.01, { ...IDLE, accelerate: true, right: true, drift: true }, 4, 0, (e) =>
         events.push(e),
       );
     }
     expect(car.isDrifting).toBe(true);
 
-    const speedBeforeExit = car.speed;
     // Release drift
-    car.update(0.01, { ...IDLE, accelerate: true }, 2, 0, (e) => events.push(e));
+    car.update(0.01, { ...IDLE, accelerate: true }, 4, 0, (e) => events.push(e));
     expect(car.isDrifting).toBe(false);
-    expect(car.speed).toBeGreaterThan(speedBeforeExit);
     expect(events).toEqual([
       { type: 'driftStart', direction: 1 },
-      expect.objectContaining({ type: 'driftEnd', clean: true }),
+      expect.objectContaining({ type: 'driftEnd' }),
     ]);
   });
 });

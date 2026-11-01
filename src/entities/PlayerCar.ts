@@ -11,8 +11,7 @@ export interface DriveControls {
 export type DriftDirection = -1 | 0 | 1;
 
 export type CarEvent =
-  | { type: 'driftStart'; direction: -1 | 1 }
-  | { type: 'driftEnd'; clean: boolean; duration: number };
+  { type: 'driftStart'; direction: -1 | 1 } | { type: 'driftEnd'; duration: number };
 
 /**
  * Fake arcade car physics (Design Pillar 1: Feel Over Simulation).
@@ -42,12 +41,8 @@ export class PlayerCar {
   driftDir: DriftDirection = 0;
   /** How long the current drift has been held, in seconds. */
   driftTime = 0;
-  /** True if the car touched off-road during the current drift (disqualifies clean exit boost). */
-  driftDirty = false;
-  /** Temporary speed ceiling bonus after a clean drift exit (decays back to 0). */
-  boostBonus = 0;
 
-  /** True while braking Input is active. */
+  /** True while braking input is active. */
   braking = false;
 
   private prevSlope = 0;
@@ -60,7 +55,7 @@ export class PlayerCar {
     return this.driftDir !== 0;
   }
 
-  /** Normalized speed (0..1+) against base `tuning.maxSpeed`. */
+  /** Normalized speed (0..1) against `tuning.maxSpeed`. */
   get speedRatio(): number {
     return tuning.maxSpeed > 0 ? this.speed / tuning.maxSpeed : 0;
   }
@@ -88,41 +83,33 @@ export class PlayerCar {
     this.prevX = this.x;
     this.braking = controls.brake;
 
-    // 1. Decay any active exit-boost ceiling bonus.
-    if (this.boostBonus > 0) {
-      this.boostBonus = Math.max(0, this.boostBonus - dt * 0.08);
-    }
+    const maxSpeed = tuning.maxSpeed;
+    const baseSpeedRatio = Math.min(1, this.speed / Math.max(1, maxSpeed));
+    const offRoadCap = maxSpeed * tuning.offRoadMaxSpeedRatio;
 
-    const maxSpeed = tuning.maxSpeed * (1 + this.boostBonus);
-    const baseSpeedRatio = Math.min(1, this.speed / Math.max(1, tuning.maxSpeed));
-
-    // 2. Longitudinal speed (accelerate / brake / coast).
+    // 1. Longitudinal speed (accelerate / brake / coast + off-road drag).
     if (controls.brake) {
-      this.speed -= tuning.maxSpeed * tuning.brakeRate * dt;
+      this.speed -= maxSpeed * tuning.brakeRate * dt;
+    } else if (this.isOffRoad && this.speed > offRoadCap) {
+      // Off-road grass drags speed down toward offRoadCap even if throttle is held
+      // (Design Pillar 3: slows down noticeably, never forces a dead stop).
+      this.speed = Math.max(offRoadCap, this.speed - maxSpeed * tuning.offRoadDecelRate * dt);
     } else if (controls.accelerate) {
-      // Non-linear taper: punchy off the line, gradually tapers near top gear.
+      const targetCap = this.isOffRoad ? offRoadCap : maxSpeed;
       const taper = 1 - tuning.accelTaper * Math.pow(baseSpeedRatio, 1.4);
-      this.speed += tuning.maxSpeed * tuning.accelRate * Math.max(0.1, taper) * dt;
+      this.speed = Math.min(
+        targetCap,
+        this.speed + maxSpeed * tuning.accelRate * Math.max(0.1, taper) * dt,
+      );
     } else {
-      this.speed -= tuning.maxSpeed * tuning.coastRate * dt;
-    }
-
-    // 3. Off-road speed bleed (Design Pillar 3: slows down toward offRoadMaxSpeedRatio, never stops).
-    if (this.isOffRoad) {
-      const offRoadCap = tuning.maxSpeed * tuning.offRoadMaxSpeedRatio;
-      if (this.speed > offRoadCap) {
-        this.speed = Math.max(
-          offRoadCap,
-          this.speed - tuning.maxSpeed * tuning.offRoadDecelRate * dt,
-        );
-      }
+      this.speed -= maxSpeed * tuning.coastRate * dt;
     }
 
     this.speed = Math.max(0, Math.min(maxSpeed, this.speed));
 
     const speedRatio = this.speedRatio;
 
-    // 4. Smooth steering input.
+    // 2. Smooth steering input.
     const rawSteer = (controls.right ? 1 : 0) - (controls.left ? 1 : 0);
     const steerBlend = 1 - Math.exp(-tuning.steerResponse * dt);
     this.steer += (rawSteer - this.steer) * steerBlend;
@@ -130,39 +117,28 @@ export class PlayerCar {
       this.steer = 0;
     }
 
-    // 5. Drift state machine.
+    // 3. Drift state machine.
     const canSustainDrift = controls.drift && speedRatio >= tuning.driftMinSpeedRatio;
     if (this.driftDir === 0) {
       if (canSustainDrift && rawSteer !== 0) {
         this.driftDir = rawSteer > 0 ? 1 : -1;
         this.driftTime = 0;
-        this.driftDirty = this.isOffRoad;
         onEvent?.({ type: 'driftStart', direction: this.driftDir });
       }
     } else {
       if (!canSustainDrift) {
-        const clean = !this.driftDirty && this.driftTime >= tuning.driftCleanMinTime;
         const duration = this.driftTime;
         this.driftDir = 0;
         this.driftTime = 0;
-        this.driftDirty = false;
-        if (clean) {
-          this.boostBonus = tuning.driftExitBoost;
-          this.speed = Math.min(
-            tuning.maxSpeed * (1 + this.boostBonus),
-            this.speed + tuning.maxSpeed * tuning.driftExitBoost,
-          );
-        }
-        onEvent?.({ type: 'driftEnd', clean, duration });
+        onEvent?.({ type: 'driftEnd', duration });
       } else {
         this.driftTime += dt;
-        if (this.isOffRoad) this.driftDirty = true;
         // Mild speed bleed while sliding sideways.
-        this.speed = Math.max(0, this.speed - tuning.maxSpeed * tuning.driftDecelRate * dt);
+        this.speed = Math.max(0, this.speed - maxSpeed * tuning.driftDecelRate * dt);
       }
     }
 
-    // 6. Lateral movement: steering authority + centrifugal pull on curves.
+    // 4. Lateral movement: steering authority + centrifugal pull on curves.
     // Steering requires forward motion so the car cannot slide sideways when parked.
     const steerAuthority = Math.min(1, speedRatio * 1.35);
     let lateralVel: number;
@@ -182,7 +158,7 @@ export class PlayerCar {
     this.x += (lateralVel - centrifugalPush) * dt;
     this.x = Math.max(-tuning.playerXLimit, Math.min(tuning.playerXLimit, this.x));
 
-    // 7. Visual feel: yaw, crest pitch, and road bounce.
+    // 5. Visual feel: yaw, crest pitch, and road bounce.
     const targetYaw =
       this.driftDir !== 0 ? this.driftDir * 0.65 + this.steer * 0.35 : this.steer * 0.45;
     this.yaw += (targetYaw - this.yaw) * (1 - Math.exp(-12 * dt));
@@ -206,23 +182,24 @@ export function drawPlayerCar(
   canvasWidth: number,
   canvasHeight: number,
 ): void {
-  const speedRatio = Math.min(1.2, car.speedRatio);
+  const speedRatio = Math.min(1, car.speedRatio);
   const bounceAmp = car.isOffRoad ? 3.2 * speedRatio : 0.8 * speedRatio;
   const bounceY = Math.sin(car.bouncePhase) * bounceAmp;
   const pitchY = car.pitch * 6;
 
-  const cx = canvasWidth / 2 + car.yaw * 10;
+  const cx = canvasWidth / 2 + car.yaw * 5;
   const baseY = canvasHeight - 26 + bounceY + pitchY;
-  const skew = car.yaw * 14;
+  // Subtle perspective shift instead of heavy cartoon shear
+  const skew = car.yaw * 4.5;
 
   ctx.save();
   ctx.translate(cx, baseY);
-  ctx.rotate(car.yaw * 0.08);
+  ctx.rotate(car.yaw * 0.025);
 
   // Drift tire smoke puffs
   if (car.isDrifting) {
     const dir = -car.driftDir;
-    ctx.fillStyle = car.driftDirty ? 'rgba(180, 120, 210, 0.38)' : 'rgba(5, 217, 232, 0.42)';
+    ctx.fillStyle = car.isOffRoad ? 'rgba(180, 120, 210, 0.38)' : 'rgba(5, 217, 232, 0.42)';
     for (let i = 0; i < 4; i++) {
       const phase = (car.bouncePhase * 0.7 + i * 1.7) % 4;
       const r = 4 + phase * 3.5;

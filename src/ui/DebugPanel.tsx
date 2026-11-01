@@ -84,11 +84,11 @@ export function DebugPanel({ open, onClose }: DebugPanelProps) {
   };
 
   return (
-    <aside className="pointer-events-auto absolute top-14 right-4 bottom-4 z-10 flex w-80 flex-col rounded border border-cyan-400/50 bg-[#0d0221]/92 font-mono text-xs text-fuchsia-100 shadow-[0_0_30px_rgba(5,217,232,0.25)] backdrop-blur-md">
+    <aside className="pointer-events-auto absolute top-14 right-4 bottom-4 z-10 flex w-84 flex-col rounded border border-cyan-400/50 bg-[#0d0221]/92 font-mono text-xs text-fuchsia-100 shadow-[0_0_30px_rgba(5,217,232,0.25)] backdrop-blur-md">
       <div className="flex items-center justify-between border-b border-fuchsia-500/30 px-3 py-2.5">
         <div>
           <div className="font-bold tracking-wider text-cyan-300 uppercase">FEEL TUNING</div>
-          <div className="text-[10px] text-fuchsia-300/70">Live engine parameters</div>
+          <div className="text-[10px] text-fuchsia-300/70">Parametri live (effetto immediato)</div>
         </div>
         <div className="flex items-center gap-1.5">
           <button
@@ -127,7 +127,7 @@ export function DebugPanel({ open, onClose }: DebugPanelProps) {
 
       <div className="flex-1 space-y-4 overflow-y-auto p-3">
         {GROUPS.map((group) => (
-          <div key={group} className="space-y-2">
+          <div key={group} className="space-y-2.5">
             <div className="border-b border-fuchsia-500/25 pb-1 text-[10px] font-bold tracking-[0.2em] text-pink-400 uppercase">
               {group}
             </div>
@@ -142,8 +142,12 @@ export function DebugPanel({ open, onClose }: DebugPanelProps) {
                     >
                       {ctrl.label}
                     </span>
-                    <span className="tabular-nums text-fuchsia-300">{current}</span>
+                    <span className="tabular-nums text-fuchsia-300">
+                      {current}
+                      {ctrl.unit ? ` ${ctrl.unit}` : ''}
+                    </span>
                   </div>
+                  <div className="text-[10px] leading-tight text-fuchsia-300/65">{ctrl.hint}</div>
                   <input
                     type="range"
                     min={ctrl.min}
