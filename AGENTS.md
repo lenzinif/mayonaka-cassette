@@ -4,12 +4,12 @@
 
 This is a **driving game** (emotional fantasy and flow state), not a hardcore racing simulation. Every implementation decision must obey four core design pillars:
 
-1. **Feel Over Simulation:** All physics (centrifugal curve pull, drift slide, hill cresting, gearbox torque, dashboard turntable sway) are faked via simple tunable formulas. Never introduce rigid-body physics engines.
-2. **Music Drives State, Driving Manipulates Music:** The soundtrack and road rendering are tightly coupled. High speeds and clean drifts open the Web Audio low-pass filter; slow speeds and collisions muffle the track and trigger turntable pitch dips; jerky driving makes the dashboard turntable needle skip the actual track.
+1. **Feel Over Simulation:** All physics (centrifugal curve pull, drift slide, hill cresting, gearbox torque, dashboard melon soda slosh) are faked via simple tunable formulas. Never introduce rigid-body physics engines.
+2. **Music Drives State, Driving Manipulates Music:** The soundtrack and road rendering are tightly coupled. High speeds and clean drifts open the Web Audio low-pass filter; slow speeds and collisions muffle the track and trigger tape pitch dips; jerky driving makes the dashboard melon soda splash over the cup rim.
 3. **Protect the Flow State:** Collisions with roadside props or traffic must never cause a game-over explosion or dead stop. They deduct Groove, momentarily dip speed, muffle the audio filter, and keep the player moving. Mistimed inputs (off-beat gear shifts) are never punished; they simply earn no bonus.
 4. **Your Music Is the Level (Core Feature):** Players load their own local tracks or playlists. Each song is analysed once and **generates its own deterministic road** (same file → same road), so a song can be learned and mastered. A bundled default soundtrack (synth fallback + royalty-free tracks) must always exist for players who load nothing.
 
-> Full mechanic specs (song-driven road, beat-shift gearbox, dashboard turntable & Tofu Mode, analysis validation): see `docs/DESIGN.md`.
+> Full mechanic specs (song-driven road, beat-shift gearbox, dashboard melon soda & Tofu Mode, analysis validation): see `docs/DESIGN.md`.
 
 ---
 
@@ -71,7 +71,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 │   ├── entities/
 │   │   ├── PlayerCar.ts       # Speed, X-offset, drift state, Groove meter math & car renderer
 │   │   ├── Gearbox.ts         # 4-speed fake torque curve, RPM, beat-shift judgement, auto-shift assist
-│   │   ├── DashTurntable.ts   # Jerk-driven needle spring-damper, skip events, canvas inset renderer
+│   │   ├── MelonSoda.ts       # Jerk-driven liquid surface physics, spill events, canvas inset renderer
 │   │   └── TrafficAndProps.ts # Roadside obstacle collisions & AI kei trucks
 │   ├── ui/
 │   │   ├── CanvasStage.tsx    # Mounts 640x360 canvas and manages GameLoop lifecycle
@@ -100,7 +100,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 6. **Deterministic Song Roads:** `SongRoadGenerator` output must be a pure function of `(BeatMap, seed)` where `seed` derives from the file's content hash. Use `SeededRandom` only — never `Math.random()` in generation code. Road length in bars must equal the song length in bars.
 7. **Analysis Off the Hot Path:** `decodeAudioData` runs on the main thread (workers have no `AudioContext`); all DSP (onset envelope, tempo autocorrelation, energy, sections) runs in `analysis.worker.ts` on transferred `Float32Array` PCM. Analysis happens only at import time, never during a run.
 8. **Beat Judgement Uses Event Timestamps:** Beat-quantized inputs (gear shifts) are judged from the keydown `event.timeStamp` mapped to the audio clock (`AudioContext.getOutputTimestamp()`), not from the fixed-step tick that polls them.
-9. **Canvas-Owned Animated Insets:** Anything animated every frame (dashboard turntable inset, passenger cam animation) is drawn by the engine on the canvas. React only renders static frames/labels around it.
+9. **Canvas-Owned Animated Insets:** Anything animated every frame (melon soda inset, passenger cam animation) is drawn by the engine on the canvas. React only renders static frames/labels around it.
 
 ---
 
@@ -113,7 +113,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
   - **M3a — Analysis spike (gate):** `BeatMap`, `TrackAnalyzer` + `analysis.worker.ts`, `BeatMapInspector` (`?analyze`) run against the local `test-tracks/` corpus. **Exit criteria** in `docs/DESIGN.md` §2.4. If unmet, fall back to tap-tempo-first import before continuing.
   - **M3b — Audio engine:** `FunkAudioEngine`, `BeatClock` (audio clock + latency compensation), `TrackLibrary` (hashing, IndexedDB cache, playlists), `TrackLoader` UI with BPM correction, synthesized fallback loop + bundled royalty-free track JSON, speed-linked low-pass sweep, turntable pitch dip, BPM road/sky pulse.
 - **M4 (Song-Driven Road):** `SeededRandom`, `RoadChunks` vocabulary, section-aware `SongRoadGenerator` (build-ups → climbs cresting on the drop, drops → fast straights/sweepers, breakdowns → technical curves), road length = song length.
-- **M5 (Groove & Rhythm Driving):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `SSS`) with hysteresis, `Gearbox` beat-shift (+ auto-shift assist), `DashTurntable` always-on needle physics + Tofu Mode, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD with gear/RPM, `CRTOverlay`.
+- **M5 (Groove & Rhythm Driving):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `SSS`) with hysteresis, `Gearbox` beat-shift (+ auto-shift assist), `MelonSoda` always-on liquid physics + Tofu Mode, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD with gear/RPM, `CRTOverlay`.
 - **M6 (Playlist Run & Forks):** Playlist = sequence of stages; forks choose the next playlist track via `RadioSelector`; 4-bar DJ crossfade; end-of-run grade screen; local per-song best scores keyed by content hash.
-- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, dashboard turntable, passenger cam reactions, drift/collision particles.
+- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, melon soda glass, passenger cam reactions, drift/collision particles.
 - **M8 (Polish & Release):** Gamepad polling, asset preloader, tab-visibility pause, performance profiling, static deployment.

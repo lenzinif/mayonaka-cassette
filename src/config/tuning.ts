@@ -42,6 +42,11 @@ export const DEFAULT_TUNING = {
   audioFilterDriftQ: 3.2,
   audioOffRoadPitchDip: 0.09,
   bpmPulseStrength: 1.0,
+
+  // Song-Driven Road (M4)
+  referenceSpeedRatio: 0.85,
+  roadCurveEnergyScale: 0.6,
+  roadHillEnergyScale: 0.65,
 } satisfies Record<string, number>;
 
 export type TuningKey = keyof typeof DEFAULT_TUNING;
@@ -339,6 +344,34 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     hint: 'Intensità della pulsazione a tempo di musica su sole, montagne e cordoli',
     min: 0,
     max: 2,
+    step: 0.05,
+  },
+
+  {
+    group: 'Song Road',
+    key: 'referenceSpeedRatio',
+    label: 'Reference pace',
+    hint: 'Frazione di maxSpeed che calibra la lunghezza dei segmenti per battuta (scollinamento sul drop)',
+    min: 0.55,
+    max: 1.0,
+    step: 0.01,
+  },
+  {
+    group: 'Song Road',
+    key: 'roadCurveEnergyScale',
+    label: 'Curve energy scale',
+    hint: 'Quanto l’energia della battuta (barEnergy) amplifica il raggio delle curve nei chunk',
+    min: 0,
+    max: 1.5,
+    step: 0.05,
+  },
+  {
+    group: 'Song Road',
+    key: 'roadHillEnergyScale',
+    label: 'Hill energy scale',
+    hint: 'Quanto l’energia della battuta (barEnergy) amplifica dislivelli e salite dei chunk',
+    min: 0,
+    max: 1.5,
     step: 0.05,
   },
 ];

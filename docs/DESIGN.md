@@ -16,9 +16,9 @@ flowchart LR
   song["Your track"] --> analysis["BeatMap (BPM, energy, sections)"]
   analysis --> road["Song-generated road"]
   analysis --> shift["Beat-shift gearbox"]
-  shift -- "longitudinal jerk" --> deck["Dashboard turntable"]
-  road -- "curves / crests jerk" --> deck
-  deck -- "needle skip stutters the track" --> song
+  shift -- "longitudinal jerk" --> soda["Melon soda cup"]
+  road -- "curves / crests jerk" --> soda
+  soda -- "spill splashes audio / ducks Groove" --> song
 ```
 
 ---
@@ -144,31 +144,37 @@ OutRun had a LOW/HIGH stick; we extend it into a rhythm mechanic without becomin
   - Reward: 1-beat torque boost _(start: +15 %)_, Groove gain, brief low-pass filter "blip" open.
   - Off-beat shift: works normally, no bonus, **no penalty** (Pillar 3).
 - **Auto-shift assist** (option, off by default): shifts at optimal rpm, earns no beat bonus.
-- Each shift produces a longitudinal jerk proportional to the rpm drop → feeds the turntable (§5).
+- Each shift produces a longitudinal jerk proportional to the rpm drop → feeds the melon soda glass (§5).
 - Engine voice: synthesized oscillator pitched by rpm, mixed well under the music (M5, low priority).
 
 ---
 
-## 5. Dashboard Turntable & Tofu Mode (M5)
+## 5. Dashboard Melon Soda & Tofu Mode (M5)
 
-Our "Takumi's tofu": a portable turntable on the dashboard. The core lesson is **smooth inputs**, so the model reacts to **jerk** (change of acceleration), not acceleration itself.
+Our direct Initial D homage with authentic Future Funk flavor: a tall retro-kissaten diner glass of fizzy **Melon Cream Soda** (neon green soda, ice cubes, vanilla ice cream float, and a maraschino cherry) resting in the dashboard cup-holder. The core lesson is **smooth inputs**, so the model reacts to **jerk** (change of acceleration), not acceleration itself.
 
-### 5.1 Needle physics (always on)
+### 5.1 Liquid physics (always on)
 
 - Inputs per step: lateral acceleration (steering + centrifugal + drift), longitudinal acceleration (throttle, brake, shifts, collisions), vertical (slope change at crests/dips). Differentiate → jerk `j`.
-- Needle = spring-damper: `θ'' = −k·θ − c·θ' + G·j` _(start: tune so a clean committed drift entry never skips; jerky counter-steering and panic braking do)_.
-- `|θ| > skipThreshold` → **needle skip**: grid-preserving audio stutter (beat-repeat of the last 1/16 beat ×2–3 while the real source keeps running muted underneath, plus a vinyl tick). The beat grid and road sync are never displaced.
-- Outside Tofu Mode a skip is **feedback only**: no Groove loss. It teaches smoothness through the ears.
+- Liquid meniscus / tilt angle = spring-damper: `θ'' = −k·θ − c·θ' + G·j` _(start: tune so a clean committed drift entry gently tilts the soda without spilling; jerky counter-steering, erratic swerving, and panic braking cause a spill)_.
+- `|θ| > spillThreshold` → **spill event**:
+  - Droplets of neon green soda splash over the glass rim onto the dashboard tray.
+  - Distinct audio feedback: fizzy soda splash + ice cubes clinking against the glass (`clink!`) + brief momentary filter muffle / duck.
+  - The beat grid and road sync are never displaced.
+- Outside Tofu Mode a spill is **feedback only**: no Groove loss. It teaches smoothness through sight and sound.
 
 ### 5.2 Tofu Mode (toggle)
 
 - Button toggles Tofu Mode; the change applies at the next 4-bar boundary (no dodging a hairpin at the last second).
-- While active: turntable inset visible (≈ 120×80 px, bottom-left, drawn on canvas by the engine), **Groove gain ×2** _(start)_, each skip costs Groove _(start: −10 % of current tier progress)_.
+- While active: Melon Soda inset visible (≈ 120×80 px, bottom-left, drawn on canvas by the engine with pixelated styling), **Groove gain ×2** _(start)_, each spill costs Groove _(start: −10 % of current tier progress)_.
 - Turning it off ends the multiplier streak. Never a fail state.
 
-### 5.3 Cosmetics
+### 5.3 Cosmetics & Skins
 
-The turntable is the default; a melon cream-soda glass (liquid level/spill instead of needle) is a later unlockable skin using the same physics.
+The neon green **Melon Cream Soda** is the default; later unlockable skins using the same physics include:
+- **Classic Tofu Cup:** The plain white paper cup with water from Initial D.
+- **Pocari Sweat Can:** Japanese sports drink can with liquid level visible through a retro cutaway.
+- **Boss Coffee Can:** Classic Japanese canned coffee.
 
 ---
 

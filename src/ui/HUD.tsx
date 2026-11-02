@@ -47,8 +47,12 @@ export function HUD({
     const unsub = bridge.onEvent((event) => {
       if (event.type === 'lapCompleted') {
         showToast(`LAP ${event.lap} // ${formatLapTime(event.lapTime)}`, 2200);
+      } else if (event.type === 'dropSync') {
+        showToast(`DROP CREST SYNC! // BAR ${event.barIndex + 1}`, 1800);
       } else if (event.type === 'sectionEntered' && event.role === 'drop') {
-        showToast(`DROP // BAR ${event.barIndex}`, 1500);
+        showToast(`DROP // BAR ${event.barIndex + 1}`, 1500);
+      } else if (event.type === 'songRoadGenerated') {
+        showToast(`ROAD BUILT // ${event.totalBars} BARS (${event.chunkCount} CHUNKS)`, 2200);
       }
     });
     return () => {
@@ -74,6 +78,9 @@ export function HUD({
   const trackTitle = snap?.trackTitle ?? 'Neon Horizon (Synth Fallback)';
   const trackArtist = snap?.trackArtist ?? 'OutRun FM 88.4';
   const audioUnlocked = snap?.audioUnlocked ?? false;
+  const roadBarIndex = snap?.roadBarIndex ?? 0;
+  const totalBars = snap?.totalBars ?? 64;
+  const currentChunkId = snap?.currentChunkId ?? 'intro-boulevard-cruise';
 
   return (
     <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between p-4 font-mono text-white select-none sm:p-6">
@@ -125,6 +132,9 @@ export function HUD({
                 ))}
               </div>
               <span className="text-[10px] text-cyan-300/80">LPF {filterCutoffHz}Hz</span>
+              <span className="text-[10px] text-fuchsia-300/90">
+                ROAD {String(roadBarIndex + 1).padStart(2, '0')}/{totalBars} · {currentChunkId}
+              </span>
             </div>
           </div>
         </div>
