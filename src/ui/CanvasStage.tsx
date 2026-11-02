@@ -1,3 +1,4 @@
+import type { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
 import { MAX_FRAME_DT, RENDER_HEIGHT, RENDER_WIDTH, SIM_STEP } from '@src/config/constants';
 import { GameLoop } from '@src/core/GameLoop';
 import { InputManager } from '@src/core/InputManager';
@@ -7,13 +8,14 @@ import { useEffect, useRef } from 'react';
 
 export interface CanvasStageProps {
   bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
+  audio: FunkAudioEngine;
 }
 
 /**
  * Fullscreen 2D canvas stage (`z-index: 1`, AGENTS.md §2).
  * Owns the lifecycle of `InputManager`, `Game`, and `GameLoop`.
  */
-export function CanvasStage({ bridge }: CanvasStageProps) {
+export function CanvasStage({ bridge, audio }: CanvasStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -24,7 +26,7 @@ export function CanvasStage({ bridge }: CanvasStageProps) {
     ctx.imageSmoothingEnabled = false;
 
     const input = new InputManager(window);
-    const game = new Game({ input, bridge });
+    const game = new Game({ input, bridge, audio });
     const loop = new GameLoop({
       step: SIM_STEP,
       maxFrameDt: MAX_FRAME_DT,
@@ -32,12 +34,20 @@ export function CanvasStage({ bridge }: CanvasStageProps) {
       render: (alpha, fps) => game.render(ctx, alpha, fps),
     });
 
+    const unlockOnGesture = () => {
+      void audio.unlock();
+    };
+    window.addEventListener('keydown', unlockOnGesture, { passive: true });
+    window.addEventListener('pointerdown', unlockOnGesture, { passive: true });
+
     loop.start();
     return () => {
       loop.stop();
       input.dispose();
+      window.removeEventListener('keydown', unlockOnGesture);
+      window.removeEventListener('pointerdown', unlockOnGesture);
     };
-  }, [bridge]);
+  }, [bridge, audio]);
 
   return (
     <canvas

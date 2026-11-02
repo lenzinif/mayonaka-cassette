@@ -1,4 +1,5 @@
 import { LANES, MAX_DRAW_DISTANCE } from '@src/config/constants';
+import { tuning } from '@src/config/tuning';
 import type { StagePalette } from './palette';
 import { exponentialFog, interpolate, percentRemaining, project } from './RoadProjection';
 import { findSegment, type RoadSegment, type Track } from './RoadSegment';
@@ -15,6 +16,7 @@ export interface RoadView {
   fogDensity: number;
   width: number;
   height: number;
+  beatPulse?: number;
 }
 
 /**
@@ -75,7 +77,7 @@ export class RoadRenderer {
       if (p1.cameraZ <= cameraDepth) continue; // behind the projection plane
 
       if (p2.screenY < p1.screenY) {
-        this.renderSegment(ctx, width, seg, palette);
+        this.renderSegment(ctx, width, seg, palette, view.beatPulse ?? 0);
       }
 
       const sprites = seg.sprites;
@@ -106,6 +108,7 @@ export class RoadRenderer {
     width: number,
     seg: RoadSegment,
     palette: StagePalette,
+    beatPulse = 0,
   ): void {
     const { p1, p2, stripe } = seg;
     const x1 = p1.screenX;
@@ -114,8 +117,9 @@ export class RoadRenderer {
     const x2 = p2.screenX;
     const y2 = p2.screenY - 1; // 1px overlap hides anti-aliasing seams between slices
     const w2 = p2.screenW;
-    const r1 = w1 / Math.max(6, 2 * LANES);
-    const r2 = w2 / Math.max(6, 2 * LANES);
+    const pulseScale = 1 + beatPulse * tuning.bpmPulseStrength * 0.28;
+    const r1 = (w1 / Math.max(6, 2 * LANES)) * pulseScale;
+    const r2 = (w2 / Math.max(6, 2 * LANES)) * pulseScale;
 
     ctx.fillStyle = palette.grass[stripe];
     ctx.fillRect(0, y2, width, y1 - y2);

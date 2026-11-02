@@ -1,3 +1,5 @@
+import type { SectionRole } from '@src/audio/BeatMap';
+import { FunkAudioEngine, type DrivingAudioParams } from '@src/audio/FunkAudioEngine';
 import { RENDER_HEIGHT, RENDER_WIDTH, TELEMETRY_HZ } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
 import type { InputSource } from '@src/core/InputManager';
@@ -27,15 +29,30 @@ export interface TelemetrySnapshot {
   lapTime: number;
   lastLapTime: number | null;
   fps: number;
+  // M3 Audio & Beat Clock telemetry
+  bpm: number;
+  barIndex: number;
+  beatInBar: number;
+  beatPulse: number;
+  sectionRole: SectionRole;
+  barEnergy: number;
+  filterCutoffHz: number;
+  trackTitle: string;
+  trackArtist: string;
+  audioUnlocked: boolean;
 }
 
-export type GameEvent = CarEvent | { type: 'lapCompleted'; lap: number; lapTime: number };
+export type GameEvent =
+  | CarEvent
+  | { type: 'lapCompleted'; lap: number; lapTime: number }
+  | { type: 'sectionEntered'; role: SectionRole; barIndex: number };
 
 export interface GameOptions {
   input: InputSource;
   bridge?: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   track?: Track;
   palette?: StagePalette;
+  audio?: FunkAudioEngine;
 }
 
 /**
@@ -48,6 +65,7 @@ export class Game {
   readonly track: Track;
   readonly car = new PlayerCar();
   readonly bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
+  readonly audio: FunkAudioEngine;
   palette: StagePalette;
 
   /** Camera Z position along the track, in world units [0, track.length). */
@@ -59,6 +77,13 @@ export class Game {
   private lapTime = 0;
   private lastLapTime: number | null = null;
   private lastFps = 0;
+
+  private beatPulse = 0;
+  private downbeatPulse = 0;
+  private barIndex = 0;
+  private beatInBar = 0;
+  private sectionRole: SectionRole = 'intro';
+  private barEnergy = 0.5;
 
   private readonly input: InputSource;
   private readonly roadRenderer = new RoadRenderer();
@@ -72,6 +97,12 @@ export class Game {
     drift: false,
   };
 
+  private readonly drivingAudioParams: DrivingAudioParams = {
+    speedRatio: 0,
+    isDrifting: false,
+    isOffRoad: false,
+  };
+
   private readonly view: RoadView = {
     position: 0,
     playerX: 0,
@@ -82,6 +113,7 @@ export class Game {
     fogDensity: tuning.fogDensity,
     width: RENDER_WIDTH,
     height: RENDER_HEIGHT,
+    beatPulse: 0,
   };
 
   constructor(options: GameOptions) {
@@ -89,6 +121,7 @@ export class Game {
     this.bridge = options.bridge ?? new TelemetryBridge<TelemetrySnapshot, GameEvent>(TELEMETRY_HZ);
     this.track = options.track ?? buildTestTrack();
     this.palette = options.palette ?? PALETTE_SUNSET_BOULEVARD;
+    this.audio = options.audio ?? new FunkAudioEngine();
   }
 
   update = (dt: number): void => {
@@ -121,6 +154,28 @@ export class Game {
     this.simTime += dt;
     this.lapTime += dt;
 
+    // Update reactive Web Audio filter/pitch and sample BeatClock
+    this.drivingAudioParams.speedRatio = this.car.speedRatio;
+    this.drivingAudioParams.isDrifting = this.car.isDrifting;
+    this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
+
+    const prevRole = this.sectionRole;
+    const clockState = this.audio.update(dt, this.drivingAudioParams);
+    this.beatPulse = clockState.beatPulse;
+    this.downbeatPulse = clockState.downbeatPulse;
+    this.barIndex = Math.max(0, clockState.barIndex);
+    this.beatInBar = clockState.beatInBar;
+    this.sectionRole = clockState.sectionRole;
+    this.barEnergy = clockState.barEnergy;
+
+    if (clockState.justCrossedBar && this.sectionRole !== prevRole) {
+      this.bridge.emit({
+        type: 'sectionEntered',
+        role: this.sectionRole,
+        barIndex: this.barIndex,
+      });
+    }
+
     this.background.update(dt, playerSeg.curve, this.car.speedRatio);
     this.bridge.offer(this.simTime, this.buildSnapshot);
   };
@@ -149,13 +204,17 @@ export class Game {
     this.view.fogDensity = tuning.fogDensity;
     this.view.width = width;
     this.view.height = height;
+    this.view.beatPulse = this.beatPulse;
 
-    this.background.render(ctx, width, height, this.palette);
+    this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
     this.roadRenderer.render(ctx, this.track, this.view, this.palette);
     drawPlayerCar(ctx, this.car, width, height);
   };
 
   private readonly handleCarEvent = (event: CarEvent): void => {
+    if (event.type === 'driftEnd' && event.duration >= 0.4) {
+      this.audio.triggerFilterBlip(0.65);
+    }
     this.bridge.emit(event);
   };
 
@@ -171,5 +230,15 @@ export class Game {
     lapTime: this.lapTime,
     lastLapTime: this.lastLapTime,
     fps: this.lastFps,
+    bpm: this.audio.beatMap.bpm,
+    barIndex: this.barIndex,
+    beatInBar: this.beatInBar,
+    beatPulse: this.beatPulse,
+    sectionRole: this.sectionRole,
+    barEnergy: this.barEnergy,
+    filterCutoffHz: this.audio.cutoffHz,
+    trackTitle: this.audio.beatMap.title,
+    trackArtist: this.audio.beatMap.artist,
+    audioUnlocked: this.audio.unlocked,
   });
 }

@@ -2,11 +2,14 @@
 
 ## 1. Project Vision & Design Pillars (The Yu Suzuki Ethos)
 
-This is a **driving game** (emotional fantasy and flow state), not a hardcore racing simulation. Every implementation decision must obey three core design pillars:
+This is a **driving game** (emotional fantasy and flow state), not a hardcore racing simulation. Every implementation decision must obey four core design pillars:
 
-1. **Feel Over Simulation:** All physics (centrifugal curve pull, drift slide, hill cresting) are faked via simple tunable formulas. Never introduce rigid-body physics engines.
-2. **Music Drives State, Driving Manipulates Music:** The soundtrack and road rendering are tightly coupled. High speeds and clean drifts open the Web Audio low-pass filter; slow speeds and collisions muffle the track and trigger turntable pitch dips.
-3. **Protect the Flow State:** Collisions with roadside props or traffic must never cause a game-over explosion or dead stop. They deduct Groove, momentarily dip speed, muffle the audio filter, and keep the player moving.
+1. **Feel Over Simulation:** All physics (centrifugal curve pull, drift slide, hill cresting, gearbox torque, dashboard turntable sway) are faked via simple tunable formulas. Never introduce rigid-body physics engines.
+2. **Music Drives State, Driving Manipulates Music:** The soundtrack and road rendering are tightly coupled. High speeds and clean drifts open the Web Audio low-pass filter; slow speeds and collisions muffle the track and trigger turntable pitch dips; jerky driving makes the dashboard turntable needle skip the actual track.
+3. **Protect the Flow State:** Collisions with roadside props or traffic must never cause a game-over explosion or dead stop. They deduct Groove, momentarily dip speed, muffle the audio filter, and keep the player moving. Mistimed inputs (off-beat gear shifts) are never punished; they simply earn no bonus.
+4. **Your Music Is the Level (Core Feature):** Players load their own local tracks or playlists. Each song is analysed once and **generates its own deterministic road** (same file → same road), so a song can be learned and mastered. A bundled default soundtrack (synth fallback + royalty-free tracks) must always exist for players who load nothing.
+
+> Full mechanic specs (song-driven road, beat-shift gearbox, dashboard turntable & Tofu Mode, analysis validation): see `docs/DESIGN.md`.
 
 ---
 
@@ -20,7 +23,8 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 ### Architectural Boundaries (CRITICAL INVARIANTS)
 
 - **`@src/config/`, `@src/core/`, `@src/engine/`, `@src/road/`, `@src/audio/`, `@src/entities/` (Pure TypeScript Core):** Must have **ZERO React imports** (enforced via ESLint `no-restricted-imports`). Treat the engine like a standalone backend state machine that exposes `.update(dt)` and `.render(ctx, alpha, fps)`.
-- **`@src/audio/` (Web Audio & Beat Clock):** Wraps `AudioContext`. Reads static companion JSON metadata (`bpm`, `firstBeatOffsetSec`, `stageBars`) rather than running expensive real-time FFT beat detection.
+- **`@src/audio/` (Web Audio & Beat Clock):** Wraps `AudioContext`. All rhythm logic reads a `BeatMap` (`bpm`, `firstBeatOffsetSec`, per-bar `energy[]`, `sections[]`, `durationSec`). A `BeatMap` comes either from a static companion JSON (bundled tracks) or from a **one-time offline analysis** of a user-loaded file (`TrackAnalyzer`), cached in IndexedDB keyed by the file's content hash. **Real-time FFT/beat detection during gameplay is forbidden.** `AudioContext.currentTime` (with output-latency compensation) is the single master clock for beats.
+- **User Audio Privacy:** User-loaded files are decoded and analysed entirely client-side. They are never uploaded, sent over the network, or bundled. No streaming-service integrations (Spotify, YouTube, Apple Music) — DRM and ToS make them out of scope.
 - **`@src/ui/` (React Overlay):** Subscribes to engine telemetry via a throttled pub/sub bridge (`TELEMETRY_HZ = 15` Hz updates or discrete state changes like Groove milestones/stage forks). **NEVER trigger React state updates on every `requestAnimationFrame` tick.**
 
 ---
@@ -29,9 +33,12 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 
 ```text
 /
+├── docs/
+│   └── DESIGN.md              # Mechanic specs & design decisions (source of truth for gameplay)
 ├── public/
-│   ├── audio/                 # .mp3 tracks + companion .json beat configs
+│   ├── audio/                 # Bundled .mp3 tracks + companion BeatMap .json
 │   └── sprites/               # Sprite sheets (cars, roadside props, parallax layers)
+├── test-tracks/               # GITIGNORED local analysis corpus (+ ground-truth.json). Never commit audio.
 ├── src/
 │   ├── config/
 │   │   ├── constants.ts       # Fixed resolution, fixed step (1/120s), segment length
@@ -39,7 +46,8 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 │   ├── core/
 │   │   ├── FixedStepper.ts    # Accumulator-based fixed-timestep stepper
 │   │   ├── GameLoop.ts        # requestAnimationFrame loop with deltaTime clamping
-│   │   ├── InputManager.ts    # Keyboard/Gamepad polling state (no per-frame DOM events)
+│   │   ├── InputManager.ts    # Keyboard/Gamepad polling state + timestamped press edges
+│   │   ├── SeededRandom.ts    # Deterministic PRNG (seeded from track content hash)
 │   │   └── TelemetryBridge.ts # Throttled event emitter syncing Engine -> React HUD
 │   ├── engine/
 │   │   ├── Background.ts      # Procedural synthwave sky, striped sun, parallax mountains
@@ -50,18 +58,28 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 │   │   ├── RoadProjection.ts  # 3D-to-2D camera projection & easing helpers
 │   │   ├── RoadRenderer.ts    # Two-pass projection + Painter's Algorithm renderer
 │   │   ├── RoadsideProps.ts   # Procedural greybox roadside props (palms, lamps, billboards)
-│   │   └── TrackBuilder.ts    # Declarative builders for straight, hill, curve, fork
+│   │   ├── TrackBuilder.ts    # Declarative builders for straight, hill, curve, fork
+│   │   ├── RoadChunks.ts      # Hand-authored bar-length road "chunks" tagged by energy/role
+│   │   └── SongRoadGenerator.ts # BeatMap + seed -> chunk sequence -> RoadSegment[]
 │   ├── audio/
+│   │   ├── BeatMap.ts         # BeatMap types, JSON validation, bar/section helpers
+│   │   ├── BeatClock.ts       # Deterministic BPM beat/bar calculator on the audio clock
 │   │   ├── FunkAudioEngine.ts # Web Audio graph (Source -> BiquadFilter -> Gain -> Destination)
-│   │   └── BeatClock.ts       # Deterministic BPM beat/bar calculator
+│   │   ├── TrackAnalyzer.ts   # One-time offline BPM / first-beat / energy / section analysis
+│   │   ├── analysis.worker.ts # DSP worker (receives decoded PCM; no AudioContext inside)
+│   │   └── TrackLibrary.ts    # File import, content hashing, IndexedDB BeatMap cache, playlists
 │   ├── entities/
 │   │   ├── PlayerCar.ts       # Speed, X-offset, drift state, Groove meter math & car renderer
+│   │   ├── Gearbox.ts         # 4-speed fake torque curve, RPM, beat-shift judgement, auto-shift assist
+│   │   ├── DashTurntable.ts   # Jerk-driven needle spring-damper, skip events, canvas inset renderer
 │   │   └── TrafficAndProps.ts # Roadside obstacle collisions & AI kei trucks
 │   ├── ui/
 │   │   ├── CanvasStage.tsx    # Mounts 640x360 canvas and manages GameLoop lifecycle
 │   │   ├── DebugPanel.tsx     # Live feel-tuning sliders (?debug / F2) & JSON export
-│   │   ├── HUD.tsx            # Speedometer, Groove cassette bar, 90s anime passenger cam
-│   │   ├── RadioSelector.tsx  # Stage fork station prompt & track title toast
+│   │   ├── BeatMapInspector.tsx # Dev tool (?analyze): corpus analysis results vs ground truth
+│   │   ├── TrackLoader.tsx    # Drag & drop / file picker, analysis progress, BPM ×2 / ÷2 / tap fix
+│   │   ├── HUD.tsx            # Speedometer, gear/RPM, Groove cassette bar, 90s anime passenger cam
+│   │   ├── RadioSelector.tsx  # Stage fork: pick next playlist track & title toast
 │   │   └── CRTOverlay.tsx     # Pure CSS scanline / VHS vignette overlay
 │   ├── App.tsx                # Mounts <CanvasStage/>, <HUD/>, and <DebugPanel/>
 │   └── main.tsx
@@ -79,6 +97,10 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 3. **Zero Garbage Collection in Render Loop:** Do not allocate new objects, arrays, or closures inside `render()` or `project()`. Mutate pre-allocated screen-coordinate structs on each `RoadSegment`.
 4. **Greybox-First Rendering:** Every sprite, car, or background layer must implement a procedural Canvas polygon fallback (neon magenta/cyan trapezoids, vector grid lines, colored bounding boxes) and audio must include a procedural synth fallback. The game must be 100% playable and visually legible with zero external assets loaded.
 5. **Web Audio Autoplay Compliance:** Never instantiate or resume `AudioContext` on page load. Always initialize/resume inside the user's first keydown or "Press Start" click handler.
+6. **Deterministic Song Roads:** `SongRoadGenerator` output must be a pure function of `(BeatMap, seed)` where `seed` derives from the file's content hash. Use `SeededRandom` only — never `Math.random()` in generation code. Road length in bars must equal the song length in bars.
+7. **Analysis Off the Hot Path:** `decodeAudioData` runs on the main thread (workers have no `AudioContext`); all DSP (onset envelope, tempo autocorrelation, energy, sections) runs in `analysis.worker.ts` on transferred `Float32Array` PCM. Analysis happens only at import time, never during a run.
+8. **Beat Judgement Uses Event Timestamps:** Beat-quantized inputs (gear shifts) are judged from the keydown `event.timeStamp` mapped to the audio clock (`AudioContext.getOutputTimestamp()`), not from the fixed-step tick that polls them.
+9. **Canvas-Owned Animated Insets:** Anything animated every frame (dashboard turntable inset, passenger cam animation) is drawn by the engine on the canvas. React only renders static frames/labels around it.
 
 ---
 
@@ -87,8 +109,11 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 - **M0 (Foundations):** Vite + React + TS strict + Tailwind v4, ESLint layer boundaries, `FixedStepper`, `GameLoop`, `TelemetryBridge`, `CanvasStage`.
 - **M1 (Pseudo-3D Road):** `RoadSegment`, `RoadProjection`, `TrackBuilder`, `RoadRenderer`, `RoadsideProps`, `Background`, looping test track.
 - **M2 (Driving Feel):** `PlayerCar` (tapered acceleration, speed-dependent steering, centrifugal pull, drift with clean exit boost), `DebugPanel` live tuning sliders (`?debug` / `F2`).
-- **M3 (Reactive Audio):** `FunkAudioEngine`, `BeatClock`, synthesized fallback loop + royalty-free track JSON, speed-linked low-pass filter sweep, beat-quantized drops, turntable pitch dip, BPM road/sky pulse.
-- **M4 (Groove, Collisions & HUD):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `SSS`) with hysteresis, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD, `CRTOverlay`.
-- **M5 (Game Loop & Stage Forks):** Bar-based stage progression (`stageBars`), branching highway forks with `RadioSelector` and 4-bar DJ crossfade, end-of-run grade screen.
-- **M6 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, passenger cam reactions, drift/collision particles.
-- **M7 (Polish & Release):** Gamepad polling, asset preloader, tab-visibility pause, performance profiling, static deployment.
+- **M3 (Reactive Audio & Track Import):**
+  - **M3a — Analysis spike (gate):** `BeatMap`, `TrackAnalyzer` + `analysis.worker.ts`, `BeatMapInspector` (`?analyze`) run against the local `test-tracks/` corpus. **Exit criteria** in `docs/DESIGN.md` §2.4. If unmet, fall back to tap-tempo-first import before continuing.
+  - **M3b — Audio engine:** `FunkAudioEngine`, `BeatClock` (audio clock + latency compensation), `TrackLibrary` (hashing, IndexedDB cache, playlists), `TrackLoader` UI with BPM correction, synthesized fallback loop + bundled royalty-free track JSON, speed-linked low-pass sweep, turntable pitch dip, BPM road/sky pulse.
+- **M4 (Song-Driven Road):** `SeededRandom`, `RoadChunks` vocabulary, section-aware `SongRoadGenerator` (build-ups → climbs cresting on the drop, drops → fast straights/sweepers, breakdowns → technical curves), road length = song length.
+- **M5 (Groove & Rhythm Driving):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `SSS`) with hysteresis, `Gearbox` beat-shift (+ auto-shift assist), `DashTurntable` always-on needle physics + Tofu Mode, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD with gear/RPM, `CRTOverlay`.
+- **M6 (Playlist Run & Forks):** Playlist = sequence of stages; forks choose the next playlist track via `RadioSelector`; 4-bar DJ crossfade; end-of-run grade screen; local per-song best scores keyed by content hash.
+- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, dashboard turntable, passenger cam reactions, drift/collision particles.
+- **M8 (Polish & Release):** Gamepad polling, asset preloader, tab-visibility pause, performance profiling, static deployment.

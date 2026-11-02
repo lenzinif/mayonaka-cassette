@@ -5,3 +5,6 @@ dist
 coverage
 .DS_Store
 Thumbs.db
+
+# Local audio analysis corpus — copyrighted audio must never be committed
+test-tracks/

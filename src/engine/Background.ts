@@ -1,3 +1,4 @@
+import { tuning } from '@src/config/tuning';
 import type { StagePalette } from '@src/road/palette';
 
 const MOUNTAIN_POINTS = 64;
@@ -35,8 +36,12 @@ export class Background {
     width: number,
     height: number,
     palette: StagePalette,
+    beatPulse = 0,
+    downbeatPulse = 0,
   ): void {
     const horizonY = Math.floor(height * 0.5);
+    const pulse = beatPulse * tuning.bpmPulseStrength;
+    const downPulse = downbeatPulse * tuning.bpmPulseStrength;
 
     // 1. Sky gradient
     const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
@@ -46,14 +51,22 @@ export class Background {
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, horizonY + 2);
 
+    // Subtle horizon beat glow on kick/downbeat
+    if (pulse > 0.05) {
+      ctx.globalAlpha = Math.min(0.45, pulse * 0.22 + downPulse * 0.15);
+      ctx.fillStyle = palette.sunBottom;
+      ctx.fillRect(0, horizonY - 14, width, 16);
+      ctx.globalAlpha = 1;
+    }
+
     // Fallback ground fill below horizon in case a steep downhill exposes a sliver
     ctx.fillStyle = palette.grass[1];
     ctx.fillRect(0, horizonY, width, height - horizonY);
 
-    // 2. Retro striped synthwave sun
+    // 2. Retro striped synthwave sun (pulses with BPM)
     const sunX = width * 0.5 - this.sunOffset;
     const sunY = horizonY - 18;
-    const sunR = 58;
+    const sunR = 58 + pulse * 4.5 + downPulse * 2.5;
     const sunGrad = ctx.createLinearGradient(0, sunY - sunR, 0, sunY + sunR);
     sunGrad.addColorStop(0, palette.sunTop);
     sunGrad.addColorStop(1, palette.sunBottom);
@@ -102,7 +115,7 @@ export class Background {
       else ctx.lineTo(x, y);
     }
     ctx.strokeStyle = palette.mountainRim;
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1.2 + pulse * 1.1;
     ctx.stroke();
   }
 }

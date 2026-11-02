@@ -35,6 +35,13 @@ export const DEFAULT_TUNING = {
   driftCounterSteer: 0.6,
   driftCentrifugalReduce: 0.55,
   driftDecelRate: 0.08,
+
+  // Audio & Beat Pulse (M3)
+  audioFilterMinHz: 420,
+  audioFilterMaxHz: 18000,
+  audioFilterDriftQ: 3.2,
+  audioOffRoadPitchDip: 0.09,
+  bpmPulseStrength: 1.0,
 } satisfies Record<string, number>;
 
 export type TuningKey = keyof typeof DEFAULT_TUNING;
@@ -285,5 +292,53 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0,
     max: 0.5,
     step: 0.01,
+  },
+
+  {
+    group: 'Audio',
+    key: 'audioFilterMinHz',
+    label: 'Filter min cutoff',
+    hint: 'Frequenza passa-basso a bassa velocità o fuori strada (suono ovattato)',
+    unit: 'Hz',
+    min: 150,
+    max: 2500,
+    step: 20,
+  },
+  {
+    group: 'Audio',
+    key: 'audioFilterMaxHz',
+    label: 'Filter max cutoff',
+    hint: 'Frequenza passa-basso ad alta velocità e in drift (suono aperto)',
+    unit: 'Hz',
+    min: 4000,
+    max: 20000,
+    step: 250,
+  },
+  {
+    group: 'Audio',
+    key: 'audioFilterDriftQ',
+    label: 'Drift filter Q',
+    hint: 'Risonanza del filtro French House mentre sei in drift',
+    min: 0.7,
+    max: 8,
+    step: 0.1,
+  },
+  {
+    group: 'Audio',
+    key: 'audioOffRoadPitchDip',
+    label: 'Off-road pitch dip',
+    hint: 'Rallentamento del vinile quando finisci fuori strada sull’erba',
+    min: 0,
+    max: 0.3,
+    step: 0.01,
+  },
+  {
+    group: 'Audio',
+    key: 'bpmPulseStrength',
+    label: 'BPM visual pulse',
+    hint: 'Intensità della pulsazione a tempo di musica su sole, montagne e cordoli',
+    min: 0,
+    max: 2,
+    step: 0.05,
   },
 ];
