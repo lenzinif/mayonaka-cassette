@@ -10,3 +10,14 @@ body,
   background-color: #060112;
   overflow: hidden;
 }
+
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background-color: rgba(5, 1, 13, 0.82);
+  backdrop-filter: blur(4px);
+}

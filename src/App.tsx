@@ -3,18 +3,21 @@ import { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
 import { TrackLibrary, type PlaylistItem } from '@src/audio/TrackLibrary';
 import { TELEMETRY_HZ } from '@src/config/constants';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
-import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
-import { useEffect, useState } from 'react';
+import type { Game, GameEvent, TelemetrySnapshot } from '@src/engine/Game';
+import { useEffect, useRef, useState } from 'react';
 import { BeatMapInspector } from './ui/BeatMapInspector';
 import { CanvasStage } from './ui/CanvasStage';
+import { CRTOverlay } from './ui/CRTOverlay';
 import { DebugPanel, loadSavedTuning } from './ui/DebugPanel';
 import { HUD } from './ui/HUD';
+import { RadioSelector } from './ui/RadioSelector';
 import { TrackLoader } from './ui/TrackLoader';
 
 export function App() {
   const [bridge] = useState(() => new TelemetryBridge<TelemetrySnapshot, GameEvent>(TELEMETRY_HZ));
   const [audio] = useState(() => new FunkAudioEngine());
   const [library] = useState(() => new TrackLibrary());
+  const gameRef = useRef<Game | null>(null);
 
   const [debugOpen, setDebugOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -68,7 +71,14 @@ export function App() {
   return (
     <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[#060112]">
       <div className="relative aspect-video max-h-full max-w-full w-full">
-        <CanvasStage bridge={bridge} audio={audio} />
+        <CanvasStage
+          bridge={bridge}
+          audio={audio}
+          library={library}
+          onGameReady={(game) => {
+            gameRef.current = game;
+          }}
+        />
         <HUD
           bridge={bridge}
           debugOpen={debugOpen}
@@ -76,6 +86,13 @@ export function App() {
           onOpenTrackLoader={() => setTrackLoaderOpen(true)}
           onOpenInspector={() => setInspectorOpen(true)}
         />
+        <RadioSelector
+          bridge={bridge}
+          library={library}
+          onRestartRun={() => gameRef.current?.restartPlaylistRun()}
+          onOpenTrackLoader={() => setTrackLoaderOpen(true)}
+        />
+        <CRTOverlay />
         <DebugPanel open={debugOpen} onClose={() => setDebugOpen(false)} />
         <TrackLoader
           open={trackLoaderOpen}

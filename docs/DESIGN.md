@@ -137,15 +137,14 @@ Rules:
 OutRun had a LOW/HIGH stick; we extend it into a rhythm mechanic without becoming a sim.
 
 - **4 gears**, top-speed ratios _(start)_ `[0.35, 0.60, 0.82, 1.00] × maxSpeed`.
-- `rpm = speed / gearTopSpeed`; fake torque curve peaks around 0.7 rpm and fades toward redline; redline is a soft limiter (speed holds, no damage). Replaces the current single `accelTaper` curve in `PlayerCar`.
+- `rpm = speed / gearTopSpeed`; fake torque curve peaks around 0.7 rpm and fades toward redline; redline is a soft limiter (speed holds, no damage). Replaces the single `accelTaper` curve in `PlayerCar`.
 - **Beat judgement** on every manual shift (timestamp-based, latency-compensated, AGENTS.md §4.8):
   - `PERFECT` ±50 ms _(start)_ of a beat, `GOOD` ±100 ms; downbeat of a bar counts as a bigger bonus.
-  - Only counts when the shift makes sense (upshift at ≥ 0.75 rpm, downshift that keeps rpm < redline) → no spamming.
-  - Reward: 1-beat torque boost _(start: +15 %)_, Groove gain, brief low-pass filter "blip" open.
+  - Only counts when the shift makes sense (upshift at ≥ 0.72 rpm, downshift that keeps rpm < redline) → no spamming.
+  - **Reward:** Groove gain (extra on downbeat) + brief low-pass filter "blip" open. **No speed or torque boost** (this is not Mario Kart — Groove is the sole reward).
   - Off-beat shift: works normally, no bonus, **no penalty** (Pillar 3).
-- **Auto-shift assist** (option, off by default): shifts at optimal rpm, earns no beat bonus.
-- Each shift produces a longitudinal jerk proportional to the rpm drop → feeds the melon soda glass (§5).
-- Engine voice: synthesized oscillator pitched by rpm, mixed well under the music (M5, low priority).
+- **Auto-shift assist** (option, off by default, toggle `G`): shifts at optimal rpm, earns no beat bonus. In manual mode, coming to a near-stop automatically drops to 1st gear to prevent stalling.
+- Each shift produces a longitudinal jerk proportional to the rpm drop → feeds the melon soda glass when Tofu Mode is active (§5).
 
 ---
 
@@ -153,25 +152,24 @@ OutRun had a LOW/HIGH stick; we extend it into a rhythm mechanic without becomin
 
 Our direct Initial D homage with authentic Future Funk flavor: a tall retro-kissaten diner glass of fizzy **Melon Cream Soda** (neon green soda, ice cubes, vanilla ice cream float, and a maraschino cherry) resting in the dashboard cup-holder. The core lesson is **smooth inputs**, so the model reacts to **jerk** (change of acceleration), not acceleration itself.
 
-### 5.1 Liquid physics (always on)
+### 5.1 Tofu Mode (toggle) & Liquid Physics
 
-- Inputs per step: lateral acceleration (steering + centrifugal + drift), longitudinal acceleration (throttle, brake, shifts, collisions), vertical (slope change at crests/dips). Differentiate → jerk `j`.
-- Liquid meniscus / tilt angle = spring-damper: `θ'' = −k·θ − c·θ' + G·j` _(start: tune so a clean committed drift entry gently tilts the soda without spilling; jerky counter-steering, erratic swerving, and panic braking cause a spill)_.
-- `|θ| > spillThreshold` → **spill event**:
-  - Droplets of neon green soda splash over the glass rim onto the dashboard tray.
-  - Distinct audio feedback: fizzy soda splash + ice cubes clinking against the glass (`clink!`) + brief momentary filter muffle / duck.
-  - The beat grid and road sync are never displaced.
-- Outside Tofu Mode a spill is **feedback only**: no Groove loss. It teaches smoothness through sight and sound.
+- Everything related to the Melon Soda cup (inset display, liquid physics, splashes/spills, Groove multiplier, and spill penalty) is active **only while Tofu Mode is enabled** (`T` key or HUD toggle).
+- While Tofu Mode is active:
+  - **Melon Soda inset** is visible (`120×80` px, bottom-left, drawn on canvas by the engine with pixelated styling).
+  - **Groove gain ×2** _(start)_.
+  - Inputs per step: lateral acceleration (steering + centrifugal + drift), longitudinal acceleration (throttle, brake, shifts, collisions), vertical (slope change at crests/dips). Differentiate → jerk `j`.
+  - Liquid meniscus / tilt angle = spring-damper: `θ'' = −k·θ − c·θ' + G·j` _(start: tune so a clean committed drift entry gently tilts the soda without spilling; jerky counter-steering, erratic swerving, and panic braking cause a spill)_.
+  - `|θ| > spillThreshold` → **spill event**:
+    - Droplets of neon green soda splash over the glass rim onto the dashboard tray.
+    - Distinct audio feedback: fizzy soda splash + ice cubes clinking against the glass (`clink!`) + brief momentary filter muffle / duck.
+    - Costs Groove _(start: −10 % of current tier progress)_.
+    - The beat grid and road sync are never displaced.
+- Turning Tofu Mode off hides the inset and ends the multiplier streak. Never a fail state.
 
-### 5.2 Tofu Mode (toggle)
+### 5.2 Cosmetics & Skins
 
-- Button toggles Tofu Mode; the change applies at the next 4-bar boundary (no dodging a hairpin at the last second).
-- While active: Melon Soda inset visible (≈ 120×80 px, bottom-left, drawn on canvas by the engine with pixelated styling), **Groove gain ×2** _(start)_, each spill costs Groove _(start: −10 % of current tier progress)_.
-- Turning it off ends the multiplier streak. Never a fail state.
-
-### 5.3 Cosmetics & Skins
-
-The neon green **Melon Cream Soda** is the default; later unlockable skins using the same physics include:
+The neon green **Melon Cream Soda** is the default; unlockable/selectable skins using the same physics include:
 - **Classic Tofu Cup:** The plain white paper cup with water from Initial D.
 - **Pocari Sweat Can:** Japanese sports drink can with liquid level visible through a retro cutaway.
 - **Boss Coffee Can:** Classic Japanese canned coffee.
@@ -180,21 +178,20 @@ The neon green **Melon Cream Soda** is the default; later unlockable skins using
 
 ## 6. Controls
 
-| Action             | Keyboard      | Gamepad (M8)       |
-| ------------------ | ------------- | ------------------ |
-| Steer              | ← → / A D     | Left stick / D-pad |
-| Accelerate / Brake | ↑ ↓ / W S     | RT / LT            |
-| Drift              | Space / Shift | A / Cross          |
-| Shift up / down    | E / Q         | RB / LB            |
-| Tofu Mode          | T             | Y / Triangle       |
+| Action             | Keyboard                     | Gamepad (M8)       |
+| ------------------ | ---------------------------- | ------------------ |
+| Steer              | ← → / A D                    | Left stick / D-pad |
+| Accelerate / Brake | ↑ ↓ / W S                    | RT / LT            |
+| Drift              | S + Steer (or C / Left Ctrl) | A / Cross          |
+| Shift up / down    | Space (up) / Shift (down)    | RB / LB            |
+| Auto-shift assist  | G                            | Select / Back      |
+| Tofu Mode          | T                            | Y / Triangle       |
 
-Shift and Tofu Mode need **press edges with timestamps** in `InputManager` (polling `isDown` alone is not enough for beat judgement).
+Shift and Tofu Mode use **press edges with timestamps** in `InputManager` (polling `isDown` alone is not enough for beat judgement).
 
 ---
 
 ## 7. Open Questions
 
 - `referenceSpeed` value and whether it adapts to the player's Groove tier.
-- Drift exit boost was removed in M2; revisit once beat-shift boosts exist to avoid overlapping rewards.
-- Mix level of engine voice vs. user music (default probably off for user tracks).
 - How to present `tempoStable: false` songs (allowed with reduced features, or warned at import).

@@ -3,8 +3,53 @@ import { DEFAULT_SYNTH_BEATMAP } from './FunkAudioEngine';
 import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
 
 const IDB_NAME = 'outrun-futurefunk-audio';
-const IDB_VERSION = 1;
+const IDB_VERSION = 2;
 const BEATMAP_STORE = 'beatmaps';
+const SCORE_STORE = 'scores';
+const LS_SCORES_KEY = 'outrun-futurefunk-best-scores-v1';
+
+export type RunGrade = 'SSS' | 'S' | 'A' | 'B' | 'C';
+
+const GRADE_RANK: Readonly<Record<RunGrade, number>> = {
+  C: 1,
+  B: 2,
+  A: 3,
+  S: 4,
+  SSS: 5,
+};
+
+export interface StageScoreSummary {
+  stageNumber: number;
+  contentHash: string;
+  title: string;
+  artist: string;
+  bpm: number;
+  score: number;
+  grade: RunGrade;
+  avgGroove: number;
+  maxGroove: number;
+  perfectShifts: number;
+  goodShifts: number;
+  dropSyncs: number;
+  collisions: number;
+  sodaSpills: number;
+  tofuModeUsed: boolean;
+  durationSec: number;
+  isNewRecord?: boolean;
+}
+
+export interface SongBestScore {
+  contentHash: string;
+  title: string;
+  artist: string;
+  bestScore: number;
+  bestGrade: RunGrade;
+  maxGroove: number;
+  perfectShifts: number;
+  dropSyncs: number;
+  bestTimeSec: number;
+  updatedAt: number;
+}
 
 export interface PlaylistItem {
   id: string;
@@ -22,13 +67,56 @@ export interface ImportProgress {
 }
 
 /**
- * Client-side track library, IndexedDB BeatMap cache, and ordered stage playlist
- * (docs/DESIGN.md §2.1, AGENTS.md §2 & §3).
+ * Computes a stage/song letter grade from driving performance metrics (M6).
+ */
+export function computeStageGrade(
+  score: number,
+  avgGroove: number,
+  sodaSpills: number,
+  collisions: number,
+): RunGrade {
+  if (avgGroove >= 82 && score >= 9000 && sodaSpills === 0 && collisions <= 1) {
+    return 'SSS';
+  }
+  if (avgGroove >= 65 || score >= 7000) {
+    return 'S';
+  }
+  if (avgGroove >= 45 || score >= 4500) {
+    return 'A';
+  }
+  if (avgGroove >= 28 || score >= 2500) {
+    return 'B';
+  }
+  return 'C';
+}
+
+/**
+ * Computes the overall run grade across all completed stages in a playlist run.
+ */
+export function computeOverallRunGrade(stages: readonly StageScoreSummary[]): RunGrade {
+  if (stages.length === 0) return 'C';
+  let sumRank = 0;
+  for (const s of stages) {
+    sumRank += GRADE_RANK[s.grade];
+  }
+  const avgRank = sumRank / stages.length;
+  if (avgRank >= 4.6) return 'SSS';
+  if (avgRank >= 3.7) return 'S';
+  if (avgRank >= 2.7) return 'A';
+  if (avgRank >= 1.7) return 'B';
+  return 'C';
+}
+
+/**
+ * Client-side track library, IndexedDB BeatMap cache, ordered stage playlist,
+ * and local per-song best scores keyed by content hash
+ * (docs/DESIGN.md §2.1, AGENTS.md §2, §3 & §5 M6).
  *
  * Pure TypeScript module (zero React imports).
  */
 export class TrackLibrary {
   private readonly memoryCache = new Map<string, BeatMap>();
+  private readonly bestScores = new Map<string, SongBestScore>();
   private readonly analyzer = new TrackAnalyzer();
   private readonly listeners = new Set<() => void>();
 
@@ -43,6 +131,11 @@ export class TrackLibrary {
   ];
   private activeIndex = 0;
 
+  constructor() {
+    this.loadBestScoresFromLocalStorage();
+    void this.loadBestScoresFromIdb();
+  }
+
   get items(): readonly PlaylistItem[] {
     return this.playlist;
   }
@@ -53,6 +146,21 @@ export class TrackLibrary {
 
   get currentIndex(): number {
     return this.activeIndex;
+  }
+
+  /** True when the playlist has more than 1 track so stage forks can advance through songs. */
+  get hasMultipleTracks(): boolean {
+    return this.playlist.length > 1;
+  }
+
+  /** True when there is another track after `activeIndex` in the playlist. */
+  get hasNextTrack(): boolean {
+    return this.activeIndex + 1 < this.playlist.length;
+  }
+
+  /** Returns the next track in the playlist if available, or `null` if on the final track. */
+  get nextTrackItem(): PlaylistItem | null {
+    return this.playlist[this.activeIndex + 1] ?? null;
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -70,6 +178,14 @@ export class TrackLibrary {
     return this.activeItem;
   }
 
+  /** Advances to the next track in the playlist if one exists, returning the newly active item. */
+  advanceToNextTrack(): PlaylistItem | null {
+    if (!this.hasNextTrack) return null;
+    this.activeIndex += 1;
+    this.notify();
+    return this.activeItem;
+  }
+
   selectByContentHash(contentHash: string): PlaylistItem {
     const idx = this.playlist.findIndex((it) => it.contentHash === contentHash);
     if (idx >= 0) {
@@ -77,6 +193,67 @@ export class TrackLibrary {
       this.notify();
     }
     return this.activeItem;
+  }
+
+  /**
+   * Returns the saved local best score for `contentHash`, or `null` if never completed.
+   */
+  getBestScore(contentHash: string): SongBestScore | null {
+    return this.bestScores.get(contentHash) ?? null;
+  }
+
+  /**
+   * Returns all saved per-song best scores keyed by `contentHash`.
+   */
+  getAllBestScores(): ReadonlyMap<string, SongBestScore> {
+    return this.bestScores;
+  }
+
+  /**
+   * Records a completed stage's score and updates the local per-song best score if beaten.
+   */
+  recordStageResult(summary: StageScoreSummary): { best: SongBestScore; isNewRecord: boolean } {
+    const existing = this.bestScores.get(summary.contentHash);
+    const isNewRecord = !existing || summary.score > existing.bestScore;
+
+    const updated: SongBestScore = existing
+      ? {
+          contentHash: summary.contentHash,
+          title: summary.title,
+          artist: summary.artist,
+          bestScore: Math.max(existing.bestScore, summary.score),
+          bestGrade:
+            GRADE_RANK[summary.grade] >= GRADE_RANK[existing.bestGrade]
+              ? summary.grade
+              : existing.bestGrade,
+          maxGroove: Math.max(existing.maxGroove, summary.maxGroove),
+          perfectShifts: Math.max(existing.perfectShifts, summary.perfectShifts),
+          dropSyncs: Math.max(existing.dropSyncs, summary.dropSyncs),
+          bestTimeSec:
+            existing.bestTimeSec > 0
+              ? Math.min(existing.bestTimeSec, summary.durationSec)
+              : summary.durationSec,
+          updatedAt: Date.now(),
+        }
+      : {
+          contentHash: summary.contentHash,
+          title: summary.title,
+          artist: summary.artist,
+          bestScore: summary.score,
+          bestGrade: summary.grade,
+          maxGroove: summary.maxGroove,
+          perfectShifts: summary.perfectShifts,
+          dropSyncs: summary.dropSyncs,
+          bestTimeSec: summary.durationSec,
+          updatedAt: Date.now(),
+        };
+
+    this.bestScores.set(summary.contentHash, updated);
+    this.saveBestScoresToLocalStorage();
+    void this.putBestScoreInIdb(updated);
+    this.notify();
+
+    return { best: updated, isNewRecord };
   }
 
   /**
@@ -222,6 +399,87 @@ export class TrackLibrary {
     }
   }
 
+  private loadBestScoresFromLocalStorage(): void {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const raw = window.localStorage.getItem(LS_SCORES_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          if (isSongBestScore(item)) {
+            this.bestScores.set(item.contentHash, item);
+          }
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  private saveBestScoresToLocalStorage(): void {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const list = Array.from(this.bestScores.values());
+      window.localStorage.setItem(LS_SCORES_KEY, JSON.stringify(list));
+    } catch {
+      // Ignore storage errors
+    }
+  }
+
+  private async loadBestScoresFromIdb(): Promise<void> {
+    const db = await this.openDb();
+    if (!db || !db.objectStoreNames.contains(SCORE_STORE)) return;
+
+    return new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction(SCORE_STORE, 'readonly');
+        const store = tx.objectStore(SCORE_STORE);
+        const req = store.getAll();
+        req.onsuccess = () => {
+          const rows = req.result as unknown[];
+          let changed = false;
+          if (Array.isArray(rows)) {
+            for (const row of rows) {
+              if (isSongBestScore(row)) {
+                const cur = this.bestScores.get(row.contentHash);
+                if (!cur || row.bestScore > cur.bestScore) {
+                  this.bestScores.set(row.contentHash, row);
+                  changed = true;
+                }
+              }
+            }
+          }
+          if (changed) {
+            this.saveBestScoresToLocalStorage();
+            this.notify();
+          }
+          resolve();
+        };
+        req.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
+  private async putBestScoreInIdb(score: SongBestScore): Promise<void> {
+    const db = await this.openDb();
+    if (!db || !db.objectStoreNames.contains(SCORE_STORE)) return;
+
+    return new Promise<void>((resolve) => {
+      try {
+        const tx = db.transaction(SCORE_STORE, 'readwrite');
+        const store = tx.objectStore(SCORE_STORE);
+        store.put(score);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => resolve();
+      } catch {
+        resolve();
+      }
+    });
+  }
+
   private openDb(): Promise<IDBDatabase | null> {
     if (typeof indexedDB === 'undefined') {
       return Promise.resolve(null);
@@ -234,6 +492,9 @@ export class TrackLibrary {
           if (!db.objectStoreNames.contains(BEATMAP_STORE)) {
             db.createObjectStore(BEATMAP_STORE, { keyPath: 'contentHash' });
           }
+          if (!db.objectStoreNames.contains(SCORE_STORE)) {
+            db.createObjectStore(SCORE_STORE, { keyPath: 'contentHash' });
+          }
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve(null);
@@ -242,4 +503,15 @@ export class TrackLibrary {
       }
     });
   }
+}
+
+function isSongBestScore(val: unknown): val is SongBestScore {
+  if (!val || typeof val !== 'object') return false;
+  const rec = val as Record<string, unknown>;
+  return (
+    typeof rec.contentHash === 'string' &&
+    typeof rec.bestScore === 'number' &&
+    typeof rec.bestGrade === 'string' &&
+    rec.bestGrade in GRADE_RANK
+  );
 }

@@ -51,19 +51,8 @@ export class Background {
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, horizonY + 2);
 
-    // Subtle horizon beat glow on kick/downbeat
-    if (pulse > 0.05) {
-      ctx.globalAlpha = Math.min(0.45, pulse * 0.22 + downPulse * 0.15);
-      ctx.fillStyle = palette.sunBottom;
-      ctx.fillRect(0, horizonY - 14, width, 16);
-      ctx.globalAlpha = 1;
-    }
-
-    // Fallback ground fill below horizon in case a steep downhill exposes a sliver
-    ctx.fillStyle = palette.grass[1];
-    ctx.fillRect(0, horizonY, width, height - horizonY);
-
     // 2. Retro striped synthwave sun (pulses with BPM)
+    // Sits on the horizon behind mountains; strictly clipped to the sky (never bleeds below horizonY).
     const sunX = width * 0.5 - this.sunOffset;
     const sunY = horizonY - 18;
     const sunR = 58 + pulse * 4.5 + downPulse * 2.5;
@@ -72,6 +61,10 @@ export class Background {
     sunGrad.addColorStop(1, palette.sunBottom);
 
     ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, horizonY);
+    ctx.clip();
+
     ctx.beginPath();
     ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
     ctx.clip();
@@ -87,7 +80,20 @@ export class Background {
     }
     ctx.restore();
 
-    // 3. Parallax mountain silhouette + neon cyan rim
+    // Subtle horizon beat glow on kick/downbeat (kept in the sky above horizonY)
+    if (pulse > 0.05) {
+      ctx.globalAlpha = Math.min(0.45, pulse * 0.22 + downPulse * 0.15);
+      ctx.fillStyle = palette.sunBottom;
+      ctx.fillRect(0, horizonY - 14, width, 14);
+      ctx.globalAlpha = 1;
+    }
+
+    // 3. Fallback ground fill below horizon in case a steep downhill exposes a sliver
+    // Rendered AFTER the sun so ground terrain always occludes the celestial body.
+    ctx.fillStyle = palette.grass[1];
+    ctx.fillRect(0, horizonY, width, height - horizonY);
+
+    // 4. Parallax mountain silhouette + neon cyan rim
     const step = MOUNTAIN_SPAN / MOUNTAIN_POINTS;
     const startIdx = Math.floor(this.scrollX / step);
     const frac = (this.scrollX % step) / step;
