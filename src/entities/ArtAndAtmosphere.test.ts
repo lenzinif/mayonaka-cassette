@@ -168,7 +168,7 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     expect(mock.fillRectCalls).toBeGreaterThan(80);
   });
 
-  it('renders PlayerCar purely from behind with steering banking lean, and KeiTruck 3-state sprite frames', () => {
+  it('renders PlayerCar purely from behind with steering banking lean, and KeiTruck pure rear-view sprite', () => {
     const car = new PlayerCar();
     expect(car.spriteFrame).toBe(0);
     expect(getPlayerCarSpriteFrame(car)).toBe(0);
@@ -198,19 +198,18 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     expect(driftMock.fillRectCalls).toBeGreaterThan(10);
     expect(driftMock.polygonFillCalls).toBeGreaterThan(0);
 
-    // KeiTruck discrete 3-state OutRun curve/turn sprite frames (-2..+2)
+    // KeiTruck pure rear view with curve tilt (zero lateral side quads or vertical wobble)
     expect(getKeiTruckSpriteFrame(0)).toBe(0);
-    expect(getKeiTruckSpriteFrame(0.1)).toBe(0); // small adjustment stays 0
-    expect(getKeiTruckSpriteFrame(0.28)).toBe(1);
-    expect(getKeiTruckSpriteFrame(-0.52)).toBe(-2);
+    expect(getKeiTruckSpriteFrame(0.1)).toBe(0);
+    expect(getKeiTruckSpriteFrame(0.28)).toBe(0);
+    expect(getKeiTruckSpriteFrame(-0.52)).toBe(0);
 
     const truckStraightMock = createMockCanvasContext();
     drawKeiTruck(truckStraightMock.ctx, 320, 220, 0.04, 0, 0, false, 0);
     const truckTurnMock = createMockCanvasContext();
     drawKeiTruck(truckTurnMock.ctx, 320, 220, 0.04, 0, 0.25, false, 3.5);
-    expect(truckTurnMock.polygonFillCalls).toBeGreaterThan(truckStraightMock.polygonFillCalls);
-    expect(
-      truckTurnMock.fillRectCalls + truckTurnMock.polygonFillCalls,
-    ).toBeGreaterThan(truckStraightMock.fillRectCalls + truckStraightMock.polygonFillCalls);
+    expect(truckStraightMock.fillRectCalls).toBeGreaterThan(10);
+    expect(truckTurnMock.fillRectCalls).toBeGreaterThan(10);
+    expect(truckTurnMock.polygonFillCalls).toBe(0); // Zero perspective polygon quads
   });
 });

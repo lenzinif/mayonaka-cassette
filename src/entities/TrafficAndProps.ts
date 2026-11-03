@@ -523,44 +523,32 @@ export class TrafficManager {
 }
 
 const TRUCK_CAB_COLORS = ['#e8f7ff', '#ff4f9a', '#d8b4fe'] as const;
-const TRUCK_CAB_SIDE_COLORS = ['#c2dfef', '#d62b74', '#b680ed'] as const;
-const TRUCK_CAB_ROOF_COLORS = ['#ffffff', '#ff85b8', '#edd6ff'] as const;
 const TRUCK_BED_COLORS = ['#b8d8eb', '#c81d66', '#9d65c9'] as const;
-const TRUCK_BED_SIDE_COLORS = ['#94bcd4', '#9e1350', '#7e4ba8'] as const;
 const TRUCK_CARGO_COLORS = ['#05d9e8', '#ffd319', '#00f59b'] as const;
-const TRUCK_CARGO_TOP_COLORS = ['#7af0f7', '#ffe675', '#6bffc3'] as const;
-const TRUCK_CARGO_SIDE_COLORS = ['#039ba8', '#cc9f08', '#00b874'] as const;
 
 /**
- * Discrete OutRun-style 3-state sprite frame index for AI Kei Trucks (`-2..+2`):
- * - `0`: straight rear view & small adjustments
- * - `±1`: light / medium curve turn
- * - `±2`: heavy curve turn / knocked-off sideways slide
+ * Discrete OutRun-style sprite frame index for AI Kei Trucks:
+ * Pure rear view (0).
  */
-export type TruckSpriteFrame = -2 | -1 | 0 | 1 | 2;
-
-const TRUCK_REAR_COS = [1.0, 0.9, 0.78] as const;
-const TRUCK_SIDE_RATIO = [0, 0.28, 0.48] as const;
-const TRUCK_NOSE_LIFT = [0, 0.09, 0.16] as const;
+export type TruckSpriteFrame = 0;
 
 /**
- * Maps an effective visual turn/curve angle to a discrete 3-state OutRun traffic sprite frame (`-2..+2`).
+ * Kei truck sprite frame (reverted to pure rear view 0).
  */
-export function getKeiTruckSpriteFrame(turnAngle: number): TruckSpriteFrame {
-  const abs = Math.abs(turnAngle);
-  if (abs < 0.2) return 0;
-  const dir = turnAngle > 0 ? 1 : -1;
-  if (abs < 0.44) return (dir * 1) as TruckSpriteFrame;
-  return (dir * 2) as TruckSpriteFrame;
+export function getKeiTruckSpriteFrame(turnAngle?: number): TruckSpriteFrame {
+  void turnAngle;
+  return 0;
 }
 
 /**
- * 16-bit pixel-art 80s Japanese Kei Truck 3-state multi-angle renderer
- * (AGENTS.md §4.1, §4.3, §4.4 & §5 M7).
+ * 16-bit pixel-art 80s Japanese Kei Truck renderer (AGENTS.md §4.1, §4.3, §4.4 & §5 M7).
  *
- * Uses a unified 3-station 3D box projection (`v = 0` rear tailgate, `v = 0.62` cab back / cargo front,
- * `v = 1.0` cab front nose) so the rear tailgate, 3D cargo volume (top + side + rear faces), flatbed
- * drop-side panel, and forward cab-over driver cabin share exact vertices with zero gaps.
+ * Renders an authentic Daihatsu Hijet / Honda Acty style cab-over kei truck with:
+ * - Pure rear-view perspective (zero 3/4 lateral distortion or side panels)
+ * - 3 distinct cargo variants (Melon soda crates, Synth boombox, Fujiwara canopy)
+ * - JDM yellow license plate, mudflaps, corrugated tailgate, driver silhouette
+ * - Dynamic tilt on curve/shunt and hazard light flash when knocked off-road.
+ * - Rock-solid vertical stability (no up/down wobble or nose lift).
  */
 export function drawKeiTruck(
   ctx: CanvasRenderingContext2D,
@@ -577,15 +565,10 @@ export function drawKeiTruck(
 
   const v = variant % 3;
   const cabColor = TRUCK_CAB_COLORS[v]!;
-  const cabSideColor = TRUCK_CAB_SIDE_COLORS[v]!;
-  const cabRoofColor = TRUCK_CAB_ROOF_COLORS[v]!;
   const bedColor = TRUCK_BED_COLORS[v]!;
-  const bedSideColor = TRUCK_BED_SIDE_COLORS[v]!;
   const cargoColor = TRUCK_CARGO_COLORS[v]!;
-  const cargoTopColor = TRUCK_CARGO_TOP_COLORS[v]!;
-  const cargoSideColor = TRUCK_CARGO_SIDE_COLORS[v]!;
 
-  // Distant low-LOD silhouette (<10px wide): 5 crisp pixel rects, zero save/restore/quad overhead
+  // Distant low-LOD silhouette (<10px wide): 5 crisp pixel rects, zero save/restore overhead
   if (w < 10) {
     const sx = Math.round(screenX - w * 0.5);
     const sy = Math.round(screenY);
@@ -604,333 +587,30 @@ export function drawKeiTruck(
     return;
   }
 
-  const effectiveTurn = tiltAngle * 1.4 + roadCurve * 0.085;
-  const frame = getKeiTruckSpriteFrame(effectiveTurn);
-  const absFrame = Math.abs(frame);
-  const dir = Math.sign(frame);
-
-  const rearCos = TRUCK_REAR_COS[absFrame]!;
-  const rearW = Math.max(4, Math.round(w * rearCos));
-  const halfW = Math.max(2, Math.round(rearW * 0.5));
-  const sideSpan = Math.round(w * TRUCK_SIDE_RATIO[absFrame]!);
-  const noseLift = Math.round(h * TRUCK_NOSE_LIFT[absFrame]!);
-
-  // 3 longitudinal stations along the truck:
-  // Station A (v = 0.00): Rear tailgate & back of cargo
-  // Station B (v = 0.62): Front of flatbed/cargo & back wall of cab-over cabin
-  // Station C (v = 1.00): Front bumper/nose of cab-over cabin
-  const xA = -dir * Math.round(sideSpan * 0.35);
-  const yA = 0;
-  const xB = xA + dir * Math.round(sideSpan * 0.62);
-  const yB = -Math.round(noseLift * 0.62);
-  const xC = xA + dir * sideSpan;
-  const yC = -noseLift;
-
-  const seamRearX = xA + dir * halfW;
-  const seamMidX = xB + dir * halfW;
-  const seamFrontX = xC + dir * halfW;
+  const halfW = Math.max(2, Math.round(w * 0.5));
 
   ctx.save();
   ctx.translate(Math.round(screenX), Math.round(screenY));
-  if (Math.abs(tiltAngle) > 0.005) {
-    ctx.rotate(tiltAngle * (isKnocked ? 0.38 : 0.16));
+  const effectiveTilt =
+    tiltAngle * 0.45 + (roadCurve ? Math.max(-0.15, Math.min(0.15, roadCurve * 0.015)) : 0);
+  if (Math.abs(effectiveTilt) > 0.005) {
+    ctx.rotate(effectiveTilt * (isKnocked ? 0.75 : 1.0));
   }
 
-  const tireW = Math.max(2, Math.round(rearW * 0.2));
-  const tireH = Math.max(2, Math.round(h * 0.23));
-  const bedH = Math.round(h * 0.34);
-  const bedBot = -Math.round(tireH * 0.72);
-  const bedTop = bedBot - bedH;
-  const cargoH = Math.round(h * 0.26);
-  const cargoTop = bedTop - cargoH;
-  const cabTop = -h;
-  const cabH = bedTop - cabTop;
-
-  // 1. Ground shadow footprint under all 3 stations
+  // 1. Ground shadow footprint - clean dark rectangular shadow, no stripe or wobble
   ctx.fillStyle = 'rgba(8, 2, 20, 0.65)';
-  if (absFrame === 0) {
-    ctx.fillRect(-halfW - 2, -Math.max(1, Math.round(h * 0.06)), rearW + 4, Math.max(2, Math.round(h * 0.1)));
-  } else {
-    truckQuad(
-      ctx,
-      'rgba(8, 2, 20, 0.65)',
-      xA - halfW - 2,
-      2,
-      xA + halfW + 2,
-      2,
-      xC + halfW + 2,
-      2 + yC,
-      xC - halfW - 2,
-      2 + yC,
-    );
-  }
+  ctx.fillRect(-halfW - 2, -Math.max(1, Math.round(h * 0.06)), w + 4, Math.max(2, Math.round(h * 0.1)));
 
-  // 2. Side wheels on the exposed flank (when turning: absFrame >= 1)
-  if (absFrame >= 1 && sideSpan >= 3) {
-    const sideWheelW = Math.max(2, Math.round(sideSpan * 0.26));
-    const rearSideWheelX =
-      xA + dir * (halfW + Math.round(sideSpan * 0.18)) - Math.floor(sideWheelW * 0.5);
-    const rearSideWheelY = -tireH + Math.round(yB * 0.28);
-    const frontSideWheelX =
-      xA + dir * (halfW + Math.round(sideSpan * 0.78)) - Math.floor(sideWheelW * 0.5);
-    const frontSideWheelY = -tireH + Math.round(yC * 0.82);
-
-    ctx.fillStyle = '#12091f';
-    ctx.fillRect(rearSideWheelX, rearSideWheelY, sideWheelW, tireH);
-    ctx.fillRect(frontSideWheelX, frontSideWheelY, sideWheelW, tireH);
-    if (w >= 14 && sideWheelW >= 3) {
-      ctx.fillStyle = '#e0fbfc';
-      ctx.fillRect(
-        rearSideWheelX + 1,
-        rearSideWheelY + Math.round(tireH * 0.25),
-        Math.max(1, sideWheelW - 2),
-        Math.max(1, Math.round(tireH * 0.45)),
-      );
-      ctx.fillRect(
-        frontSideWheelX + 1,
-        frontSideWheelY + Math.round(tireH * 0.25),
-        Math.max(1, sideWheelW - 2),
-        Math.max(1, Math.round(tireH * 0.45)),
-      );
-    }
-  }
-
-  // 3. Forward Cab-Over Driver Cabin (Station B v=0.62 to Station C v=1.00)
-  if (absFrame >= 1 && sideSpan >= 2) {
-    // 3a. Cab 3D Roof Top Quad connecting Station B roof to Station C roof
-    truckQuad(
-      ctx,
-      cabRoofColor,
-      xB - halfW,
-      cabTop + yB,
-      xB + halfW,
-      cabTop + yB,
-      xC + halfW,
-      cabTop + yC,
-      xC - halfW,
-      cabTop + yC,
-    );
-
-    // 3b. Cab Exposed Side Door & Pillar (from seamMidX at v=0.62 to seamFrontX at v=1.00)
-    truckQuad(
-      ctx,
-      cabSideColor,
-      seamMidX,
-      bedBot + yB,
-      seamFrontX,
-      bedBot + yC,
-      seamFrontX,
-      cabTop + yC,
-      seamMidX,
-      cabTop + yB,
-    );
-
-    // Side cab window + front amber corner blinker on the exposed cab side
-    if (w >= 12 && Math.abs(seamFrontX - seamMidX) >= 3) {
-      const winX1 = seamMidX + dir * Math.max(1, Math.round(Math.abs(seamFrontX - seamMidX) * 0.16));
-      const winX2 = seamFrontX - dir * Math.max(1, Math.round(Math.abs(seamFrontX - seamMidX) * 0.14));
-      const winTopB = cabTop + Math.round(cabH * 0.16) + yB;
-      const winTopC = cabTop + Math.round(cabH * 0.16) + yC;
-      const winBotB = cabTop + Math.round(cabH * 0.62) + yB;
-      const winBotC = cabTop + Math.round(cabH * 0.62) + yC;
-      truckQuad(ctx, '#1a0c33', winX1, winBotB, winX2, winBotC, winX2, winTopC, winX1, winTopB);
-
-      // Front amber headlight/blinker at the leading corner of the cab
-      ctx.fillStyle = '#ffd319';
-      ctx.fillRect(
-        dir > 0 ? seamFrontX - 2 : seamFrontX,
-        bedBot - Math.max(2, Math.round(bedH * 0.55)) + yC,
-        2,
-        Math.max(2, Math.round(bedH * 0.35)),
-      );
-    }
-  }
-
-  // 3c. Cab Rear Wall at Station B (centered at xB, yB — seamlessly joined to Cargo Front & Cab Side!)
-  ctx.fillStyle = cabColor;
-  ctx.fillRect(xB - halfW, cabTop + yB, halfW * 2, cabH + Math.round(bedH * 0.25));
-  if (w >= 12) {
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(
-      xB - halfW + 1,
-      cabTop + yB,
-      Math.max(1, halfW * 2 - 2),
-      Math.max(1, Math.round(h * 0.03)),
-    );
-  }
-
-  // Rear cab window + driver head silhouette at Station B
-  const winW = Math.round(halfW * 2 * 0.7);
-  const winH = Math.max(2, Math.round(cabH * 0.48));
-  const winX = xB - Math.round(winW * 0.5);
-  const winY = cabTop + yB + Math.round(cabH * 0.18);
-  ctx.fillStyle = '#1a0c33';
-  ctx.fillRect(winX, winY, winW, winH);
-  if (winW >= 6 && winH >= 4) {
-    const headS = Math.max(2, Math.round(winH * 0.55));
-    ctx.fillStyle = '#381a5c';
-    ctx.fillRect(
-      winX + winW - headS - Math.max(1, Math.round(winW * 0.12)),
-      winY + winH - headS,
-      headS,
-      headS,
-    );
-    ctx.fillStyle = '#05d9e8';
-    ctx.fillRect(winX + 1, winY + 1, Math.max(1, Math.round(winW * 0.25)), Math.max(1, winH - 2));
-  }
-
-  // 4. 3D Cargo Box (spanning Station A v=0.00 to Station B v=0.62, flush with the Cab Rear Wall & Side!)
-  const cargoHalfW = halfW;
-  if (absFrame >= 1 && sideSpan >= 2) {
-    // 4a. Cargo 3D Top Face connecting Station A top to Station B top (gives true 3D depth!)
-    truckQuad(
-      ctx,
-      cargoTopColor,
-      xA - cargoHalfW,
-      cargoTop + yA,
-      xA + cargoHalfW,
-      cargoTop + yA,
-      xB + cargoHalfW,
-      cargoTop + yB,
-      xB - cargoHalfW,
-      cargoTop + yB,
-    );
-
-    // 4b. Cargo 3D Exposed Side Face connecting Station A side to Station B cab back
-    truckQuad(
-      ctx,
-      cargoSideColor,
-      seamRearX,
-      bedTop + yA,
-      seamMidX,
-      bedTop + yB,
-      seamMidX,
-      cargoTop + yB,
-      seamRearX,
-      cargoTop + yA,
-    );
-
-    // Side-face cargo detail stripe so the 3D depth reads clearly
-    if (w >= 14 && cargoH >= 4) {
-      const stripeY1 = cargoTop + Math.round(cargoH * 0.42);
-      const stripeY2 = cargoTop + Math.round(cargoH * 0.62);
-      truckQuad(
-        ctx,
-        v === 2 ? '#fff3b0' : '#140624',
-        seamRearX,
-        stripeY2 + yA,
-        seamMidX,
-        stripeY2 + yB,
-        seamMidX,
-        stripeY1 + yB,
-        seamRearX,
-        stripeY1 + yA,
-      );
-    }
-  }
-
-  // 4c. Cargo Rear Face at Station A (centered at xA, yA)
-  const cargoW = cargoHalfW * 2;
-  const cargoX = xA - cargoHalfW;
-  const cargoY = cargoTop + yA;
-  ctx.fillStyle = cargoColor;
-  ctx.fillRect(cargoX, cargoY, cargoW, cargoH);
-
-  if (w >= 14 && cargoH >= 4) {
-    if (v === 0) {
-      // Variant 0: Stacked Melon Soda bottle crates with neon green bottle caps
-      ctx.fillStyle = '#0d0221';
-      ctx.fillRect(
-        cargoX,
-        cargoY + Math.round(cargoH * 0.48),
-        cargoW,
-        Math.max(1, Math.round(cargoH * 0.12)),
-      );
-      ctx.fillStyle = '#00f59b';
-      const step = Math.max(2, Math.round(cargoW * 0.22));
-      for (let bx = cargoX + 2; bx < cargoX + cargoW - 2; bx += step) {
-        const capW = Math.max(1, Math.min(step - 1, cargoX + cargoW - 2 - bx));
-        ctx.fillRect(
-          bx,
-          cargoY - Math.max(1, Math.round(cargoH * 0.14)),
-          capW,
-          Math.max(1, Math.round(cargoH * 0.18)),
-        );
-      }
-    } else if (v === 1) {
-      // Variant 1: Retro synth boombox / speaker cabinet stack
-      ctx.fillStyle = '#1a0933';
-      const spkR = Math.max(2, Math.round(cargoH * 0.55));
-      ctx.fillRect(cargoX + Math.round(cargoW * 0.14), cargoY + Math.round(cargoH * 0.2), spkR, spkR);
-      ctx.fillRect(
-        cargoX + cargoW - Math.round(cargoW * 0.14) - spkR,
-        cargoY + Math.round(cargoH * 0.2),
-        spkR,
-        spkR,
-      );
-      ctx.fillStyle = '#ff2a6d';
-      ctx.fillRect(
-        xA - Math.max(1, Math.round(cargoW * 0.12)),
-        cargoY + Math.round(cargoH * 0.25),
-        Math.max(2, Math.round(cargoW * 0.24)),
-        Math.max(2, Math.round(cargoH * 0.45)),
-      );
-    } else {
-      // Variant 2: Kissaten / Fujiwara striped canvas tarpaulin canopy
-      ctx.fillStyle = '#140624';
-      ctx.fillRect(
-        cargoX,
-        cargoY + Math.round(cargoH * 0.36),
-        cargoW,
-        Math.max(1, Math.round(cargoH * 0.26)),
-      );
-      ctx.fillStyle = '#fff3b0';
-      ctx.fillRect(
-        cargoX + Math.round(cargoW * 0.2),
-        cargoY + Math.round(cargoH * 0.42),
-        Math.round(cargoW * 0.6),
-        Math.max(1, Math.round(cargoH * 0.12)),
-      );
-    }
-  }
-
-  // 5. Flatbed Drop-Side Panel (Station A v=0.00 to Station B v=0.62)
-  if (absFrame >= 1 && sideSpan >= 2) {
-    truckQuad(
-      ctx,
-      bedSideColor,
-      seamRearX,
-      bedBot + yA,
-      seamMidX,
-      bedBot + yB,
-      seamMidX,
-      bedTop + yB,
-      seamRearX,
-      bedTop + yA,
-    );
-    // White top rim along flatbed side panel
-    const rimH = Math.max(1, Math.round(bedH * 0.1));
-    truckQuad(
-      ctx,
-      '#ffffff',
-      seamRearX,
-      bedTop + rimH + yA,
-      seamMidX,
-      bedTop + rimH + yB,
-      seamMidX,
-      bedTop + yB,
-      seamRearX,
-      bedTop + yA,
-    );
-  }
-
-  // 6. Rear Tires & Mudflaps at Station A (v=0.00)
-  const leftTireX = xA + Math.round(-halfW * 0.94);
-  const rightTireX = xA + Math.round(halfW * 0.94 - tireW);
+  // 2. Rear tires & mudflaps
+  const tireW = Math.max(2, Math.round(w * 0.2));
+  const tireH = Math.max(2, Math.round(h * 0.23));
+  const leftTireX = Math.round(-halfW * 0.94);
+  const rightTireX = Math.round(halfW * 0.94 - tireW);
   ctx.fillStyle = '#12091f';
   ctx.fillRect(leftTireX, -tireH, tireW, tireH);
   ctx.fillRect(rightTireX, -tireH, tireW, tireH);
 
+  // Mudflap brackets & white tire tread highlights
   if (w >= 14) {
     ctx.fillStyle = '#241138';
     ctx.fillRect(
@@ -940,99 +620,118 @@ export function drawKeiTruck(
       Math.max(1, Math.round(tireH * 0.28)),
     );
     ctx.fillStyle = '#f6e7ff';
-    ctx.fillRect(
-      leftTireX,
-      -Math.max(2, Math.round(tireH * 0.28)),
-      tireW,
-      Math.max(1, Math.round(tireH * 0.14)),
-    );
-    ctx.fillRect(
-      rightTireX,
-      -Math.max(2, Math.round(tireH * 0.28)),
-      tireW,
-      Math.max(1, Math.round(tireH * 0.14)),
-    );
+    ctx.fillRect(leftTireX, -Math.max(2, Math.round(tireH * 0.28)), tireW, Math.max(1, Math.round(tireH * 0.14)));
+    ctx.fillRect(rightTireX, -Math.max(2, Math.round(tireH * 0.28)), tireW, Math.max(1, Math.round(tireH * 0.14)));
   }
 
-  // 7. Flatbed Corrugated Rear Tailgate at Station A (v=0.00, flush with seamRearX!)
+  // 3. Forward cab-over driver cabin
+  const cabW = Math.round(w * 0.88);
+  const cabH = Math.round(h * 0.44);
+  const cabTop = -h;
+  const cabLeft = -Math.round(cabW * 0.5);
+  ctx.fillStyle = cabColor;
+  ctx.fillRect(cabLeft, cabTop, cabW, cabH);
+
+  // Roof highlight & rack rail
+  if (w >= 12) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(cabLeft + 1, cabTop, cabW - 2, Math.max(1, Math.round(h * 0.03)));
+  }
+
+  // Rear cab window + driver head silhouette
+  const winW = Math.round(cabW * 0.68);
+  const winH = Math.round(cabH * 0.46);
+  const winX = -Math.round(winW * 0.5);
+  const winY = cabTop + Math.round(cabH * 0.16);
+  ctx.fillStyle = '#1a0c33';
+  ctx.fillRect(winX, winY, winW, winH);
+  if (winW >= 6 && winH >= 4) {
+    // Driver silhouette on right-hand JDM side + cyan glass glare on left
+    const headS = Math.max(2, Math.round(winH * 0.55));
+    ctx.fillStyle = '#381a5c';
+    ctx.fillRect(winX + winW - headS - Math.max(1, Math.round(winW * 0.12)), winY + winH - headS, headS, headS);
+    ctx.fillStyle = '#05d9e8';
+    ctx.fillRect(winX + 1, winY + 1, Math.max(1, Math.round(winW * 0.25)), Math.max(1, winH - 2));
+  }
+
+  // 4. Variant-specific pixel-art cargo in the flatbed
+  const cargoW = Math.round(w * 0.82);
+  const cargoH = Math.round(h * 0.27);
+  const cargoX = -Math.round(cargoW * 0.5);
+  const cargoY = -Math.round(h * 0.65);
+  ctx.fillStyle = cargoColor;
+  ctx.fillRect(cargoX, cargoY, cargoW, cargoH);
+
+  if (w >= 14 && cargoH >= 4) {
+    if (v === 0) {
+      // Variant 0: Stacked Melon Soda bottle crates with neon green bottle caps
+      ctx.fillStyle = '#0d0221';
+      ctx.fillRect(cargoX, cargoY + Math.round(cargoH * 0.48), cargoW, Math.max(1, Math.round(cargoH * 0.12)));
+      ctx.fillStyle = '#00f59b';
+      const step = Math.max(2, Math.round(cargoW * 0.22));
+      for (let bx = cargoX + 2; bx < cargoX + cargoW - 2; bx += step) {
+        ctx.fillRect(bx, cargoY - Math.max(1, Math.round(cargoH * 0.16)), Math.max(1, step - 1), Math.max(1, Math.round(cargoH * 0.2)));
+      }
+    } else if (v === 1) {
+      // Variant 1: Retro synth boombox / speaker cabinet stack
+      ctx.fillStyle = '#1a0933';
+      const spkR = Math.max(2, Math.round(cargoH * 0.55));
+      ctx.fillRect(cargoX + Math.round(cargoW * 0.14), cargoY + Math.round(cargoH * 0.2), spkR, spkR);
+      ctx.fillRect(cargoX + cargoW - Math.round(cargoW * 0.14) - spkR, cargoY + Math.round(cargoH * 0.2), spkR, spkR);
+      ctx.fillStyle = '#ff2a6d';
+      ctx.fillRect(-Math.max(1, Math.round(cargoW * 0.12)), cargoY + Math.round(cargoH * 0.25), Math.max(2, Math.round(cargoW * 0.24)), Math.max(2, Math.round(cargoH * 0.45)));
+    } else {
+      // Variant 2: Kissaten / Fujiwara striped canvas tarpaulin canopy
+      ctx.fillStyle = '#140624';
+      ctx.fillRect(cargoX, cargoY + Math.round(cargoH * 0.36), cargoW, Math.max(1, Math.round(cargoH * 0.26)));
+      ctx.fillStyle = '#fff3b0';
+      ctx.fillRect(cargoX + Math.round(cargoW * 0.2), cargoY + Math.round(cargoH * 0.42), Math.round(cargoW * 0.6), Math.max(1, Math.round(cargoH * 0.12)));
+    }
+  }
+
+  // 5. Flatbed corrugated tailgate & side latches
+  const bedH = Math.round(h * 0.34);
+  const bedY = Math.round(-tireH * 0.75 - bedH);
   ctx.fillStyle = bedColor;
-  ctx.fillRect(xA - halfW, bedTop, halfW * 2, bedH);
+  ctx.fillRect(-halfW, bedY, w, bedH);
 
+  // Top tailgate rim & corrugated horizontal ribs
   ctx.fillStyle = '#ffffff';
-  ctx.fillRect(xA - halfW, bedTop, halfW * 2, Math.max(1, Math.round(bedH * 0.09)));
+  ctx.fillRect(-halfW, bedY, w, Math.max(1, Math.round(bedH * 0.09)));
   ctx.fillStyle = '#1a0f2b';
-  ctx.fillRect(
-    xA + Math.round(-halfW * 0.92),
-    bedTop + Math.round(bedH * 0.35),
-    Math.round(halfW * 2 * 0.92),
-    Math.max(1, Math.round(bedH * 0.12)),
-  );
-  ctx.fillRect(
-    xA + Math.round(-halfW * 0.92),
-    bedTop + Math.round(bedH * 0.58),
-    Math.round(halfW * 2 * 0.92),
-    Math.max(1, Math.round(bedH * 0.12)),
-  );
+  ctx.fillRect(Math.round(-halfW * 0.92), bedY + Math.round(bedH * 0.35), Math.round(w * 0.92), Math.max(1, Math.round(bedH * 0.12)));
+  ctx.fillRect(Math.round(-halfW * 0.92), bedY + Math.round(bedH * 0.58), Math.round(w * 0.92), Math.max(1, Math.round(bedH * 0.12)));
 
-  // 8. Rear Bumper, JDM Yellow Kei-Plate & Tail/Hazard Lights at Station A
-  const tailW = Math.max(2, Math.round(halfW * 2 * 0.22));
+  // 6. Rear bumper, JDM yellow kei-plate & tail/hazard lights
+  const tailW = Math.max(2, Math.round(w * 0.22));
   const tailH = Math.max(2, Math.round(bedH * 0.26));
-  const tailY = bedBot - tailH - Math.max(1, Math.round(bedH * 0.08));
+  const tailY = bedY + bedH - tailH - Math.max(1, Math.round(bedH * 0.08));
   ctx.fillStyle = isKnocked ? '#fff3b0' : '#ff2a6d';
-  ctx.fillRect(xA + Math.round(-halfW * 0.9), tailY, tailW, tailH);
-  ctx.fillRect(xA + Math.round(halfW * 0.9 - tailW), tailY, tailW, tailH);
+  ctx.fillRect(Math.round(-halfW * 0.9), tailY, tailW, tailH);
+  ctx.fillRect(Math.round(halfW * 0.9 - tailW), tailY, tailW, tailH);
 
+  // Inner amber turn-signal pixel on tail lamps
   if (tailW >= 4) {
     ctx.fillStyle = '#ffd319';
     const sigW = Math.max(1, Math.round(tailW * 0.35));
-    ctx.fillRect(xA + Math.round(-halfW * 0.9), tailY, sigW, tailH);
-    ctx.fillRect(xA + Math.round(halfW * 0.9 - sigW), tailY, sigW, tailH);
+    ctx.fillRect(Math.round(-halfW * 0.9), tailY, sigW, tailH);
+    ctx.fillRect(Math.round(halfW * 0.9 - sigW), tailY, sigW, tailH);
   }
 
-  const plateW = Math.max(2, Math.round(halfW * 2 * 0.18));
+  // Center yellow JDM kei-plate
+  const plateW = Math.max(2, Math.round(w * 0.18));
   ctx.fillStyle = '#ffd319';
-  ctx.fillRect(xA - Math.round(plateW * 0.5), tailY, plateW, tailH);
+  ctx.fillRect(-Math.round(plateW * 0.5), tailY, plateW, tailH);
   if (plateW >= 5 && tailH >= 3) {
     ctx.fillStyle = '#12091f';
-    ctx.fillRect(
-      xA - Math.round(plateW * 0.3),
-      tailY + 1,
-      Math.max(2, Math.round(plateW * 0.6)),
-      Math.max(1, tailH - 2),
-    );
+    ctx.fillRect(-Math.round(plateW * 0.3), tailY + 1, Math.max(2, Math.round(plateW * 0.6)), Math.max(1, tailH - 2));
   }
 
+  // Knocked-off hazard flash & pixel impact burst icon above cab
   if (isKnocked && w >= 10) {
     ctx.fillStyle = '#ffd319';
-    ctx.fillRect(
-      xB - 2,
-      cabTop + yB - Math.max(4, Math.round(h * 0.18)),
-      4,
-      Math.max(3, Math.round(h * 0.12)),
-    );
+    ctx.fillRect(-2, cabTop - Math.max(4, Math.round(h * 0.18)), 4, Math.max(3, Math.round(h * 0.12)));
   }
 
   ctx.restore();
-}
-
-function truckQuad(
-  ctx: CanvasRenderingContext2D,
-  color: string,
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  x3: number,
-  y3: number,
-  x4: number,
-  y4: number,
-): void {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
-  ctx.lineTo(x3, y3);
-  ctx.lineTo(x4, y4);
-  ctx.closePath();
-  ctx.fill();
 }
