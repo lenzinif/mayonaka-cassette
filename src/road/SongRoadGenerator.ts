@@ -576,8 +576,10 @@ function populateChunkProps(
 
   for (const rule of chunk.props) {
     const stepBeats = Math.max(1, Math.round(rule.everyBeats));
-    const baseOffset =
-      rule.offset ?? (rule.kind === 'billboard' ? 1.72 : rule.kind === 'palm' ? 1.35 : 1.22);
+    const baseOffset = Math.max(
+      1.4,
+      rule.offset ?? (rule.kind === 'billboard' ? 1.85 : rule.kind === 'palm' ? 1.48 : 1.42),
+    );
 
     let altToggle = 0;
     for (let beat = 0; beat < totalBeats; beat += stepBeats) {

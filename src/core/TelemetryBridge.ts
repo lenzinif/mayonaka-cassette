@@ -28,6 +28,12 @@ export class TelemetryBridge<Snapshot, Event> {
     for (const listener of this.snapshotListeners) listener();
   }
 
+  /** Immediately forces a snapshot build and notification, bypassing the throttle interval. */
+  publish(build: () => Snapshot): void {
+    this.snapshot = build();
+    for (const listener of this.snapshotListeners) listener();
+  }
+
   emit(event: Event): void {
     for (const listener of this.eventListeners) listener(event);
   }

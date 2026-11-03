@@ -252,8 +252,7 @@ export class ParticleSystem {
   }
 
   /**
-   * Emits a celebratory burst of exhaust flames and neon sparks on a clean drift exit
-   * or a beat-synced gear shift (`PERFECT` / `GOOD`).
+   * Emits a subtle puff of tire smoke on a clean drift exit (exhaust flames removed).
    */
   emitBoostOrShiftBurst(
     car: PlayerCar,
@@ -261,38 +260,30 @@ export class ParticleSystem {
     canvasHeight: number,
     tier: 'PERFECT' | 'GOOD' | 'DRIFT_EXIT',
   ): void {
+    if (tier !== 'DRIFT_EXIT') return;
     const rig = computePlayerCarRearRig(car, canvasWidth, canvasHeight, this.rearRigScratch);
     const carBaseY = rig.baseY;
-    const count = tier === 'PERFECT' ? 16 : tier === 'DRIFT_EXIT' ? 14 : 8;
 
-    for (let i = 0; i < count; i++) {
+    for (let i = 0; i < 6; i++) {
       const p = this.allocate();
-      const exhaustSide = i % 2 === 0 ? -1 : 1;
-      const exhaustAnchorX = exhaustSide < 0 ? rig.leftExhaustX : rig.rightExhaustX;
-      const startX = exhaustAnchorX + this.nextRange(-2, 2);
-      const startY = carBaseY - 6 + this.nextRange(-1, 2);
+      const tireSide = i % 2 === 0 ? -1 : 1;
+      const tireAnchorX = tireSide < 0 ? rig.leftTireX : rig.rightTireX;
+      const startX = tireAnchorX + this.nextRange(-3, 3);
+      const startY = carBaseY - 2 + this.nextRange(-1, 2);
       p.active = true;
-      p.kind = i % 3 === 0 ? 'spark' : 'flame';
+      p.kind = 'smoke';
       p.prevX = startX;
       p.prevY = startY;
       p.x = startX;
       p.y = startY;
-      p.vx = exhaustSide * this.nextRange(6, 42) + this.nextRange(-18, 18);
-      p.vy = this.nextRange(12, 54);
-      p.size = p.kind === 'flame' ? 3 : 2;
+      p.vx = tireSide * this.nextRange(10, 32) + this.nextRange(-12, 12);
+      p.vy = this.nextRange(-22, -6);
+      p.size = 3;
       p.life = 0;
-      p.maxLife = this.nextRange(0.16, 0.32);
-      p.gravity = p.kind === 'spark' ? 120 : -30;
-      if (tier === 'PERFECT') {
-        p.color = i % 2 === 0 ? '#00f59b' : '#ffd319';
-        p.secondaryColor = '#ffffff';
-      } else if (tier === 'DRIFT_EXIT') {
-        p.color = i % 2 === 0 ? '#05d9e8' : '#ff2a6d';
-        p.secondaryColor = '#fff3b0';
-      } else {
-        p.color = '#05d9e8';
-        p.secondaryColor = '#d8f8ff';
-      }
+      p.maxLife = this.nextRange(0.18, 0.3);
+      p.gravity = -16;
+      p.color = '#05d9e8';
+      p.secondaryColor = '#e0fbfc';
     }
   }
 

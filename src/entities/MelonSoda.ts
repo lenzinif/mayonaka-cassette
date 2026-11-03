@@ -253,15 +253,23 @@ export class MelonSoda {
     this.prevLonAccel = motion.longitudinalAccel;
     this.prevVertAccel = motion.verticalAccel;
 
+    // Asymmetric jerk: Unloading (releasing steer towards 0 / easing out of a turn)
+    // is a relaxing recovery, not a violent impact. Heavily attenuate unloading jerk
+    // so corner exit glides the liquid smoothly to rest without whipping over the opposite rim.
+    const isUnloadingLat = motion.lateralAccel * jLat < 0;
+    const effectiveJLat = isUnloadingLat ? jLat * 0.25 : jLat;
+
     const jerkBlend = 1 - Math.exp(-28 * dt);
-    const clampedJLat = this.graceTimer > 0 ? 0 : Math.max(-40, Math.min(40, jLat));
-    const clampedJLon = this.graceTimer > 0 ? 0 : Math.max(-40, Math.min(40, jLon));
+    const clampedJLat = this.graceTimer > 0 ? 0 : Math.max(-35, Math.min(35, effectiveJLat));
+    const clampedJLon = this.graceTimer > 0 ? 0 : Math.max(-35, Math.min(35, jLon));
     this.smoothedJerkLat += (clampedJLat - this.smoothedJerkLat) * jerkBlend;
     this.smoothedJerkLon += (clampedJLon - this.smoothedJerkLon) * jerkBlend;
 
-    // Off-road kerb & grass vibration excites both slosh and vertical heave
+    // Off-road kerb & grass vibration excites both slosh and vertical heave.
+    // Scaled realistically so grazing the rumble strip creates a palpable buzz
+    // without instantly blowing the cup rim.
     const offRoadWave = motion.isOffRoad
-      ? Math.sin(this.bubblePhase * 7.5) * (0.4 + motion.speedRatio * 1.4) * 14
+      ? Math.sin(this.bubblePhase * 7.5) * (0.2 + motion.speedRatio * 0.8) * 6.5
       : 0;
 
     // 2. Mode 1: Fundamental pendulum slosh (driven by BOTH sustained G-force AND jerk!)
@@ -271,9 +279,9 @@ export class MelonSoda {
     const g = tuning.sodaSensitivity;
 
     const sustainedDrive =
-      (motion.lateralAccel * 7.2 + motion.longitudinalAccel * 4.5) * g;
+      (motion.lateralAccel * 6.0 + motion.longitudinalAccel * 4.2) * g;
     const jerkDrive =
-      (this.smoothedJerkLat * 0.65 + this.smoothedJerkLon * 0.42 + offRoadWave) * g;
+      (this.smoothedJerkLat * 0.55 + this.smoothedJerkLon * 0.38 + offRoadWave) * g;
 
     const thetaAccel = -k1 * this.theta - c1 * this.thetaVel + sustainedDrive + jerkDrive;
     this.thetaVel += thetaAccel * dt;
@@ -281,10 +289,13 @@ export class MelonSoda {
     this.theta = Math.max(-1.5, Math.min(1.5, this.theta));
 
     // 3. Mode 2: Second-harmonic S-wave crest (faster surface curl driven by jerk + mode coupling)
-    const k2 = k1 * 2.6;
-    const c2 = c1 * 1.15;
+    const k2 = k1 * 2.5;
+    const c2 = c1 * 1.35;
+    // Damped mode coupling: pendulum return-to-center does NOT curl waves over the opposite rim.
+    const thetaCoupling =
+      Math.abs(this.theta) > 0.4 ? -this.thetaVel * 0.85 : -this.thetaVel * 0.35;
     const crestDrive =
-      (this.smoothedJerkLat * 0.85 - this.thetaVel * 3.2 + offRoadWave * 1.2) * g;
+      (this.smoothedJerkLat * 0.65 + thetaCoupling + offRoadWave * 0.7) * g;
     const crestAccel = -k2 * this.crestWave - c2 * this.crestVel + crestDrive;
     this.crestVel += crestAccel * dt;
     this.crestWave += this.crestVel * dt;

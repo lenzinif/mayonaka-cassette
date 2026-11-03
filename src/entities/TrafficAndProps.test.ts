@@ -86,7 +86,7 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
       side: -1,
     });
     expect(car.speed).toBeGreaterThan(tuning.maxSpeed * 0.2);
-    expect(car.bumpVx).toBeLessThan(-2.5);
+    expect(car.bumpVx).toBeCloseTo(-tuning.propBounceImpulse, 1);
   });
 
   it('translates visible trucks by deltaZ without pop-in during an A2 horizon stitch', () => {

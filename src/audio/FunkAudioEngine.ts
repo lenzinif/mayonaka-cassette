@@ -277,6 +277,7 @@ export class FunkAudioEngine {
   private isSynthLoopBuffer = true;
 
   private isPlaying = false;
+  private isPaused = false;
   private currentCutoffHz = 2400;
   private currentPlaybackRate = 1.0;
 
@@ -343,6 +344,42 @@ export class FunkAudioEngine {
     const clamped = Math.max(0, Math.min(1, volume));
     if (this.masterGain && this.ctx) {
       this.masterGain.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.02);
+    }
+  }
+
+  get paused(): boolean {
+    return this.isPaused;
+  }
+
+  /**
+   * Freezes audio playback, suspends the Web Audio context, and halts BeatClock advancement
+   * (AGENTS.md §5 M8 tab-visibility & pause handling).
+   */
+  async pause(): Promise<void> {
+    if (this.isPaused) return;
+    this.isPaused = true;
+    if (this.ctx && this.ctx.state === 'running') {
+      try {
+        await this.ctx.suspend();
+      } catch {
+        // Ignore suspend failure in test/unsupported environments
+      }
+    }
+  }
+
+  /**
+   * Resumes Web Audio context and resynchronizes the clock without time drift.
+   */
+  async resume(): Promise<void> {
+    if (!this.isPaused) return;
+    this.isPaused = false;
+    if (this.ctx && this.ctx.state === 'suspended') {
+      try {
+        await this.ctx.resume();
+        this.lastAudioTimeSec = this.ctx.currentTime;
+      } catch {
+        // Ignore resume failure
+      }
     }
   }
 
@@ -543,7 +580,10 @@ export class FunkAudioEngine {
    * Plays a synthesized retro thud and triggers a progressive turntable pitch sag on obstacle/traffic bump.
    */
   triggerCollisionSound(obstacle: 'prop' | 'traffic'): void {
-    this.triggerPitchDip(obstacle === 'traffic' ? 0.13 : 0.1, obstacle === 'traffic' ? 0.48 : 0.36);
+    this.triggerPitchDip(
+      obstacle === 'traffic' ? 0.08 : 0.025,
+      obstacle === 'traffic' ? 0.35 : 0.18,
+    );
 
     if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
     const now = this.ctx.currentTime;
@@ -551,16 +591,16 @@ export class FunkAudioEngine {
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     osc.type = 'triangle';
-    osc.frequency.setValueAtTime(obstacle === 'traffic' ? 135 : 110, now);
-    osc.frequency.exponentialRampToValueAtTime(38, now + 0.14);
+    osc.frequency.setValueAtTime(obstacle === 'traffic' ? 120 : 90, now);
+    osc.frequency.exponentialRampToValueAtTime(36, now + 0.12);
 
-    gain.gain.setValueAtTime(0.22, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+    gain.gain.setValueAtTime(obstacle === 'traffic' ? 0.12 : 0.07, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
 
     osc.connect(gain);
     gain.connect(this.masterGain);
     osc.start(now);
-    osc.stop(now + 0.16);
+    osc.stop(now + 0.14);
   }
 
   /**
@@ -569,6 +609,15 @@ export class FunkAudioEngine {
    * so off-road excursions and bumps feel organic and analog rather than abrupt.
    */
   update(dt: number, driving: DrivingAudioParams): Readonly<BeatClockState> {
+    if (this.isPaused) {
+      if (this.ctx && this.ctx.state === 'running') {
+        this.lastAudioTimeSec = this.ctx.currentTime;
+      }
+      const latencySec = this.getOutputLatencySec();
+      const audibleTrackSec = Math.max(0, this.virtualTrackSec - latencySec);
+      return this.beatClock.sample(audibleTrackSec);
+    }
+
     if (this.crossfadeRemainingSec > 0) {
       this.crossfadeRemainingSec = Math.max(0, this.crossfadeRemainingSec - dt);
       if (this.crossfadeRemainingSec === 0) {
@@ -577,11 +626,8 @@ export class FunkAudioEngine {
     }
 
     // 1. Progressive off-road envelope (smooth ramp-in as car enters grass, smooth release back to road)
-    const rawOffRoadTarget = driving.isOffRoad
-      ? driving.offRoadDepth !== undefined
-        ? Math.max(0.25, Math.min(1, driving.offRoadDepth))
-        : 1.0
-      : 0;
+    const depthProgress = Math.max(0, Math.min(1, driving.offRoadDepth ?? 1));
+    const rawOffRoadTarget = driving.isOffRoad ? depthProgress : 0;
     const offRoadRate = rawOffRoadTarget > this.offRoadEnvelope ? 2.6 : 2.0;
     this.offRoadEnvelope +=
       (rawOffRoadTarget - this.offRoadEnvelope) * (1 - Math.exp(-offRoadRate * dt));
@@ -644,7 +690,7 @@ export class FunkAudioEngine {
     const maxHz = tuning.audioFilterMaxHz;
     const speedCurve = Math.pow(Math.max(0, Math.min(1, driving.speedRatio)), 1.35);
     const driftBoost = driving.isDrifting ? 0.24 : 0;
-    const offRoadMuffle = -0.38 * this.offRoadEnvelope;
+    const offRoadMuffle = -0.32 * this.offRoadEnvelope;
     const impactMuffle = -this.filterMuffleEnvelope;
     const introMuffle = clockState.sectionRole === 'intro' ? -0.18 : 0;
     const blip = this.filterBlipBoost * 0.3;
@@ -653,7 +699,16 @@ export class FunkAudioEngine {
       0,
       Math.min(1, speedCurve + driftBoost + offRoadMuffle + impactMuffle + introMuffle + blip),
     );
-    const targetCutoff = minHz * Math.pow(maxHz / Math.max(100, minHz), openness);
+    let targetCutoff = minHz * Math.pow(maxHz / Math.max(100, minHz), openness);
+
+    // Apply musical off-road / impact floor cap: ensure the filter remains stylish and never drops into brutal underwater sludge
+    if (this.offRoadEnvelope > 0.001 || this.filterMuffleEnvelope > 0.001) {
+      const activeFloor = Math.max(minHz, tuning.audioFilterOffRoadFloorHz);
+      const muffleIntensity = Math.max(this.offRoadEnvelope, this.filterMuffleEnvelope);
+      const dynamicFloor = minHz + (activeFloor - minHz) * muffleIntensity;
+      targetCutoff = Math.max(dynamicFloor, targetCutoff);
+    }
+
     this.currentCutoffHz +=
       (targetCutoff - this.currentCutoffHz) * (1 - Math.exp(-5.5 * dt));
 

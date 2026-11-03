@@ -97,4 +97,58 @@ describe('MelonSoda & Tofu Mode (M5)', () => {
     expect(soda.theta).toBe(0);
     expect(soda.droplets.some((d) => d.active)).toBe(false);
   });
+
+  it('gracefully handles high-speed corner exit and steering release without spilling (asymmetric unloading)', () => {
+    const soda = new MelonSoda();
+    soda.setActive(true);
+
+    // Warm-up grace period
+    for (let i = 0; i < 35; i++) {
+      soda.update(1 / 120, {
+        lateralAccel: 0,
+        longitudinalAccel: 0,
+        verticalAccel: 0,
+        isOffRoad: false,
+        speedRatio: 0.9,
+      });
+    }
+
+    let spills = 0;
+    // Sustained high-speed cornering (say holding A in a medium-sharp curve)
+    for (let i = 0; i < 120; i++) {
+      soda.update(
+        1 / 120,
+        {
+          lateralAccel: -0.65,
+          longitudinalAccel: 0.1,
+          verticalAccel: 0,
+          isOffRoad: false,
+          speedRatio: 0.95,
+        },
+        () => spills++,
+      );
+    }
+    expect(spills).toBe(0);
+    expect(soda.effectivePeakAngle).toBeLessThan(tuning.sodaSpillThreshold);
+
+    // Release steering to center (unloading back to 0)
+    for (let i = 0; i < 60; i++) {
+      // Lateral accel decays from -0.65 back to 0
+      const decel = -0.65 * Math.exp(-9 * (i / 120));
+      soda.update(
+        1 / 120,
+        {
+          lateralAccel: decel,
+          longitudinalAccel: 0.05,
+          verticalAccel: 0,
+          isOffRoad: false,
+          speedRatio: 0.95,
+        },
+        () => spills++,
+      );
+    }
+
+    expect(spills).toBe(0);
+    expect(soda.effectivePeakAngle).toBeLessThan(tuning.sodaSpillThreshold);
+  });
 });

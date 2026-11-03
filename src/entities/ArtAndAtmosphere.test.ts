@@ -168,43 +168,40 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     expect(mock.fillRectCalls).toBeGreaterThan(80);
   });
 
-  it('switches OutRun multi-angle 3/4 sprite frames for PlayerCar and KeiTruck when steering and drifting', () => {
+  it('switches OutRun 3-state 3/4 sprite frames (-2..+2) for PlayerCar and KeiTruck when steering and drifting', () => {
     const car = new PlayerCar();
     expect(car.spriteFrame).toBe(0);
     expect(getPlayerCarSpriteFrame(car)).toBe(0);
 
+    // Small steering adjustments stay on frame 0 (straight)
+    car.steer = 0.25;
+    car.yaw = 0.1;
+    expect(car.spriteFrame).toBe(0);
+
     const straightMock = createMockCanvasContext();
     drawPlayerCar(straightMock.ctx, car, 640, 360);
-    const straightRects = straightMock.fillRectCalls;
 
-    // Slight right turn -> frame +1; hard right turn -> frame +2
-    car.steer = 0.35;
-    car.yaw = 0.14;
+    // Light / normal cornering turn -> frame +1
+    car.steer = 0.9;
+    car.yaw = 0.38;
     expect(car.spriteFrame).toBe(1);
 
-    car.steer = 1;
-    car.yaw = 0.42;
-    expect(car.spriteFrame).toBe(2);
-
-    // Drift left -> immediately frame -3, then deep drift -> frame -4
+    // Drift left -> frame -2 (heavy turn / drift)
     car.driftDir = -1;
-    car.driftTime = 0.1;
+    car.driftTime = 0.2;
     car.steer = 0;
-    expect(car.spriteFrame).toBe(-3);
+    expect(car.spriteFrame).toBe(-2);
 
-    car.driftTime = 0.5;
-    expect(car.spriteFrame).toBe(-4);
-
-    // Rendering in drift frame draws additional 3/4 side flank wheels, mirror & marker details
+    // Rendering in drift frame draws additional 3/4 side flank quads and wheels
     const driftMock = createMockCanvasContext();
     drawPlayerCar(driftMock.ctx, car, 640, 360);
-    expect(driftMock.fillRectCalls).toBeGreaterThan(straightRects);
+    expect(driftMock.polygonFillCalls).toBeGreaterThan(straightMock.polygonFillCalls);
 
-    // KeiTruck discrete OutRun curve/turn sprite frames (-3..+3)
+    // KeiTruck discrete 3-state OutRun curve/turn sprite frames (-2..+2)
     expect(getKeiTruckSpriteFrame(0)).toBe(0);
-    expect(getKeiTruckSpriteFrame(0.14)).toBe(1);
-    expect(getKeiTruckSpriteFrame(-0.3)).toBe(-2);
-    expect(getKeiTruckSpriteFrame(0.55)).toBe(3);
+    expect(getKeiTruckSpriteFrame(0.1)).toBe(0); // small adjustment stays 0
+    expect(getKeiTruckSpriteFrame(0.28)).toBe(1);
+    expect(getKeiTruckSpriteFrame(-0.52)).toBe(-2);
 
     const truckStraightMock = createMockCanvasContext();
     drawKeiTruck(truckStraightMock.ctx, 320, 220, 0.04, 0, 0, false, 0);

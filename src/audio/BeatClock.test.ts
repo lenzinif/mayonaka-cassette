@@ -67,10 +67,11 @@ describe('BeatClock & FunkAudioEngine', () => {
     const fastDriftCutoff = engine.cutoffHz;
     expect(fastDriftCutoff).toBeGreaterThan(slowCutoff * 4);
 
-    // Off-road drag dips playbackRate below 1.0
+    // Off-road drag dips playbackRate below 1.0 smoothly without brutal detune
     for (let i = 0; i < 30; i++) {
       engine.update(1 / 60, { speedRatio: 0.5, isDrifting: false, isOffRoad: true });
     }
-    expect(engine.playbackRate).toBeLessThan(0.95);
+    expect(engine.playbackRate).toBeLessThan(0.99);
+    expect(engine.playbackRate).toBeGreaterThan(0.96);
   });
 });

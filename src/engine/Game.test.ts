@@ -344,4 +344,85 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     // Car should have reached the stage fork or completed the stage, and DJ should NOT be stuck in holdOutroLoop
     expect(audio.isOutroLooping).toBe(false);
   });
+
+  it('pauses and resumes simulation, audio clock, and renders pause overlay (M8 Polish)', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const audio = new FunkAudioEngine();
+    const library = new TrackLibrary();
+    const game = new Game({ input, bridge, audio, library });
+
+    const pauseEvents: boolean[] = [];
+    bridge.onEvent((ev) => {
+      if (ev.type === 'pauseChanged') {
+        pauseEvents.push(ev.paused);
+      }
+    });
+
+    expect(game.paused).toBe(false);
+
+    // Initial tick to publish first telemetry snapshot
+    game.update(1 / 60);
+    expect(bridge.getSnapshot()?.isPaused).toBe(false);
+
+    // 1. Trigger Pause via togglePause() or action 'pause'
+    input.press('pause');
+    game.update(1 / 60);
+
+    expect(game.paused).toBe(true);
+    expect(pauseEvents).toEqual([true]);
+    expect(bridge.getSnapshot()?.isPaused).toBe(true);
+
+    const posAtPause = game.position;
+    const speedAtPause = game.car.speed;
+
+    // 2. Advancing update while paused should NOT advance simulation
+    input.setDown('accelerate', true);
+    game.update(0.5);
+    expect(game.position).toBe(posAtPause);
+    expect(game.car.speed).toBe(speedAtPause);
+
+    // 3. Resume via unpause press or setPaused(false)
+    input.press('accelerate');
+    game.update(1 / 60);
+    expect(game.paused).toBe(false);
+    expect(pauseEvents).toEqual([true, false]);
+    expect(bridge.getSnapshot()?.isPaused).toBe(false);
+
+    // 4. Render pause overlay when paused
+    game.setPaused(true);
+    const fillRectCalls: unknown[][] = [];
+    const fillTextCalls: unknown[][] = [];
+    const mockCtx = {
+      canvas: { width: 640, height: 360 },
+      save: () => {},
+      restore: () => {},
+      fillRect: (...args: unknown[]) => fillRectCalls.push(args),
+      strokeRect: () => {},
+      fillText: (...args: unknown[]) => fillTextCalls.push(args),
+      beginPath: () => {},
+      closePath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      quadraticCurveTo: () => {},
+      arc: () => {},
+      ellipse: () => {},
+      rect: () => {},
+      clip: () => {},
+      fill: () => {},
+      stroke: () => {},
+      translate: () => {},
+      rotate: () => {},
+      scale: () => {},
+      setTransform: () => {},
+      setLineDash: () => {},
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      drawImage: () => {},
+    } as unknown as CanvasRenderingContext2D;
+
+    game.render(mockCtx, 1, 60);
+    expect(fillRectCalls.length).toBeGreaterThan(0);
+    expect(fillTextCalls.some((c) => c[0] === 'PAUSED')).toBe(true);
+  });
 });

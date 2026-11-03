@@ -44,8 +44,21 @@ export function CanvasStage({ bridge, audio, library, onGameReady }: CanvasStage
     const unlockOnGesture = () => {
       void audio.unlock();
     };
+    const handleVisibilityChange = () => {
+      if (document.hidden || document.visibilityState === 'hidden') {
+        game.setPaused(true);
+      }
+    };
+    const handleCanvasClick = () => {
+      if (game.paused) {
+        game.setPaused(false);
+      }
+    };
+
     window.addEventListener('keydown', unlockOnGesture, { passive: true });
     window.addEventListener('pointerdown', unlockOnGesture, { passive: true });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    canvas.addEventListener('click', handleCanvasClick);
 
     loop.start();
     return () => {
@@ -53,6 +66,8 @@ export function CanvasStage({ bridge, audio, library, onGameReady }: CanvasStage
       input.dispose();
       window.removeEventListener('keydown', unlockOnGesture);
       window.removeEventListener('pointerdown', unlockOnGesture);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      canvas.removeEventListener('click', handleCanvasClick);
     };
   }, [bridge, audio, library]);
 

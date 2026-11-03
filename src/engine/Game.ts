@@ -131,11 +131,15 @@ export interface TelemetrySnapshot {
   forkProgress: number;
   forkLeftOption: ForkOptionInfo | null;
   forkRightOption: ForkOptionInfo | null;
+  // M8 Polish & Lifecycle telemetry
+  isPaused: boolean;
+  gamepadConnected: boolean;
 }
 
 export type GameEvent =
   | CarEvent
   | CollisionEvent
+  | { type: 'pauseChanged'; paused: boolean }
   | { type: 'lapCompleted'; lap: number; lapTime: number }
   | { type: 'sectionEntered'; role: SectionRole; barIndex: number }
   | { type: 'dropSync'; barIndex: number; deltaBeats: number }
@@ -234,6 +238,7 @@ export class Game {
   private readonly crossedDropBars = new Set<number>();
   private horizonStitchCooldown = 0;
 
+  private isPaused = false;
   private readonly input: InputSource;
   private readonly roadRenderer = new RoadRenderer();
   private readonly background = new Background();
@@ -245,6 +250,26 @@ export class Game {
     brake: false,
     drift: false,
   };
+
+  get paused(): boolean {
+    return this.isPaused;
+  }
+
+  setPaused(paused: boolean): void {
+    if (this.isPaused === paused) return;
+    this.isPaused = paused;
+    if (paused) {
+      void this.audio.pause();
+    } else {
+      void this.audio.resume();
+    }
+    this.bridge.publish?.(this.buildSnapshot);
+    this.bridge.emit({ type: 'pauseChanged', paused });
+  }
+
+  togglePause(): void {
+    this.setPaused(!this.isPaused);
+  }
 
   private readonly drivingAudioParams: DrivingAudioParams = {
     speedRatio: 0,
@@ -346,26 +371,32 @@ export class Game {
   }
 
   update = (dt: number): void => {
-    // Detect BeatMap switch or manual BPM adjustment from TrackLoader (skip if early DJ crossfade is active)
-    if (
-      !this.hasCustomTrack &&
-      !this.earlyCrossfadeStarted &&
-      this.audio.beatMap !== this.activeRoadBeatMap
-    ) {
-      const isNewSong = this.audio.beatMap.contentHash !== this.activeRoadBeatMap.contentHash;
-      this.loadBeatMapRoad(this.audio.beatMap, isNewSong);
-    }
+    // 0. Poll hardware controllers (Gamepad API & input state)
+    this.input.poll?.();
 
-    this.prevPosition = this.position;
-    if (this.horizonStitchCooldown > 0) {
-      this.horizonStitchCooldown = Math.max(0, this.horizonStitchCooldown - dt);
-    }
-
-    // 1. Process timestamped discrete key presses (Beat-Shift, Tofu Mode, Auto-Shift, Fork Choice)
+    // 1. Process timestamped discrete key presses (Beat-Shift, Tofu Mode, Auto-Shift, Fork Choice, Pause)
     const presses = this.input.consumePresses?.();
     if (presses && presses.length > 0) {
       for (let i = 0; i < presses.length; i++) {
         const p = presses[i]!;
+        if (p.action === 'pause') {
+          this.togglePause();
+          continue;
+        }
+
+        // When paused, pressing primary action buttons unpauses the game seamlessly
+        if (this.isPaused) {
+          if (
+            p.action === 'accelerate' ||
+            p.action === 'drift' ||
+            p.action === 'shiftUp' ||
+            p.action === 'brake'
+          ) {
+            this.setPaused(false);
+          }
+          continue;
+        }
+
         if (p.action === 'shiftUp' || p.action === 'shiftDown') {
           const dir = p.action === 'shiftUp' ? 'up' : 'down';
           const judgement = this.audio.judgeInputTimestamp(p.timeStamp);
@@ -411,12 +442,36 @@ export class Game {
       }
     }
 
-    // 2. Poll continuous driving controls
+    // When paused, do not advance simulation clock, vehicle physics, road, or particles
+    if (this.isPaused) {
+      this.bridge.offer(this.simTime, this.buildSnapshot);
+      return;
+    }
+
+    // Detect BeatMap switch or manual BPM adjustment from TrackLoader (skip if early DJ crossfade is active)
+    if (
+      !this.hasCustomTrack &&
+      !this.earlyCrossfadeStarted &&
+      this.audio.beatMap !== this.activeRoadBeatMap
+    ) {
+      const isNewSong = this.audio.beatMap.contentHash !== this.activeRoadBeatMap.contentHash;
+      this.loadBeatMapRoad(this.audio.beatMap, isNewSong);
+    }
+
+    this.prevPosition = this.position;
+    if (this.horizonStitchCooldown > 0) {
+      this.horizonStitchCooldown = Math.max(0, this.horizonStitchCooldown - dt);
+    }
+
+    // 2. Poll continuous driving controls (digital buttons + analog Gamepad axes)
     this.controls.left = this.input.isDown('left');
     this.controls.right = this.input.isDown('right');
     this.controls.accelerate = this.input.isDown('accelerate');
     this.controls.brake = this.input.isDown('brake');
     this.controls.drift = this.input.isDown('drift');
+    this.controls.steerAxis = this.input.getSteerAxis?.();
+    this.controls.throttleAxis = this.input.getThrottleAxis?.();
+    this.controls.brakeAxis = this.input.getBrakeAxis?.();
 
     const cameraDepth = cameraDepthFromFov(tuning.fieldOfView);
     const playerZOffset = tuning.cameraHeight * cameraDepth;
@@ -593,6 +648,10 @@ export class Game {
     drawPlayerCar(ctx, this.car, width, height);
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
+
+    if (this.isPaused) {
+      drawPauseOverlay(ctx, width, height);
+    }
   };
 
   private getForkZoneStartZ(): number | undefined {
@@ -1044,11 +1103,18 @@ export class Game {
       this.melonSoda.applyImpulse(event.side * 3.8);
       this.audio.triggerCollisionSound('traffic');
       this.stageScore += 400;
+    } else if (event.outcome === 'propBounce') {
+      // Roadside prop scrape: gentle arcade rub and clean flow retention
+      this.stageCollisions++;
+      this.collisionShake = Math.max(this.collisionShake, 0.35);
+      this.car.deductGroove(tuning.grooveCollisionPenalty * 0.6, this.handleCarEvent);
+      this.melonSoda.applyImpulse(event.side * 2.8);
+      this.audio.triggerCollisionSound('prop');
     } else {
       this.stageCollisions++;
-      this.collisionShake = Math.max(this.collisionShake, 0.95);
+      this.collisionShake = Math.max(this.collisionShake, 0.85);
       this.car.deductGroove(tuning.grooveCollisionPenalty, this.handleCarEvent);
-      this.melonSoda.applyImpulse(event.side * 7.2);
+      this.melonSoda.applyImpulse(event.side * 6.5);
       this.audio.triggerCollisionSound(event.obstacle);
     }
     this.bridge.emit(event);
@@ -1172,6 +1238,53 @@ export class Game {
       forkProgress: this.forkProgress,
       forkLeftOption: this.buildForkLeftOption(),
       forkRightOption: this.buildForkRightOption(),
+      isPaused: this.isPaused,
+      gamepadConnected: this.input.isGamepadConnected?.() ?? false,
     };
   };
+}
+
+/**
+ * 80s arcade pause overlay drawn directly on the Canvas (AGENTS.md §4.9 & §5 M8).
+ */
+export function drawPauseOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+): void {
+  ctx.save();
+  ctx.fillStyle = 'rgba(7, 1, 18, 0.74)';
+  ctx.fillRect(0, 0, width, height);
+
+  const boxW = 260;
+  const boxH = 88;
+  const boxX = Math.round((width - boxW) * 0.5);
+  const boxY = Math.round((height - boxH) * 0.5 - 12);
+
+  ctx.fillStyle = 'rgba(13, 2, 33, 0.94)';
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+
+  ctx.strokeStyle = '#05d9e8';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+
+  ctx.strokeStyle = '#ff2a6d';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(boxX + 3, boxY + 3, boxW - 6, boxH - 6);
+
+  ctx.fillStyle = '#ff2a6d';
+  ctx.font = '900 22px "Courier New", monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('PAUSED', Math.round(width * 0.5), boxY + 28);
+
+  ctx.fillStyle = '#05d9e8';
+  ctx.font = '700 9px "Courier New", monospace';
+  ctx.fillText('PRESS [P], [ESC] OR GAMEPAD [START]', Math.round(width * 0.5), boxY + 52);
+
+  ctx.fillStyle = '#ffd319';
+  ctx.font = '700 8px "Courier New", monospace';
+  ctx.fillText('CLICK ANYWHERE TO RESUME', Math.round(width * 0.5), boxY + 68);
+
+  ctx.restore();
 }

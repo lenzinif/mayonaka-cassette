@@ -40,7 +40,8 @@ export const DEFAULT_TUNING = {
   audioFilterMinHz: 420,
   audioFilterMaxHz: 18000,
   audioFilterDriftQ: 3.2,
-  audioOffRoadPitchDip: 0.09,
+  audioOffRoadPitchDip: 0.025,
+  audioFilterOffRoadFloorHz: 2200,
   bpmPulseStrength: 1.0,
 
   // Song-Driven Road (M4 & Spacetime Sync)
@@ -81,7 +82,8 @@ export const DEFAULT_TUNING = {
 
   // Traffic & Collisions (M5)
   trafficDensity: 1.0,
-  collisionSpeedRetention: 0.72,
+  collisionSpeedRetention: 0.85,
+  propBounceImpulse: 1.3,
 } satisfies Record<string, number>;
 
 export type TuningKey = keyof typeof DEFAULT_TUNING;
@@ -370,7 +372,17 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     hint: 'Rallentamento del vinile quando finisci fuori strada sull’erba',
     min: 0,
     max: 0.3,
-    step: 0.01,
+    step: 0.005,
+  },
+  {
+    group: 'Audio',
+    key: 'audioFilterOffRoadFloorHz',
+    label: 'Off-road filter floor',
+    hint: 'Limite minimo della frequenza di taglio quando sei fuori pista (mantiene il groove)',
+    unit: 'Hz',
+    min: 800,
+    max: 6000,
+    step: 100,
   },
   {
     group: 'Audio',
@@ -626,5 +638,14 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0.4,
     max: 0.95,
     step: 0.02,
+  },
+  {
+    group: 'Traffic',
+    key: 'propBounceImpulse',
+    label: 'Prop bounce impulse',
+    hint: 'Spinta di rimbalzo elastica quando urti un ostacolo a bordo strada',
+    min: 0.2,
+    max: 3.5,
+    step: 0.1,
   },
 ];
