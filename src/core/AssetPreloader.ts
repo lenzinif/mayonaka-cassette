@@ -31,29 +31,39 @@ export interface PreloadSummary {
   totalTimeMs: number;
 }
 
+export function resolveAssetUrl(path: string): string {
+  const base =
+    typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.BASE_URL
+      ? import.meta.env.BASE_URL
+      : './';
+  const cleanBase = base.endsWith('/') ? base : `${base}/`;
+  const cleanPath = path.startsWith('/') ? path.slice(1) : path;
+  return `${cleanBase}${cleanPath}`;
+}
+
 export const DEFAULT_ASSET_MANIFEST: readonly AssetDescriptor[] = [
   {
     id: 'sprite-atlas',
     kind: 'image',
-    url: '/sprites/sprite-atlas.svg',
+    url: resolveAssetUrl('sprites/sprite-atlas.svg'),
     critical: false,
   },
   {
     id: 'beatmap-neon-horizon',
     kind: 'json',
-    url: '/audio/neon-horizon.beatmap.json',
+    url: resolveAssetUrl('audio/neon-horizon.beatmap.json'),
     critical: false,
   },
   {
     id: 'beatmap-midnight-wangan',
     kind: 'json',
-    url: '/audio/midnight-wangan.beatmap.json',
+    url: resolveAssetUrl('audio/midnight-wangan.beatmap.json'),
     critical: false,
   },
   {
     id: 'beatmap-melon-soda-sunset',
     kind: 'json',
-    url: '/audio/melon-soda-sunset.beatmap.json',
+    url: resolveAssetUrl('audio/melon-soda-sunset.beatmap.json'),
     critical: false,
   },
   {

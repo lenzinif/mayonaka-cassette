@@ -596,13 +596,8 @@ export function computePlayerCarRearRig(
   canvasHeight: number,
   out: CarRearRig,
 ): CarRearRig {
-  const speedRatio = Math.min(1, car.speedRatio);
-  const bounceAmp = car.isOffRoad ? 3.2 * speedRatio : 0.8 * speedRatio;
-  const bounceY = Math.round(Math.sin(car.bouncePhase) * bounceAmp);
-  const pitchY = Math.round(car.pitch * 6);
-
   const cx = Math.round(canvasWidth * 0.5 + car.yaw * 5);
-  const baseY = Math.round(canvasHeight - 26 + bounceY + pitchY);
+  const baseY = Math.round(canvasHeight - 26);
   const bank = Math.round(car.yaw * 6);
   const tireShift = Math.round(bank * 0.2);
   const exShift = Math.round(bank * 0.22);
@@ -637,13 +632,8 @@ export function drawPlayerCar(
   canvasWidth: number,
   canvasHeight: number,
 ): void {
-  const speedRatio = Math.min(1, car.speedRatio);
-  const bounceAmp = car.isOffRoad ? 3.2 * speedRatio : 0.8 * speedRatio;
-  const bounceY = Math.round(Math.sin(car.bouncePhase) * bounceAmp);
-  const pitchY = Math.round(car.pitch * 6);
-
   const cx = Math.round(canvasWidth / 2 + car.yaw * 5);
-  const baseY = Math.round(canvasHeight - 26 + bounceY + pitchY);
+  const baseY = Math.round(canvasHeight - 26);
 
   // Progressive banking / shear offset for authentic OutRun sprite stretch during steering:
   // Layers shift proportionally from bottom (tires ~0.2) to top (roof ~0.78)
@@ -682,15 +672,10 @@ export function drawPlayerCar(
     }
   }
 
-  // 2. Pixel-stepped ground shadow + HIGH/SSS Groove neon underglow
+  // 2. Clean dark ground shadow
   ctx.fillStyle = 'rgba(8, 2, 20, 0.7)';
   ctx.fillRect(-halfW - 3 + Math.round(bumperShift * 0.5), 1, halfW * 2 + 6, 5);
   ctx.fillRect(-halfW + 2 + Math.round(bumperShift * 0.5), 6, halfW * 2 - 4, 2);
-  if (car.grooveTier === 'SSS' || car.grooveTier === 'HIGH') {
-    ctx.fillStyle =
-      car.grooveTier === 'SSS' ? 'rgba(255, 211, 25, 0.42)' : 'rgba(5, 217, 232, 0.34)';
-    ctx.fillRect(-halfW + 4 + Math.round(bumperShift * 0.5), 2, halfW * 2 - 8, 4);
-  }
 
   // 3. 12-inch 80s rear tires with animated tread blocks and white steelie wheel covers
   const tireW = 12;
