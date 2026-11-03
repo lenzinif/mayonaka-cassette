@@ -12,6 +12,7 @@ export interface TrackLoaderProps {
   onSelectTrack: (item: PlaylistItem) => void;
   onUpdateBeatMap: (contentHash: string, updated: BeatMap) => void;
   onClose: () => void;
+  onRemoveTrack?: (removed: PlaylistItem, newActive: PlaylistItem) => void;
 }
 
 /**
@@ -27,6 +28,7 @@ export function TrackLoader({
   onSelectTrack,
   onUpdateBeatMap,
   onClose,
+  onRemoveTrack,
 }: TrackLoaderProps) {
   const [, setVersion] = useState(0);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
@@ -59,6 +61,23 @@ export function TrackLoader({
     } finally {
       window.setTimeout(() => setProgress(null), 900);
     }
+  };
+
+  const handleRemoveTrack = (e: React.MouseEvent, idx: number, item: PlaylistItem) => {
+    e.stopPropagation();
+    if (items.length <= 1) return;
+    const wasActive = item.contentHash === active.contentHash;
+    const removed = library.removeTrack(idx);
+    if (!removed) return;
+    if (wasActive) {
+      onSelectTrack(library.activeItem);
+    }
+    onRemoveTrack?.(removed, library.activeItem);
+  };
+
+  const handleRestoreDefaults = () => {
+    library.restoreDefaultPlaylist();
+    onSelectTrack(library.activeItem);
   };
 
   const handleTapTempo = () => {
@@ -249,34 +268,49 @@ export function TrackLoader({
 
           {/* Playlist */}
           <div>
-            <div className="mb-1.5 text-[10px] tracking-widest text-fuchsia-300 uppercase">
-              STAGE PLAYLIST ({items.length} {items.length === 1 ? 'TRACK' : 'TRACKS'})
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="text-[10px] tracking-widest text-fuchsia-300 uppercase">
+                STAGE PLAYLIST ({items.length} {items.length === 1 ? 'TRACK' : 'TRACKS'})
+              </div>
+              <button
+                type="button"
+                onClick={handleRestoreDefaults}
+                className="cursor-pointer text-[10px] tracking-wider text-fuchsia-400/80 hover:text-cyan-300 transition uppercase"
+                title="Ripristina la playlist con le 3 tracce Future Funk predefinite"
+              >
+                RESTORE DEFAULTS
+              </button>
             </div>
             <div className="divide-y divide-fuchsia-500/20 rounded border border-fuchsia-500/30 bg-[#090117]">
               {items.map((item, idx) => {
                 const isSelected = item.contentHash === active.contentHash;
                 const best = library.getBestScore(item.contentHash);
+                const canRemove = items.length > 1;
                 return (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
-                    onClick={() => {
-                      library.selectTrack(idx);
-                      onSelectTrack(item);
-                    }}
-                    className={`flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left transition ${
-                      isSelected ? 'bg-fuchsia-900/50 text-white' : 'hover:bg-fuchsia-950/40'
+                    className={`flex w-full items-center justify-between px-3 py-2 text-left transition ${
+                      isSelected
+                        ? 'bg-fuchsia-900/50 text-white'
+                        : 'hover:bg-fuchsia-950/40 text-fuchsia-100'
                     }`}
                   >
-                    <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        library.selectTrack(idx);
+                        onSelectTrack(item);
+                      }}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left focus:outline-hidden"
+                    >
                       <span className="text-[10px] font-bold text-pink-400">
                         {String(idx + 1).padStart(2, '0')}
                       </span>
-                      <div>
-                        <div className="font-semibold">
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold">
                           {item.beatMap.artist} — {item.beatMap.title}
                         </div>
-                        <div className="text-[10px] text-fuchsia-300/70">
+                        <div className="truncate text-[10px] text-fuchsia-300/70">
                           {item.beatMap.sections.length} sections //{' '}
                           {Math.round(item.beatMap.durationSec)}s // {item.beatMap.source}
                           {best
@@ -284,8 +318,9 @@ export function TrackLoader({
                             : ''}
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-right tabular-nums">
+                    </button>
+
+                    <div className="flex shrink-0 items-center gap-2 text-right tabular-nums pl-2">
                       {best && (
                         <span className="rounded border border-emerald-400/50 bg-emerald-950/75 px-1.5 py-0.5 text-[10px] font-black text-emerald-300">
                           {best.bestGrade}
@@ -294,8 +329,26 @@ export function TrackLoader({
                       <span className="rounded border border-cyan-400/40 bg-cyan-950/60 px-2 py-0.5 text-[11px] font-bold text-cyan-300">
                         {item.beatMap.bpm.toFixed(1)} BPM
                       </span>
+                      <button
+                        type="button"
+                        disabled={!canRemove}
+                        onClick={(e) => handleRemoveTrack(e, idx, item)}
+                        aria-label={`Rimuovi ${item.beatMap.title} dalla playlist`}
+                        title={
+                          canRemove
+                            ? `Rimuovi "${item.beatMap.title}" dalla playlist`
+                            : "Impossibile rimuovere l'unica traccia rimasta"
+                        }
+                        className={`rounded border px-2 py-0.5 text-[11px] font-bold transition ${
+                          canRemove
+                            ? 'cursor-pointer border-rose-500/40 bg-rose-950/60 text-rose-300 hover:border-rose-400 hover:bg-rose-900 hover:text-white shadow-[0_0_8px_rgba(244,63,94,0.25)]'
+                            : 'cursor-not-allowed border-zinc-700/50 bg-zinc-900/40 text-zinc-600 opacity-40'
+                        }`}
+                      >
+                        ✕
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

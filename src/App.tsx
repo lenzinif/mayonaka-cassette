@@ -82,6 +82,7 @@ export function App() {
   const handleSelectTrack = (item: PlaylistItem) => {
     void audio.unlock();
     audio.loadTrack(item.beatMap, item.audioBuffer);
+    gameRef.current?.loadBeatMapRoad(item.beatMap, true);
   };
 
   const handleUpdateBeatMap = (contentHash: string, updated: BeatMap) => {

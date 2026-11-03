@@ -151,6 +151,11 @@ export class TrackLibrary {
     return this.playlist.length > 1;
   }
 
+  /** True when tracks can be safely removed (playlist must keep at least 1 track). */
+  get canRemoveTrack(): boolean {
+    return this.playlist.length > 1;
+  }
+
   /** True when there is another track after `activeIndex` in the playlist. */
   get hasNextTrack(): boolean {
     return this.activeIndex + 1 < this.playlist.length;
@@ -191,6 +196,64 @@ export class TrackLibrary {
       this.notify();
     }
     return this.activeItem;
+  }
+
+  /**
+   * Removes a track from the playlist by zero-based index.
+   * Maintains at least one track in the playlist so driving and road generation always remain valid.
+   * Adjusts activeIndex if needed and notifies subscribers.
+   *
+   * @param index Index of the track to remove.
+   * @returns The removed PlaylistItem, or `null` if removal is disallowed or index is invalid.
+   */
+  removeTrack(index: number): PlaylistItem | null {
+    if (this.playlist.length <= 1) return null;
+    if (index < 0 || index >= this.playlist.length) return null;
+
+    const [removed] = this.playlist.splice(index, 1);
+    if (!removed) return null;
+
+    if (index < this.activeIndex) {
+      this.activeIndex = Math.max(0, this.activeIndex - 1);
+    } else if (index === this.activeIndex) {
+      this.activeIndex = Math.min(this.activeIndex, this.playlist.length - 1);
+    }
+
+    this.notify();
+    return removed;
+  }
+
+  /**
+   * Removes a track from the playlist by its unique item `id`.
+   */
+  removeTrackById(id: string): PlaylistItem | null {
+    const idx = this.playlist.findIndex((p) => p.id === id);
+    if (idx < 0) return null;
+    return this.removeTrack(idx);
+  }
+
+  /**
+   * Removes a track from the playlist by its `contentHash`.
+   */
+  removeTrackByContentHash(contentHash: string): PlaylistItem | null {
+    const idx = this.playlist.findIndex((p) => p.contentHash === contentHash);
+    if (idx < 0) return null;
+    return this.removeTrack(idx);
+  }
+
+  /**
+   * Restores the default 3-stage Future Funk playlist from bundled BeatMaps.
+   */
+  restoreDefaultPlaylist(): void {
+    this.playlist = BUNDLED_BEATMAPS.map((beatMap) => ({
+      id: beatMap.contentHash,
+      contentHash: beatMap.contentHash,
+      beatMap,
+      audioBuffer: null,
+      isBundled: true,
+    }));
+    this.activeIndex = 0;
+    this.notify();
   }
 
   /**
