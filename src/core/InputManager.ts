@@ -82,6 +82,22 @@ const GAMEPAD_BUTTON_ACTIONS: Readonly<Record<number, Action>> = {
   15: 'forkRight',
 };
 
+const ALL_ACTIONS: readonly Action[] = [
+  'left',
+  'right',
+  'accelerate',
+  'brake',
+  'drift',
+  'shiftUp',
+  'shiftDown',
+  'tofuMode',
+  'cycleSodaSkin',
+  'autoShift',
+  'forkLeft',
+  'forkRight',
+  'pause',
+];
+
 /** Read-only view of input used by the engine; lets tests inject a fake. */
 export interface InputSource {
   isDown(action: Action): boolean;
@@ -144,6 +160,8 @@ export class InputManager implements InputSource {
   };
 
   private readonly prevGamepadButtons: boolean[] = [];
+  private readonly connectedScratch: Gamepad[] = [];
+  private lastDisconnectedPollMs = -1000;
   private gamepadConnected = false;
   private gamepadId = '';
   private steerAxis = 0;
@@ -199,8 +217,18 @@ export class InputManager implements InputSource {
    * continuous button states, and enqueues high-resolution timestamped rising-edge events.
    */
   poll = (): void => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (
+      !this.gamepadConnected &&
+      !this.getGamepadsFn &&
+      now - this.lastDisconnectedPollMs < 250
+    ) {
+      return;
+    }
+
     const gamepads = this.getConnectedGamepads();
     if (gamepads.length === 0) {
+      this.lastDisconnectedPollMs = now;
       if (this.gamepadConnected) {
         this.gamepadConnected = false;
         this.gamepadId = '';
@@ -213,11 +241,9 @@ export class InputManager implements InputSource {
     this.gamepadConnected = true;
     this.gamepadId = gp.id || 'Standard Gamepad';
 
-    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-
     // 1. Reset continuous gamepad actions
-    for (const key of Object.keys(this.gamepadActions) as Action[]) {
-      this.gamepadActions[key] = false;
+    for (let i = 0; i < ALL_ACTIONS.length; i++) {
+      this.gamepadActions[ALL_ACTIONS[i]!] = false;
     }
 
     // 2. Poll Buttons (Standard Layout)
@@ -334,37 +360,37 @@ export class InputManager implements InputSource {
     this.onBlur();
   }
 
-  private getConnectedGamepads(): Gamepad[] {
+  private getConnectedGamepads(): readonly Gamepad[] {
+    this.connectedScratch.length = 0;
+
     if (this.getGamepadsFn) {
       const gps = this.getGamepadsFn();
-      const res: Gamepad[] = [];
       for (let i = 0; i < gps.length; i++) {
         const gp = gps[i];
-        if (gp && gp.connected !== false) res.push(gp);
+        if (gp && gp.connected !== false) this.connectedScratch.push(gp);
       }
-      return res;
+      return this.connectedScratch;
     }
 
     if (typeof navigator === 'undefined' || typeof navigator.getGamepads !== 'function') {
-      return [];
+      return this.connectedScratch;
     }
 
     try {
       const gps = navigator.getGamepads();
-      const res: Gamepad[] = [];
       for (let i = 0; i < gps.length; i++) {
         const gp = gps[i];
-        if (gp && gp.connected !== false) res.push(gp);
+        if (gp && gp.connected !== false) this.connectedScratch.push(gp);
       }
-      return res;
+      return this.connectedScratch;
     } catch {
-      return [];
+      return this.connectedScratch;
     }
   }
 
   private resetGamepadState(): void {
-    for (const key of Object.keys(this.gamepadActions) as Action[]) {
-      this.gamepadActions[key] = false;
+    for (let i = 0; i < ALL_ACTIONS.length; i++) {
+      this.gamepadActions[ALL_ACTIONS[i]!] = false;
     }
     this.steerAxis = 0;
     this.throttleAxis = 0;
@@ -419,7 +445,9 @@ export class InputManager implements InputSource {
   private readonly onBlur = (): void => {
     this.pressed.clear();
     this.pressQueue.length = 0;
-    for (const key of Object.keys(this.actionCounts) as Action[]) this.actionCounts[key] = 0;
+    for (let i = 0; i < ALL_ACTIONS.length; i++) {
+      this.actionCounts[ALL_ACTIONS[i]!] = 0;
+    }
     this.resetGamepadState();
   };
 }

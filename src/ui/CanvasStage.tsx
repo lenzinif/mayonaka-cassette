@@ -1,6 +1,7 @@
 import type { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
 import type { TrackLibrary } from '@src/audio/TrackLibrary';
 import { MAX_FRAME_DT, RENDER_HEIGHT, RENDER_WIDTH, SIM_STEP } from '@src/config/constants';
+import type { AssetPreloader } from '@src/core/AssetPreloader';
 import { GameLoop } from '@src/core/GameLoop';
 import { InputManager } from '@src/core/InputManager';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
@@ -11,6 +12,7 @@ export interface CanvasStageProps {
   bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   audio: FunkAudioEngine;
   library: TrackLibrary;
+  preloader?: AssetPreloader;
   onGameReady?: (game: Game) => void;
 }
 
@@ -18,7 +20,13 @@ export interface CanvasStageProps {
  * Fullscreen 2D canvas stage (`z-index: 1`, AGENTS.md §2).
  * Owns the lifecycle of `InputManager`, `Game`, and `GameLoop`.
  */
-export function CanvasStage({ bridge, audio, library, onGameReady }: CanvasStageProps) {
+export function CanvasStage({
+  bridge,
+  audio,
+  library,
+  preloader,
+  onGameReady,
+}: CanvasStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const onGameReadyRef = useRef(onGameReady);
   onGameReadyRef.current = onGameReady;
@@ -31,7 +39,7 @@ export function CanvasStage({ bridge, audio, library, onGameReady }: CanvasStage
     ctx.imageSmoothingEnabled = false;
 
     const input = new InputManager(window);
-    const game = new Game({ input, bridge, audio, library });
+    const game = new Game({ input, bridge, audio, library, preloader });
     onGameReadyRef.current?.(game);
 
     const loop = new GameLoop({
@@ -69,7 +77,7 @@ export function CanvasStage({ bridge, audio, library, onGameReady }: CanvasStage
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       canvas.removeEventListener('click', handleCanvasClick);
     };
-  }, [bridge, audio, library]);
+  }, [bridge, audio, library, preloader]);
 
   return (
     <canvas

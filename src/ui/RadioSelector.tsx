@@ -102,7 +102,7 @@ export function RadioSelector({
       {/* 1. Stage Fork Selector Overlay (active in the final outro bars of a multi-track playlist) */}
       {forkActive && leftOpt && rightOpt && (
         <div className="pointer-events-none absolute inset-x-0 top-20 z-10 flex justify-center px-4 font-mono select-none">
-          <div className="pointer-events-auto w-full max-w-xl rounded border border-pink-400/70 bg-[#0d0221]/92 p-3 text-white shadow-[0_0_32px_rgba(255,42,109,0.45)] backdrop-blur-xs">
+          <div className="pointer-events-auto w-full max-w-xl rounded border border-pink-400/70 bg-[#0d0221]/95 p-3 text-white shadow-[0_0_32px_rgba(255,42,109,0.45)]">
             <div className="flex items-center justify-between text-[10px] tracking-[0.2em] uppercase">
               <span className="font-bold text-amber-300">
                 STAGE FORK AHEAD // STEER LANE OR PRESS [1] / [2]
@@ -114,8 +114,8 @@ export function RadioSelector({
 
             <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-xs bg-fuchsia-950">
               <div
-                className="h-full bg-gradient-to-r from-cyan-400 via-pink-500 to-amber-300 transition-[width] duration-75"
-                style={{ width: `${Math.round(forkProgress * 100)}%` }}
+                className="h-full w-full origin-left bg-gradient-to-r from-cyan-400 via-pink-500 to-amber-300 transition-transform duration-75 will-change-transform"
+                style={{ transform: `scaleX(${Math.max(0, Math.min(1, forkProgress))})` }}
               />
             </div>
 
@@ -216,7 +216,7 @@ export function RadioSelector({
           key={stageToast.id}
           className="pointer-events-none absolute inset-x-0 top-20 z-10 flex justify-center px-4 font-mono select-none"
         >
-          <div className="rounded border border-cyan-300/80 bg-[#0d0221]/92 px-5 py-3 text-center text-white shadow-[0_0_28px_rgba(5,217,232,0.45)] backdrop-blur-xs">
+          <div className="rounded border border-cyan-300/80 bg-[#0d0221]/95 px-5 py-3 text-center text-white shadow-[0_0_28px_rgba(5,217,232,0.45)]">
             <div className="text-[10px] font-bold tracking-[0.26em] text-pink-400 uppercase">
               STAGE {String(stageToast.stageNumber).padStart(2, '0')} // {stageToast.paletteName}
               {isCrossfading ? ` · 4-BAR DJ CROSSFADE (${crossfadePct}%)` : ''}

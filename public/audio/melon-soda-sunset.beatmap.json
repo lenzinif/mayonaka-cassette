@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "contentHash": "sha256:bundled-coastal-breeze-118bpm",
+  "title": "Melon Soda Sunset (Synth Mix)",
+  "artist": "Kissaten 1986",
+  "bpm": 118,
+  "durationSec": 130.169,
+  "firstBeatOffsetSec": 0,
+  "beatsPerBar": 4,
+  "sections": [
+    { "startBar": 0, "bars": 8, "role": "intro" },
+    { "startBar": 8, "bars": 4, "role": "build" },
+    { "startBar": 12, "bars": 16, "role": "drop" },
+    { "startBar": 28, "bars": 8, "role": "breakdown" },
+    { "startBar": 36, "bars": 8, "role": "build" },
+    { "startBar": 44, "bars": 16, "role": "drop" },
+    { "startBar": 60, "bars": 4, "role": "outro" }
+  ],
+  "confidence": {
+    "tempo": 0.99,
+    "downbeat": 0.99,
+    "tempoStable": true
+  },
+  "source": "bundled"
+}

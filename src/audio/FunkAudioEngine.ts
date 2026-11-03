@@ -279,7 +279,13 @@ export class FunkAudioEngine {
   private isPlaying = false;
   private isPaused = false;
   private currentCutoffHz = 2400;
+  private currentQ = 1.6;
   private currentPlaybackRate = 1.0;
+  private lastAppliedCutoffHz = -1;
+  private lastAppliedQ = -1;
+  private lastAppliedPlaybackRate = -1;
+  private cachedLatencySec = 0;
+  private lastLatencyCheckSec = -10;
 
   /** Accumulated virtual track position (seconds) accounting for variable playbackRate. */
   private virtualTrackSec = 0;
@@ -711,16 +717,26 @@ export class FunkAudioEngine {
 
     this.currentCutoffHz +=
       (targetCutoff - this.currentCutoffHz) * (1 - Math.exp(-5.5 * dt));
+    const targetQ = driving.isDrifting ? tuning.audioFilterDriftQ : 1.6;
+    this.currentQ += (targetQ - this.currentQ) * (1 - Math.exp(-8.0 * dt));
 
-    // 7. Apply smoothed parameters to Web Audio nodes
+    // 7. Apply already-smoothed parameters to Web Audio nodes via direct `.value` assignment
+    // (avoids appending 360 `setTargetAtTime` automation events/s into Chromium's AudioParamTimeline!)
     if (this.ctx && this.filterNode && this.sourceNode && this.ctx.state === 'running') {
-      const now = this.ctx.currentTime;
-      this.filterNode.frequency.setTargetAtTime(this.currentCutoffHz, now, 0.055);
-      const targetQ = driving.isDrifting ? tuning.audioFilterDriftQ : 1.6;
-      this.filterNode.Q.setTargetAtTime(targetQ, now, 0.05);
-      this.sourceNode.playbackRate.setTargetAtTime(this.currentPlaybackRate, now, 0.045);
-      if (this.outgoingSourceNode) {
-        this.outgoingSourceNode.playbackRate.setTargetAtTime(this.currentPlaybackRate, now, 0.045);
+      if (Math.abs(this.currentCutoffHz - this.lastAppliedCutoffHz) >= 1.0) {
+        this.filterNode.frequency.value = this.currentCutoffHz;
+        this.lastAppliedCutoffHz = this.currentCutoffHz;
+      }
+      if (Math.abs(this.currentQ - this.lastAppliedQ) >= 0.01) {
+        this.filterNode.Q.value = this.currentQ;
+        this.lastAppliedQ = this.currentQ;
+      }
+      if (Math.abs(this.currentPlaybackRate - this.lastAppliedPlaybackRate) >= 0.0005) {
+        this.sourceNode.playbackRate.value = this.currentPlaybackRate;
+        if (this.outgoingSourceNode) {
+          this.outgoingSourceNode.playbackRate.value = this.currentPlaybackRate;
+        }
+        this.lastAppliedPlaybackRate = this.currentPlaybackRate;
       }
     }
 
@@ -774,15 +790,22 @@ export class FunkAudioEngine {
 
   private getOutputLatencySec(): number {
     if (!this.ctx) return 0;
+    const now = this.ctx.currentTime;
+    if (now - this.lastLatencyCheckSec < 0.5 && this.lastLatencyCheckSec >= 0) {
+      return this.cachedLatencySec;
+    }
+    this.lastLatencyCheckSec = now;
     const base = (this.ctx as AudioContext & { baseLatency?: number }).baseLatency ?? 0;
     const output = (this.ctx as AudioContext & { outputLatency?: number }).outputLatency ?? 0;
     if (typeof this.ctx.getOutputTimestamp === 'function') {
       const ts = this.ctx.getOutputTimestamp();
-      if (ts.contextTime && ts.contextTime > 0 && this.ctx.currentTime >= ts.contextTime) {
-        return Math.min(0.25, this.ctx.currentTime - ts.contextTime + base);
+      if (ts.contextTime && ts.contextTime > 0 && now >= ts.contextTime) {
+        this.cachedLatencySec = Math.min(0.25, now - ts.contextTime + base);
+        return this.cachedLatencySec;
       }
     }
-    return Math.min(0.25, base + output);
+    this.cachedLatencySec = Math.min(0.25, base + output);
+    return this.cachedLatencySec;
   }
 
   private startSourceNode(offsetSec: number, fadeInSec = 0): void {

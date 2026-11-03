@@ -417,7 +417,7 @@ export function stitchHorizonToTargetZ(
         ...dropBillboards,
       ];
     } else {
-      destSeg.sprites = srcSeg.sprites.slice();
+      destSeg.sprites = srcSeg.sprites;
     }
   }
 
@@ -443,24 +443,24 @@ export function stitchHorizonToTargetZ(
     seg.p2.worldY = nextY;
     prevY = nextY;
 
-    // Restore canonical sprites in the horizon fog
-    seg.sprites = track.canonical.sprites[segIdx]!.slice();
+    // Restore canonical sprites in the horizon fog without array allocation
+    seg.sprites = track.canonical.sprites[segIdx] as RoadSprite[];
   }
 
-  // Restore canonical geometry for segments outside the active window
+  // Restore canonical geometry for segments outside the active window (zero GC)
   for (let i = 0; i < toSegIndex; i++) {
     const seg = track.segments[i]!;
     seg.curve = track.canonical.curve[i]!;
     seg.p1.worldY = track.canonical.p1WorldY[i]!;
     seg.p2.worldY = track.canonical.p2WorldY[i]!;
-    seg.sprites = track.canonical.sprites[i]!.slice();
+    seg.sprites = track.canonical.sprites[i] as RoadSprite[];
   }
   for (let i = toSegIndex + drawDistance; i < segCount; i++) {
     const seg = track.segments[i]!;
     seg.curve = track.canonical.curve[i]!;
     seg.p1.worldY = track.canonical.p1WorldY[i]!;
     seg.p2.worldY = track.canonical.p2WorldY[i]!;
-    seg.sprites = track.canonical.sprites[i]!.slice();
+    seg.sprites = track.canonical.sprites[i] as RoadSprite[];
   }
 
   return {
@@ -482,7 +482,7 @@ export function restoreCanonicalTrack(track: SongTrack): void {
     s.curve = canonical.curve[i]!;
     s.p1.worldY = canonical.p1WorldY[i]!;
     s.p2.worldY = canonical.p2WorldY[i]!;
-    s.sprites = canonical.sprites[i]!.slice();
+    s.sprites = canonical.sprites[i] as RoadSprite[];
   }
 }
 

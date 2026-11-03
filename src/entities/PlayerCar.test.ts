@@ -117,6 +117,82 @@ describe('PlayerCar', () => {
     expect(events).toContainEqual(expect.objectContaining({ type: 'driftEnd' }));
   });
 
+  it('paces 1st-to-6th progression across musical bars (still in mid-gears at 4.5s, reaching 6th around 7-9s)', () => {
+    const car = new PlayerCar();
+    car.gearbox.autoShift = true;
+
+    // After 4.5 seconds (270 steps at 60 Hz), the car should still be climbing through 4th/5th gear, not pinned in 6th
+    for (let i = 0; i < 270; i++) {
+      car.update(1 / 60, { ...IDLE, accelerate: true }, 0);
+    }
+    expect(car.gear).toBeLessThan(6);
+    expect(car.speedRatio).toBeLessThan(0.8);
+
+    // Continuing up to 10 seconds reaches 6th gear and >90% speed
+    for (let i = 0; i < 330; i++) {
+      car.update(1 / 60, { ...IDLE, accelerate: true }, 0);
+    }
+    expect(car.gear).toBe(6);
+    expect(car.speedRatio).toBeGreaterThan(0.9);
+  });
+
+  it('heavily rewards downshifting from 6th gear after a speed drop (climb, drift exit, or collision)', () => {
+    // Two identical cars at 56% speed (e.g. after a tight hairpin drift or collision)
+    const luggingCar = new PlayerCar();
+    luggingCar.gearbox.gear = 6;
+    luggingCar.speed = tuning.maxSpeed * 0.56;
+
+    const downshiftedCar = new PlayerCar();
+    downshiftedCar.gearbox.gear = 6;
+    downshiftedCar.speed = tuning.maxSpeed * 0.56;
+    // Perform two beat-matched downshifts into 4th gear (powerband sweet spot)
+    downshiftedCar.shiftGear('down', {
+      tier: 'PERFECT',
+      deltaMs: 4,
+      beatIndex: 8,
+      isDownbeat: true,
+    });
+    downshiftedCar.shiftGear('down', {
+      tier: 'PERFECT',
+      deltaMs: 4,
+      beatIndex: 9,
+      isDownbeat: false,
+    });
+    expect(downshiftedCar.gear).toBe(4);
+    expect(luggingCar.isLugging).toBe(true);
+    expect(downshiftedCar.isLugging).toBe(false);
+
+    // Accelerate both cars for 2 seconds on a moderate climb (slope = 0.18)
+    for (let i = 0; i < 120; i++) {
+      luggingCar.update(1 / 60, { ...IDLE, accelerate: true }, 0, 0.18);
+      downshiftedCar.update(1 / 60, { ...IDLE, accelerate: true }, 0, 0.18);
+    }
+
+    // The car that downshifted into 4th pulls away dramatically while 6th gear bogs down
+    expect(downshiftedCar.speed).toBeGreaterThan(luggingCar.speed + tuning.maxSpeed * 0.12);
+    expect(downshiftedCar.groove).toBeGreaterThan(luggingCar.groove);
+  });
+
+  it('scales 6th-gear aerodynamic ceiling with Groove tier and unlocks Overdrive on SSS Groove + downhill plunges', () => {
+    const lowGrooveCar = new PlayerCar();
+    lowGrooveCar.gearbox.gear = 6;
+    lowGrooveCar.groove = 10;
+    lowGrooveCar.grooveTier = 'LOW';
+
+    const overdriveCar = new PlayerCar();
+    overdriveCar.gearbox.gear = 6;
+    overdriveCar.groove = 95;
+    overdriveCar.grooveTier = 'SSS';
+
+    const lowTop = lowGrooveCar.getEffectiveTopSpeed(tuning.maxSpeed, 0);
+    const sssFlatTop = overdriveCar.getEffectiveTopSpeed(tuning.maxSpeed, 0);
+    const sssDownhillTop = overdriveCar.getEffectiveTopSpeed(tuning.maxSpeed, -0.35);
+
+    expect(lowTop).toBeLessThan(tuning.maxSpeed * 0.95);
+    expect(sssFlatTop).toBeGreaterThan(tuning.maxSpeed * 1.02);
+    expect(sssDownhillTop).toBeGreaterThan(sssFlatTop);
+  });
+
   it('applies hysteresis across Groove tiers (LOW -> MEDIUM -> HIGH -> SSS)', () => {
     expect(evaluateGrooveTier(24, 'LOW')).toBe('LOW');
     expect(evaluateGrooveTier(25, 'LOW')).toBe('MEDIUM');

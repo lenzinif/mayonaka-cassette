@@ -138,6 +138,12 @@ export class PlayerCar {
   /** Lateral knockback velocity (in road half-widths/s) from obstacle or traffic collisions. */
   bumpVx = 0;
 
+  /**
+   * Temporary turbo-spool & front-end turn-in boost timer (seconds) triggered by a valid
+   * manual downshift, rewarding active downshifting on climbs and corner entries.
+   */
+  downshiftSpoolTimer = 0;
+
   private prevSlope = 0;
   private prevLateralVel = 0;
   private smoothedLatDelta = 0;
@@ -190,7 +196,54 @@ export class PlayerCar {
     return this.gearbox.rpm;
   }
 
-  /** Normalized speed (0..1) against `tuning.maxSpeed`. */
+  /** True when in gears 2–6 on asphalt and RPM has fallen below the gear's turbo operating band. */
+  get isLugging(): boolean {
+    return (
+      !this.isOffRoad &&
+      this.speed > tuning.maxSpeed * 0.08 &&
+      this.gearbox.isLugging(this.speed, tuning.maxSpeed)
+    );
+  }
+
+  /** True when pushing against the rev limiter in gears 1–5 (`rpm >= 0.96`). */
+  get isRedlining(): boolean {
+    return this.gear < MAX_GEAR && this.rpm >= 0.96;
+  }
+
+  /** True when in 6th gear at Overdrive speeds (`SSS` Groove or downhill slipstream draft). */
+  get isOverdrive(): boolean {
+    return (
+      this.gear === MAX_GEAR &&
+      (this.speedRatio >= 0.995 || (this.grooveTier === 'SSS' && this.speedRatio >= 0.95))
+    );
+  }
+
+  /**
+   * Computes the dynamic top-speed ceiling in world units/s for the current gear, Groove state,
+   * and road slope:
+   * - Gears 1–5 are governed by mechanical gearing (`gearbox.getGearTopSpeed`).
+   * - Gear 6 (Overdrive) fights aerodynamic drag: flat-road equilibrium scales with Groove
+   *   from `0.92 * maxSpeed` (`LOW` Groove) up to `1.00 * maxSpeed` (`HIGH` Groove) and
+   *   `1.04 * maxSpeed` in `SSS` (`FUNKY OVERDRIVE`), plus up to `+4.5%` gravity draft on steep downhills.
+   */
+  getEffectiveTopSpeed(maxSpeed = tuning.maxSpeed, segmentSlope = 0): number {
+    const mechanicalTop = this.gearbox.getGearTopSpeed(maxSpeed, this.gear);
+    if (this.gear < MAX_GEAR) {
+      return mechanicalTop;
+    }
+
+    const grooveProgress = Math.max(0, Math.min(1, this.groove / 85));
+    const baseAeroCeiling = 0.92 + grooveProgress * 0.08;
+    const overdriveBonus =
+      this.grooveTier === 'SSS' ? 0.02 + Math.max(0, (this.groove - 85) / 15) * 0.025 : 0;
+    const downhillBonus =
+      segmentSlope < -0.02 ? Math.min(0.045, Math.abs(segmentSlope) * 0.14) : 0;
+
+    const topMultiplier = Math.min(1.065, baseAeroCeiling + overdriveBonus + downhillBonus);
+    return mechanicalTop * topMultiplier;
+  }
+
+  /** Normalized speed (0..1.065) against `tuning.maxSpeed`. */
   get speedRatio(): number {
     return tuning.maxSpeed > 0 ? this.speed / tuning.maxSpeed : 0;
   }
@@ -265,6 +318,13 @@ export class PlayerCar {
     const result = this.gearbox.shift(direction, this.speed, tuning.maxSpeed, judgement);
     if (!result) return null;
 
+    if (direction === 'down' && result.newRpm >= 0.45 && result.newRpm <= 0.98) {
+      // Downshifting into the powerband spools the turbo and sharpens front-end turn-in
+      this.downshiftSpoolTimer = result.validForBonus && result.rewardTier !== 'OFF' ? 0.95 : 0.65;
+    } else if (direction === 'up') {
+      this.downshiftSpoolTimer = 0;
+    }
+
     let grooveGained = 0;
     if (result.validForBonus) {
       const downbeatMult = judgement.isDownbeat ? 1.35 : 1.0;
@@ -313,20 +373,33 @@ export class PlayerCar {
 
     const maxSpeed = tuning.maxSpeed;
     const prevSpeed = this.speed;
-    const gearTopSpeed = this.gearbox.getGearTopSpeed(maxSpeed);
+    const gearTopSpeed = this.getEffectiveTopSpeed(maxSpeed, segmentSlope);
     const offRoadCap = maxSpeed * tuning.offRoadMaxSpeedRatio;
+
+    if (this.downshiftSpoolTimer > 0) {
+      this.downshiftSpoolTimer = Math.max(0, this.downshiftSpoolTimer - dt);
+    }
 
     // 1. Longitudinal speed (accelerate via Gearbox torque curve / brake / coast + off-road & grade drag).
     const gearProgress = (this.gearbox.gear - 1) / (MAX_GEAR - 1);
-    // Uphill climbs (`segmentSlope > 0`) load tall gears more heavily, encouraging downshifts on `build`
-    // ramps and beat-matched upshifts on the drop crest; downhill slopes provide a mild gravity assist.
-    const gradeLoadFactor = 0.45 + gearProgress * 0.95;
+    // Uphill climbs (`segmentSlope > 0`) load tall gears (5th/6th) heavily so 6th gear cannot hold speed
+    // up steep `build` ramps, rewarding a downshift to 4th/5th; downhill slopes provide a gravity draft.
+    const gradeLoadFactor = 0.38 + Math.pow(gearProgress, 1.3) * 1.18;
     const slopeDragRate =
       segmentSlope > 0.01
-        ? Math.min(0.22, segmentSlope * 0.34) * gradeLoadFactor
+        ? Math.min(0.26, segmentSlope * 0.42) * gradeLoadFactor
         : segmentSlope < -0.01
-          ? Math.max(-0.07, segmentSlope * 0.12)
+          ? Math.max(-0.09, segmentSlope * 0.16)
           : 0;
+
+    // High-speed cornering tire scrub on tight curves (`|segmentCurve| > 2.8`) when not drifting
+    const absCurve = Math.abs(segmentCurve);
+    const cornerScrubRate =
+      this.driftDir === 0 && absCurve > 2.8 && this.speed > maxSpeed * 0.62
+        ? Math.min(0.075, (absCurve - 2.8) * 0.013) *
+          (this.speed / maxSpeed) *
+          (0.45 + 0.75 * gearProgress)
+        : 0;
 
     if (controls.brake) {
       const brakeScale =
@@ -345,24 +418,33 @@ export class PlayerCar {
           controls.throttleAxis !== undefined && controls.throttleAxis > 0.15
             ? controls.throttleAxis
             : 1.0;
-        const torque = this.gearbox.getTorqueFactor(this.speed, maxSpeed) * throttleScale;
+        const spoolBoost = this.downshiftSpoolTimer > 0 ? 1.18 : 1.0;
+        const torque =
+          this.gearbox.getTorqueFactor(this.speed, maxSpeed) * throttleScale * spoolBoost;
         // Sideways tire scrub during a drift reduces forward drive in tall gears so long drifts
-        // naturally dip speed into the 4th/5th gear powerband instead of staying pinned at redline.
-        const driftDriveScale = this.driftDir !== 0 ? Math.max(0.2, 0.62 - gearProgress * 0.42) : 1;
-        const netAccelRate = tuning.accelRate * torque * driftDriveScale - slopeDragRate;
+        // naturally dip speed into the 3rd/4th/5th gear powerband instead of staying pinned in 6th.
+        const driftDriveScale =
+          this.driftDir !== 0 ? Math.max(0.14, 0.58 - gearProgress * 0.44) : 1;
+        const netAccelRate =
+          tuning.accelRate * torque * driftDriveScale - slopeDragRate - cornerScrubRate;
         this.speed = Math.min(targetCap, this.speed + maxSpeed * netAccelRate * dt);
+      } else if (this.gear < MAX_GEAR) {
+        // Mechanical over-rev engine braking when downshifting into a lower gear above its top speed
+        const overRevRatio = Math.max(0, (this.speed - targetCap) / maxSpeed);
+        const engineBrakeRate =
+          tuning.coastRate * 1.65 + overRevRatio * 1.35 + Math.max(0, slopeDragRate);
+        this.speed = Math.max(targetCap, this.speed - maxSpeed * engineBrakeRate * dt);
       } else {
-        // Gentle engine-braking decel if above current gear's top speed (e.g. after downshift)
-        this.speed = Math.max(
-          targetCap,
-          this.speed - maxSpeed * (tuning.coastRate * 1.4 + Math.max(0, slopeDragRate)) * dt,
-        );
+        // Smooth aerodynamic settling in 6th gear when returning from downhill draft or Overdrive
+        const aeroSettleRate = tuning.coastRate * 0.75 + Math.max(0, slopeDragRate);
+        this.speed = Math.max(targetCap, this.speed - maxSpeed * aeroSettleRate * dt);
       }
     } else {
-      this.speed -= maxSpeed * (tuning.coastRate + Math.max(0, slopeDragRate)) * dt;
+      this.speed -= maxSpeed * (tuning.coastRate + Math.max(0, slopeDragRate) + cornerScrubRate) * dt;
     }
 
-    this.speed = Math.max(0, Math.min(maxSpeed, this.speed));
+    const hardMaxSpeed = maxSpeed * 1.065;
+    this.speed = Math.max(0, Math.min(hardMaxSpeed, this.speed));
     this.gearbox.update(this.speed, maxSpeed);
 
     const speedRatio = this.speedRatio;
@@ -403,8 +485,8 @@ export class PlayerCar {
       } else {
         this.driftTime += dt;
         // Lateral tire scrub bleeds speed (more pronounced in higher gears / high entry speeds),
-        // inviting a downshift to 4th/5th on exit to launch out of the corner.
-        const highGearScrub = 0.75 + 0.55 * gearProgress;
+        // inviting a downshift to 3rd/4th/5th on exit to launch out of the corner.
+        const highGearScrub = 0.78 + 0.72 * gearProgress;
         this.speed = Math.max(
           0,
           this.speed - maxSpeed * tuning.driftDecelRate * highGearScrub * dt,
@@ -414,7 +496,8 @@ export class PlayerCar {
     }
 
     // 4. Lateral movement: steering authority + centrifugal pull on curves.
-    const steerAuthority = Math.min(1, speedRatio * 1.35);
+    const turnInBonus = this.downshiftSpoolTimer > 0 ? 1.12 : 1.0;
+    const steerAuthority = Math.min(1, speedRatio * 1.35) * turnInBonus;
     let lateralVel: number;
     if (this.driftDir !== 0) {
       const inward = this.driftDir * tuning.driftInwardSteer;

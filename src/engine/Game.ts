@@ -11,6 +11,7 @@ import {
 import { RENDER_HEIGHT, RENDER_WIDTH, TELEMETRY_HZ } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
 import type { InputSource } from '@src/core/InputManager';
+import type { AssetPreloader } from '@src/core/AssetPreloader';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GearNumber } from '@src/entities/Gearbox';
 import { drawMelonSodaInset, MelonSoda, type SodaSkin } from '@src/entities/MelonSoda';
@@ -104,6 +105,9 @@ export interface TelemetrySnapshot {
   // M5 Groove, Gearbox & Tofu Mode telemetry
   gear: GearNumber;
   rpm: number;
+  isLugging: boolean;
+  isRedlining: boolean;
+  isOverdrive: boolean;
   autoShift: boolean;
   lastShiftTier: BeatJudgementTier | null;
   lastShiftDeltaMs: number | null;
@@ -190,6 +194,7 @@ export interface GameOptions {
   palette?: StagePalette;
   audio?: FunkAudioEngine;
   library?: TrackLibrary;
+  preloader?: AssetPreloader;
 }
 
 /**
@@ -204,6 +209,7 @@ export class Game {
   readonly melonSoda = new MelonSoda();
   readonly particles = new ParticleSystem();
   readonly traffic: TrafficManager;
+  readonly preloader?: AssetPreloader;
   readonly bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   readonly audio: FunkAudioEngine;
   readonly library: TrackLibrary;
@@ -341,6 +347,7 @@ export class Game {
     this.activeRoadBeatMap = this.audio.beatMap;
     this.track = options.track ?? generateSongRoad(this.audio.beatMap);
     this.traffic = new TrafficManager(this.track, this.audio.beatMap.contentHash);
+    this.preloader = options.preloader;
     this.updateRoadProgressTelemetry();
   }
 
@@ -1064,6 +1071,9 @@ export class Game {
     const roadBarFloat = this.position / this.track.barLengthWorld;
     const lagBars = audioBarFloat - roadBarFloat;
 
+    // Guard against false lag if the road wrapped early in single-track loop mode
+    if (lagBars > this.totalBars * 0.5) return;
+
     const isForkTailApproach =
       audioBarFloat >= this.totalBars - (FORK_APPROACH_BARS + 2) &&
       this.totalBars - roadBarFloat > FORK_APPROACH_BARS + 2.5;
@@ -1091,6 +1101,9 @@ export class Game {
         this.horizonStitchCooldown = 1.5;
         this.updateRoadProgressTelemetry();
         this.updateForkState();
+      } else {
+        // Avoid retrying failed stitches at 120 Hz when near track boundaries
+        this.horizonStitchCooldown = 1.0;
       }
     }
   }
@@ -1276,6 +1289,9 @@ export class Game {
       syncDeltaBeats: this.syncDeltaBeats,
       gear: this.car.gear,
       rpm: this.car.rpm,
+      isLugging: this.car.isLugging,
+      isRedlining: this.car.isRedlining,
+      isOverdrive: this.car.isOverdrive,
       autoShift: this.car.gearbox.autoShift,
       lastShiftTier: this.car.gearbox.lastShift?.rewardTier ?? null,
       lastShiftDeltaMs: this.car.gearbox.lastShift?.judgement.deltaMs ?? null,

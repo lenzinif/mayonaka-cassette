@@ -110,16 +110,17 @@ export function HUD({
         showToast(`ROAD BUILT // ${event.totalBars} BARS (${event.chunkCount} CHUNKS)`, 2200, 'cyan');
       } else if (event.type === 'gearShift') {
         const { result, grooveGained } = event;
+        const shiftLabel = result.direction === 'down' ? 'DOWNSHIFT' : 'SHIFT';
         if (result.rewardTier === 'PERFECT') {
           const db = result.judgement.isDownbeat ? 'DOWNBEAT ' : '';
           showToast(
-            `${db}PERFECT SHIFT! ${result.fromGear}→${result.toGear} (+${Math.round(grooveGained)} GROOVE)`,
+            `${db}PERFECT ${shiftLabel}! ${result.fromGear}→${result.toGear} (+${Math.round(grooveGained)} GROOVE)`,
             1400,
             'emerald',
           );
         } else if (result.rewardTier === 'GOOD') {
           showToast(
-            `GOOD SHIFT ${result.fromGear}→${result.toGear} (+${Math.round(grooveGained)} GROOVE)`,
+            `GOOD ${shiftLabel} ${result.fromGear}→${result.toGear} (+${Math.round(grooveGained)} GROOVE)`,
             1200,
             'cyan',
           );
@@ -192,6 +193,9 @@ export function HUD({
   const gear = snap?.gear ?? 1;
   const rpm = snap?.rpm ?? 0;
   const rpmPct = Math.min(100, Math.round(rpm * 100));
+  const isLugging = snap?.isLugging ?? false;
+  const isRedlining = snap?.isRedlining ?? false;
+  const isOverdrive = snap?.isOverdrive ?? false;
   const autoShift = snap?.autoShift ?? false;
   const lastShiftTier = snap?.lastShiftTier ?? null;
   const groove = snap?.groove ?? 15;
@@ -206,14 +210,15 @@ export function HUD({
   const gamepadConnected = snap?.gamepadConnected ?? false;
 
   const tierStyle = TIER_STYLES[grooveTier];
-  const shiftSweetSpot = !autoShift && gear < MAX_GEAR && rpm >= 0.72;
+  const shiftSweetSpot = !autoShift && gear < MAX_GEAR && rpm >= 0.72 && !isRedlining;
+  const showDownshiftPrompt = !autoShift && isLugging;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between p-4 font-mono text-white select-none sm:p-6">
       {/* Top Bar */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-wrap items-start gap-3">
-          <div className="rounded border border-fuchsia-500/40 bg-[#0d0221]/80 px-3 py-2 shadow-[0_0_20px_rgba(255,42,109,0.25)] backdrop-blur-xs">
+          <div className="rounded border border-fuchsia-500/40 bg-[#0d0221]/92 px-3 py-2 shadow-[0_0_20px_rgba(255,42,109,0.25)]">
             <div className="flex items-center justify-between gap-3 text-[10px] tracking-[0.22em] uppercase">
               <span className="text-cyan-300">
                 STAGE {String(stageNumber).padStart(2, '0')} // {stagePaletteName}
@@ -234,7 +239,7 @@ export function HUD({
           </div>
 
           {/* Cassette Beat Clock & Groove Meter Widget */}
-          <div className="rounded border border-cyan-400/40 bg-[#0d0221]/85 px-3 py-2 shadow-[0_0_18px_rgba(5,217,232,0.18)] backdrop-blur-xs">
+          <div className="rounded border border-cyan-400/40 bg-[#0d0221]/92 px-3 py-2 shadow-[0_0_18px_rgba(5,217,232,0.18)]">
             <div className="flex items-center justify-between gap-3 text-[10px] tracking-widest text-fuchsia-300 uppercase">
               <span className="max-w-[190px] truncate text-cyan-200">
                 {trackArtist} — {trackTitle}
@@ -297,8 +302,8 @@ export function HUD({
                 <div className="absolute inset-y-0 left-[55%] z-1 w-px bg-white/25" />
                 <div className="absolute inset-y-0 left-[85%] z-1 w-px bg-amber-300/60" />
                 <div
-                  className={`h-full bg-gradient-to-r ${tierStyle.bar} transition-[width] duration-75 ease-linear`}
-                  style={{ width: `${groove}%` }}
+                  className={`h-full w-full origin-left bg-gradient-to-r ${tierStyle.bar} transition-transform duration-75 ease-linear will-change-transform`}
+                  style={{ transform: `scaleX(${groove / 100})` }}
                 />
               </div>
             </div>
@@ -314,7 +319,7 @@ export function HUD({
                 setCleanHud(false);
                 e.currentTarget.blur();
               }}
-              className="pointer-events-auto cursor-pointer rounded border border-cyan-400/50 bg-[#0d0221]/75 px-2.5 py-1 text-xs font-semibold tracking-wider text-cyan-200 backdrop-blur-xs transition hover:border-pink-400 hover:text-pink-200"
+              className="pointer-events-auto cursor-pointer rounded border border-cyan-400/50 bg-[#0d0221]/90 px-2.5 py-1 text-xs font-semibold tracking-wider text-cyan-200 transition hover:border-pink-400 hover:text-pink-200"
               title="Mostra HUD completa [H]"
             >
               SHOW HUD [H]
@@ -435,7 +440,7 @@ export function HUD({
 
       {/* M8 Mini Performance Profiler Arcade Ribbon */}
       {showPerfHud && (
-        <div className="pointer-events-auto mx-auto mt-2 flex flex-wrap items-center justify-center gap-3 rounded border border-cyan-400/50 bg-[#090117]/92 px-3 py-1 font-mono text-[10px] text-cyan-200 shadow-[0_0_15px_rgba(5,217,232,0.3)] backdrop-blur-md">
+        <div className="pointer-events-auto mx-auto mt-2 flex flex-wrap items-center justify-center gap-3 rounded border border-cyan-400/50 bg-[#090117]/95 px-3 py-1 font-mono text-[10px] text-cyan-200 shadow-[0_0_15px_rgba(5,217,232,0.3)]">
           <span className="font-bold tracking-widest text-pink-400 uppercase">PERF MON</span>
           <span className="font-bold text-emerald-300">{fps} FPS</span>
           <span className="text-fuchsia-200">
@@ -535,6 +540,21 @@ export function HUD({
                 DRIFTING
               </span>
             )}
+            {isOverdrive && (
+              <span className="animate-pulse rounded border border-amber-300 bg-amber-950/90 px-2 py-0.5 text-xs font-bold tracking-widest text-amber-200 uppercase shadow-[0_0_12px_rgba(251,191,36,0.55)]">
+                OVERDRIVE
+              </span>
+            )}
+            {showDownshiftPrompt && (
+              <span className="animate-pulse rounded border border-amber-400 bg-amber-950/90 px-2 py-0.5 text-xs font-bold tracking-widest text-amber-200 uppercase">
+                BOGGING! DOWNSHIFT [SHIFT]
+              </span>
+            )}
+            {!autoShift && isRedlining && (
+              <span className="animate-pulse rounded border border-pink-400 bg-pink-950/90 px-2 py-0.5 text-xs font-bold tracking-widest text-pink-200 uppercase shadow-[0_0_10px_rgba(255,42,109,0.5)]">
+                REV LIMIT! SHIFT UP [SPACE]
+              </span>
+            )}
             {shiftSweetSpot && (
               <span className="animate-pulse rounded border border-emerald-300 bg-emerald-950/90 px-2 py-0.5 text-xs font-bold tracking-widest text-emerald-200 uppercase">
                 SHIFT ON BEAT [SPACE]
@@ -555,7 +575,7 @@ export function HUD({
 
           <div className="flex items-stretch gap-2">
             {/* 6-Speed Gearbox & RPM Module */}
-            <div className="flex w-44 flex-col justify-between rounded border border-pink-500/40 bg-[#0d0221]/85 p-2.5 shadow-[0_0_20px_rgba(255,42,109,0.2)] backdrop-blur-xs">
+            <div className="flex w-44 flex-col justify-between rounded border border-pink-500/40 bg-[#0d0221]/92 p-2.5 shadow-[0_0_20px_rgba(255,42,109,0.2)]">
               <div className="flex items-center justify-between">
                 <span className="text-[10px] tracking-[0.2em] text-pink-300 uppercase">GEAR</span>
                 <button
@@ -571,7 +591,7 @@ export function HUD({
               </div>
 
               <div className="my-0.5 flex items-baseline justify-between">
-                <span className="text-3xl font-black italic tabular-nums text-pink-400 drop-shadow-[0_0_8px_rgba(255,42,109,0.7)]">
+                <span className="text-3xl font-black italic tabular-nums text-pink-400 [text-shadow:0_0_8px_rgba(255,42,109,0.7)]">
                   {gear}
                 </span>
                 <div className="flex gap-0.5 text-[10px] font-bold">
@@ -597,24 +617,26 @@ export function HUD({
                   title="Beat-Shift Sweet Spot"
                 />
                 <div
-                  className={`h-full transition-[width] duration-75 ease-linear ${
+                  className={`h-full w-full origin-left transition-transform duration-75 ease-linear will-change-transform ${
                     rpm >= 0.92
                       ? 'bg-pink-500'
-                      : rpm >= 0.72
-                        ? 'bg-emerald-400'
-                        : 'bg-cyan-400'
+                      : isLugging
+                        ? 'bg-amber-400'
+                        : rpm >= 0.72
+                          ? 'bg-emerald-400'
+                          : 'bg-cyan-400'
                   }`}
-                  style={{ width: `${rpmPct}%` }}
+                  style={{ transform: `scaleX(${rpmPct / 100})` }}
                 />
               </div>
             </div>
 
             {/* Speedometer Module */}
-            <div className="w-48 rounded border border-cyan-400/40 bg-[#0d0221]/85 p-3 shadow-[0_0_24px_rgba(5,217,232,0.2)] backdrop-blur-xs">
+            <div className="w-48 rounded border border-cyan-400/40 bg-[#0d0221]/92 p-3 shadow-[0_0_24px_rgba(5,217,232,0.2)]">
               <div className="flex items-baseline justify-between">
                 <span className="text-[10px] tracking-[0.25em] text-cyan-300 uppercase">SPEED</span>
                 <div className="flex items-baseline gap-1">
-                  <span className="text-3xl font-black italic tabular-nums tracking-tight text-white drop-shadow-[0_0_8px_rgba(255,42,109,0.8)]">
+                  <span className="text-3xl font-black italic tabular-nums tracking-tight text-white [text-shadow:0_0_8px_rgba(255,42,109,0.8)]">
                     {String(speedKmh).padStart(3, '0')}
                   </span>
                   <span className="text-xs font-bold text-pink-400">KM/H</span>
@@ -622,8 +644,8 @@ export function HUD({
               </div>
               <div className="mt-2 h-2 w-full overflow-hidden rounded-xs bg-fuchsia-950">
                 <div
-                  className="h-full bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-300 transition-[width] duration-75 ease-linear"
-                  style={{ width: `${speedPct}%` }}
+                  className="h-full w-full origin-left bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-300 transition-transform duration-75 ease-linear will-change-transform"
+                  style={{ transform: `scaleX(${speedPct / 100})` }}
                 />
               </div>
             </div>

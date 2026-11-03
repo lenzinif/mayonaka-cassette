@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "contentHash": "sha256:bundled-midnight-wangan-126bpm",
+  "title": "Midnight Wangan 88 (Synth VIP)",
+  "artist": "Plastic Love FM",
+  "bpm": 126,
+  "durationSec": 121.905,
+  "firstBeatOffsetSec": 0,
+  "beatsPerBar": 4,
+  "sections": [
+    { "startBar": 0, "bars": 8, "role": "intro" },
+    { "startBar": 8, "bars": 8, "role": "build" },
+    { "startBar": 16, "bars": 16, "role": "drop" },
+    { "startBar": 32, "bars": 8, "role": "breakdown" },
+    { "startBar": 40, "bars": 8, "role": "build" },
+    { "startBar": 48, "bars": 12, "role": "drop" },
+    { "startBar": 60, "bars": 4, "role": "outro" }
+  ],
+  "confidence": {
+    "tempo": 0.99,
+    "downbeat": 0.99,
+    "tempoStable": true
+  },
+  "source": "bundled"
+}

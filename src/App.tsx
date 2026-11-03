@@ -2,6 +2,7 @@ import type { BeatMap } from '@src/audio/BeatMap';
 import { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
 import { TrackLibrary, type PlaylistItem } from '@src/audio/TrackLibrary';
 import { TELEMETRY_HZ } from '@src/config/constants';
+import { AssetPreloader, type PreloadProgress } from '@src/core/AssetPreloader';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { Game, GameEvent, TelemetrySnapshot } from '@src/engine/Game';
 import { useEffect, useRef, useState } from 'react';
@@ -10,6 +11,7 @@ import { CanvasStage } from './ui/CanvasStage';
 import { CRTOverlay } from './ui/CRTOverlay';
 import { DebugPanel, loadSavedTuning } from './ui/DebugPanel';
 import { HUD } from './ui/HUD';
+import { LoadingScreen } from './ui/LoadingScreen';
 import { RadioSelector } from './ui/RadioSelector';
 import { TrackLoader } from './ui/TrackLoader';
 
@@ -17,6 +19,9 @@ export function App() {
   const [bridge] = useState(() => new TelemetryBridge<TelemetrySnapshot, GameEvent>(TELEMETRY_HZ));
   const [audio] = useState(() => new FunkAudioEngine());
   const [library] = useState(() => new TrackLibrary());
+  const [preloader] = useState(() => new AssetPreloader());
+  const [preloadProgress, setPreloadProgress] = useState<PreloadProgress>(() => preloader.progress);
+  const [preloadReady, setPreloadReady] = useState(false);
   const gameRef = useRef<Game | null>(null);
 
   const [debugOpen, setDebugOpen] = useState(() => {
@@ -32,6 +37,16 @@ export function App() {
   });
 
   const [trackLoaderOpen, setTrackLoaderOpen] = useState(false);
+
+  useEffect(() => {
+    void preloader
+      .preloadAll((p) => {
+        setPreloadProgress({ ...p });
+      })
+      .then(() => {
+        setPreloadReady(true);
+      });
+  }, [preloader]);
 
   useEffect(() => {
     return () => {
@@ -75,6 +90,7 @@ export function App() {
           bridge={bridge}
           audio={audio}
           library={library}
+          preloader={preloader}
           onGameReady={(game) => {
             gameRef.current = game;
           }}
@@ -102,6 +118,15 @@ export function App() {
           onClose={() => setTrackLoaderOpen(false)}
         />
         {inspectorOpen && <BeatMapInspector onClose={() => setInspectorOpen(false)} />}
+        {!inspectorOpen && (
+          <LoadingScreen
+            progress={preloadProgress}
+            ready={preloadReady}
+            onStart={() => {
+              void audio.unlock();
+            }}
+          />
+        )}
       </div>
     </main>
   );

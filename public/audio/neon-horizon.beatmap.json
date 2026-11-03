@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "contentHash": "sha256:bundled-neon-horizon-122bpm",
+  "title": "Neon Horizon (Synth Fallback)",
+  "artist": "OutRun FM 88.4",
+  "bpm": 122,
+  "durationSec": 125.902,
+  "firstBeatOffsetSec": 0,
+  "beatsPerBar": 4,
+  "sections": [
+    { "startBar": 0, "bars": 8, "role": "intro" },
+    { "startBar": 8, "bars": 8, "role": "build" },
+    { "startBar": 16, "bars": 16, "role": "drop" },
+    { "startBar": 32, "bars": 8, "role": "breakdown" },
+    { "startBar": 40, "bars": 4, "role": "build" },
+    { "startBar": 44, "bars": 16, "role": "drop" },
+    { "startBar": 60, "bars": 4, "role": "outro" }
+  ],
+  "confidence": {
+    "tempo": 0.99,
+    "downbeat": 0.99,
+    "tempoStable": true
+  },
+  "source": "bundled"
+}
