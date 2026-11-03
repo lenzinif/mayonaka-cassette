@@ -16,7 +16,7 @@ export const DEFAULT_TUNING = {
   // Speed (rates are fractions of maxSpeed per second)
   maxSpeed: 12000,
   maxSpeedKmh: 290,
-  accelRate: 0.32,
+  accelRate: 0.26,
   accelTaper: 0.65,
   brakeRate: 1.0,
   coastRate: 0.18,
@@ -52,11 +52,13 @@ export const DEFAULT_TUNING = {
   syncMaxSlowdown: 0.16,
   syncHorizonStitchBars: 1.75,
 
-  // Gearbox & Beat-Shift (M5)
-  gear1MaxRatio: 0.35,
-  gear2MaxRatio: 0.6,
-  gear3MaxRatio: 0.82,
-  gear4MaxRatio: 1.0,
+  // Gearbox & Beat-Shift (M5 — 6-speed)
+  gear1MaxRatio: 0.24,
+  gear2MaxRatio: 0.4,
+  gear3MaxRatio: 0.56,
+  gear4MaxRatio: 0.72,
+  gear5MaxRatio: 0.86,
+  gear6MaxRatio: 1.0,
   shiftPerfectMs: 50,
   shiftGoodMs: 100,
 
@@ -450,8 +452,8 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     key: 'gear1MaxRatio',
     label: '1st gear top ratio',
     hint: 'Velocità massima della 1ª marcia come frazione di maxSpeed',
-    min: 0.2,
-    max: 0.5,
+    min: 0.15,
+    max: 0.4,
     step: 0.01,
   },
   {
@@ -459,8 +461,8 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     key: 'gear2MaxRatio',
     label: '2nd gear top ratio',
     hint: 'Velocità massima della 2ª marcia come frazione di maxSpeed',
-    min: 0.4,
-    max: 0.75,
+    min: 0.25,
+    max: 0.55,
     step: 0.01,
   },
   {
@@ -468,8 +470,26 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     key: 'gear3MaxRatio',
     label: '3rd gear top ratio',
     hint: 'Velocità massima della 3ª marcia come frazione di maxSpeed',
-    min: 0.65,
-    max: 0.95,
+    min: 0.4,
+    max: 0.7,
+    step: 0.01,
+  },
+  {
+    group: 'Gearbox',
+    key: 'gear4MaxRatio',
+    label: '4th gear top ratio',
+    hint: 'Velocità massima della 4ª marcia come frazione di maxSpeed',
+    min: 0.55,
+    max: 0.85,
+    step: 0.01,
+  },
+  {
+    group: 'Gearbox',
+    key: 'gear5MaxRatio',
+    label: '5th gear top ratio',
+    hint: 'Velocità massima della 5ª marcia come frazione di maxSpeed',
+    min: 0.7,
+    max: 0.96,
     step: 0.01,
   },
   {

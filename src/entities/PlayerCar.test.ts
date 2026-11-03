@@ -15,19 +15,40 @@ describe('PlayerCar', () => {
     resetTuning();
   });
 
-  it('accelerates through all 4 gears up to maxSpeed and brakes back down', () => {
+  it('accelerates through all 6 gears up to maxSpeed and brakes back down', () => {
     const car = new PlayerCar();
     car.gearbox.autoShift = true;
     for (let i = 0; i < 600; i++) {
       car.update(1 / 60, { ...IDLE, accelerate: true }, 0);
     }
-    expect(car.gear).toBe(4);
+    expect(car.gear).toBe(6);
     expect(car.speed).toBeGreaterThan(tuning.maxSpeed * 0.9);
 
     for (let i = 0; i < 120; i++) {
       car.update(1 / 60, { ...IDLE, brake: true }, 0);
     }
     expect(car.speed).toBe(0);
+  });
+
+  it('bleeds RPM in 6th gear on steep uphill climbs and sustained drifts, rewarding downshifts', () => {
+    const car = new PlayerCar();
+    car.gearbox.gear = 6;
+    car.speed = tuning.maxSpeed * 0.98;
+
+    // 1. Steep uphill climb (`segmentSlope = 0.45`) in 6th gear sags speed below redline
+    for (let i = 0; i < 90; i++) {
+      car.update(1 / 60, { ...IDLE, accelerate: true }, 0, 0.45);
+    }
+    expect(car.speedRatio).toBeLessThan(0.92);
+
+    // 2. Sustained on-road drift in 6th gear bleeds speed into 5th-gear downshift range (< 0.86)
+    car.speed = tuning.maxSpeed * 0.96;
+    for (let i = 0; i < 120; i++) {
+      car.x = 0; // keep car on asphalt (simulating balanced counter-steer around a sweeper)
+      car.update(1 / 60, { ...IDLE, accelerate: true, right: true, drift: true }, 3.5, 0);
+    }
+    expect(car.isDrifting).toBe(true);
+    expect(car.speedRatio).toBeLessThan(0.86);
   });
 
   it('caps speed at current gear top speed in manual mode until shifted up', () => {

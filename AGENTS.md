@@ -78,7 +78,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 │   │   ├── DebugPanel.tsx     # Live feel-tuning sliders (?debug / F2) & JSON export
 │   │   ├── BeatMapInspector.tsx # Dev tool (?analyze): corpus analysis results vs ground truth
 │   │   ├── TrackLoader.tsx    # Drag & drop / file picker, analysis progress, BPM ×2 / ÷2 / tap fix
-│   │   ├── HUD.tsx            # Speedometer, gear/RPM, Groove cassette bar, 90s anime passenger cam
+│   │   ├── HUD.tsx            # Speedometer, gear/RPM, Groove cassette bar
 │   │   ├── RadioSelector.tsx  # Stage fork: pick next playlist track & title toast
 │   │   └── CRTOverlay.tsx     # Pure CSS scanline / VHS vignette overlay
 │   ├── App.tsx                # Mounts <CanvasStage/>, <HUD/>, and <DebugPanel/>
@@ -100,7 +100,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 6. **Deterministic Song Roads:** `SongRoadGenerator` output must be a pure function of `(BeatMap, seed)` where `seed` derives from the file's content hash. Use `SeededRandom` only — never `Math.random()` in generation code. Road length in bars must equal the song length in bars.
 7. **Analysis Off the Hot Path:** `decodeAudioData` runs on the main thread (workers have no `AudioContext`); all DSP (onset envelope, tempo autocorrelation, energy, sections) runs in `analysis.worker.ts` on transferred `Float32Array` PCM. Analysis happens only at import time, never during a run.
 8. **Beat Judgement Uses Event Timestamps:** Beat-quantized inputs (gear shifts) are judged from the keydown `event.timeStamp` mapped to the audio clock (`AudioContext.getOutputTimestamp()`), not from the fixed-step tick that polls them.
-9. **Canvas-Owned Animated Insets:** Anything animated every frame (melon soda inset, passenger cam animation) is drawn by the engine on the canvas. React only renders static frames/labels around it.
+9. **Canvas-Owned Animated Insets:** Anything animated every frame (melon soda inset) is drawn by the engine on the canvas. React only renders static frames/labels around it.
 
 ---
 
@@ -115,5 +115,5 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 - **M4 (Song-Driven Road):** `SeededRandom`, `RoadChunks` vocabulary, section-aware `SongRoadGenerator` (build-ups → climbs cresting on the drop, drops → fast straights/sweepers, breakdowns → technical curves), road length = song length.
 - **M5 (Groove & Rhythm Driving):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `SSS`) with hysteresis, `Gearbox` beat-shift (+ auto-shift assist), `MelonSoda` always-on liquid physics + Tofu Mode, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD with gear/RPM, `CRTOverlay`.
 - **M6 (Playlist Run & Forks):** Playlist = sequence of stages; forks choose the next playlist track via `RadioSelector`; 4-bar DJ crossfade; end-of-run grade screen; local per-song best scores keyed by content hash.
-- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, melon soda glass, passenger cam reactions, drift/collision particles.
+- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, melon soda glass, drift/collision particles.
 - **M8 (Polish & Release):** Gamepad polling, asset preloader, tab-visibility pause, performance profiling, static deployment.

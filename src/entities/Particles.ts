@@ -1,5 +1,10 @@
 import type { PropKind } from '@src/road/RoadSegment';
-import type { GrooveTier, PlayerCar } from './PlayerCar';
+import {
+  computePlayerCarRearRig,
+  type CarRearRig,
+  type GrooveTier,
+  type PlayerCar,
+} from './PlayerCar';
 import type { CollisionEvent } from './TrafficAndProps';
 
 export type ParticleKind = 'smoke' | 'spark' | 'debris' | 'flame';
@@ -58,6 +63,15 @@ export class ParticleSystem {
   private smokeAccum = 0;
   private sparkAccum = 0;
   private prngState = 0x5f3759df;
+  private readonly rearRigScratch: CarRearRig = {
+    centerX: 320,
+    baseY: 334,
+    leftTireX: 278,
+    rightTireX: 362,
+    leftExhaustX: 294,
+    rightExhaustX: 346,
+    spriteFrame: 0,
+  };
 
   /** Counts currently active particles (useful for telemetry & unit tests). */
   get activeCount(): number {
@@ -144,11 +158,8 @@ export class ParticleSystem {
     const speedRatio = Math.min(1, car.speedRatio);
     if (speedRatio < 0.18) return;
 
-    const bounceAmp = car.isOffRoad ? 3.2 * speedRatio : 0.8 * speedRatio;
-    const bounceY = Math.sin(car.bouncePhase) * bounceAmp;
-    const pitchY = car.pitch * 6;
-    const carCx = canvasWidth * 0.5 + car.yaw * 5;
-    const carBaseY = canvasHeight - 26 + bounceY + pitchY;
+    const rig = computePlayerCarRearRig(car, canvasWidth, canvasHeight, this.rearRigScratch);
+    const carBaseY = rig.baseY;
 
     if (car.isDrifting) {
       const smokeRate = 48 * (0.5 + speedRatio * 0.6);
@@ -160,7 +171,8 @@ export class ParticleSystem {
         this.smokeAccum -= 1;
         const tireSide = this.nextUnit() < 0.5 ? -1 : 1;
         const p = this.allocate();
-        const startX = carCx + tireSide * 41 + this.nextRange(-4, 4);
+        const tireAnchorX = tireSide < 0 ? rig.leftTireX : rig.rightTireX;
+        const startX = tireAnchorX + this.nextRange(-4, 4);
         const startY = carBaseY - 2 + this.nextRange(-2, 2);
         p.active = true;
         p.kind = 'smoke';
@@ -192,8 +204,8 @@ export class ParticleSystem {
         while (this.sparkAccum >= 1) {
           this.sparkAccum -= 1;
           const p = this.allocate();
-          const tireSide = car.driftDir > 0 ? -1 : 1; // outside loaded tire throws sparks
-          const startX = carCx + tireSide * 43 + this.nextRange(-3, 3);
+          const tireAnchorX = car.driftDir > 0 ? rig.leftTireX : rig.rightTireX; // outside loaded tire throws sparks
+          const startX = tireAnchorX + this.nextRange(-3, 3);
           const startY = carBaseY - 1;
           p.active = true;
           p.kind = 'spark';
@@ -218,7 +230,8 @@ export class ParticleSystem {
         this.smokeAccum -= 1;
         const tireSide = this.nextUnit() < 0.5 ? -1 : 1;
         const p = this.allocate();
-        const startX = carCx + tireSide * 42 + this.nextRange(-3, 3);
+        const tireAnchorX = tireSide < 0 ? rig.leftTireX : rig.rightTireX;
+        const startX = tireAnchorX + this.nextRange(-3, 3);
         const startY = carBaseY - 1;
         p.active = true;
         p.kind = 'debris';
@@ -248,14 +261,15 @@ export class ParticleSystem {
     canvasHeight: number,
     tier: 'PERFECT' | 'GOOD' | 'DRIFT_EXIT',
   ): void {
-    const carCx = canvasWidth * 0.5 + car.yaw * 5;
-    const carBaseY = canvasHeight - 26 + car.pitch * 6;
+    const rig = computePlayerCarRearRig(car, canvasWidth, canvasHeight, this.rearRigScratch);
+    const carBaseY = rig.baseY;
     const count = tier === 'PERFECT' ? 16 : tier === 'DRIFT_EXIT' ? 14 : 8;
 
     for (let i = 0; i < count; i++) {
       const p = this.allocate();
       const exhaustSide = i % 2 === 0 ? -1 : 1;
-      const startX = carCx + exhaustSide * 23 + this.nextRange(-2, 2);
+      const exhaustAnchorX = exhaustSide < 0 ? rig.leftExhaustX : rig.rightExhaustX;
+      const startX = exhaustAnchorX + this.nextRange(-2, 2);
       const startY = carBaseY - 6 + this.nextRange(-1, 2);
       p.active = true;
       p.kind = i % 3 === 0 ? 'spark' : 'flame';

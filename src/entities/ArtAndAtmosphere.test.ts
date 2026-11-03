@@ -6,9 +6,8 @@ import { Game, type GameEvent, type TelemetrySnapshot } from '@src/engine/Game';
 import { describe, expect, it } from 'vitest';
 import { drawMelonSodaInset, MelonSoda, SODA_SKINS } from './MelonSoda';
 import { ParticleSystem } from './Particles';
-import { drawPassengerCamInset, PassengerCam } from './PassengerCam';
-import { drawPlayerCar, PlayerCar } from './PlayerCar';
-import { drawKeiTruck } from './TrafficAndProps';
+import { drawPlayerCar, getPlayerCarSpriteFrame, PlayerCar } from './PlayerCar';
+import { drawKeiTruck, getKeiTruckSpriteFrame } from './TrafficAndProps';
 
 class FakeInput implements InputSource {
   private readonly held = new Set<Action>();
@@ -37,8 +36,10 @@ class FakeInput implements InputSource {
 function createMockCanvasContext(): {
   ctx: CanvasRenderingContext2D;
   fillRectCalls: number;
+  polygonFillCalls: number;
 } {
   let fillRectCalls = 0;
+  let polygonFillCalls = 0;
   const noop = () => {};
   const grad = { addColorStop: noop };
   const ctx = {
@@ -61,7 +62,9 @@ function createMockCanvasContext(): {
     ellipse: noop,
     rect: noop,
     clip: noop,
-    fill: noop,
+    fill: () => {
+      polygonFillCalls++;
+    },
     stroke: noop,
     fillText: noop,
     strokeRect: noop,
@@ -76,10 +79,13 @@ function createMockCanvasContext(): {
     get fillRectCalls() {
       return fillRectCalls;
     },
+    get polygonFillCalls() {
+      return polygonFillCalls;
+    },
   };
 }
 
-describe('M7 — Drift & Collision Particles, Passenger Cam Reactions & Pixel-Art Sprites', () => {
+describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
   it('spawns continuous drift tire smoke + charged sparks and directional collision bursts in ParticleSystem', () => {
     const particles = new ParticleSystem();
     const car = new PlayerCar();
@@ -118,64 +124,6 @@ describe('M7 — Drift & Collision Particles, Passenger Cam Reactions & Pixel-Ar
     expect(mock.fillRectCalls).toBeGreaterThan(10);
   });
 
-  it('transitions PassengerCam across VIBING, HYPED, NERVOUS, and SHOCKED states', () => {
-    const cam = new PassengerCam();
-    expect(cam.mood).toBe('VIBING');
-
-    // 1. Drifting or SSS Groove transitions to HYPED
-    cam.update(1 / 60, {
-      speedRatio: 0.85,
-      steer: 0.5,
-      isDrifting: true,
-      driftDir: 1,
-      isOffRoad: false,
-      grooveTier: 'HIGH',
-      sectionRole: 'drop',
-      beatPulse: 0.9,
-      downbeatPulse: 0.5,
-      tofuActive: false,
-      sodaDanger: 0,
-    });
-    expect(cam.mood).toBe('HYPED');
-
-    // 2. High Melon Soda danger in Tofu Mode transitions to NERVOUS
-    cam.update(1 / 60, {
-      speedRatio: 0.85,
-      steer: 0.2,
-      isDrifting: false,
-      driftDir: 0,
-      isOffRoad: false,
-      grooveTier: 'MEDIUM',
-      sectionRole: 'intro',
-      beatPulse: 0.2,
-      downbeatPulse: 0,
-      tofuActive: true,
-      sodaDanger: 0.82,
-    });
-    expect(cam.mood).toBe('NERVOUS');
-
-    // 3. Collision or spill triggers SHOCKED which takes top priority until timer expires
-    cam.triggerShock(0.5);
-    cam.update(1 / 60, {
-      speedRatio: 0.8,
-      steer: 0,
-      isDrifting: true,
-      driftDir: 1,
-      isOffRoad: false,
-      grooveTier: 'SSS',
-      sectionRole: 'drop',
-      beatPulse: 1,
-      downbeatPulse: 1,
-      tofuActive: true,
-      sodaDanger: 0.9,
-    });
-    expect(cam.mood).toBe('SHOCKED');
-
-    const mock = createMockCanvasContext();
-    drawPassengerCamInset(mock.ctx, cam, 640, 0.5);
-    expect(mock.fillRectCalls).toBeGreaterThan(15);
-  });
-
   it('cycles through all 4 unlockable Melon Soda cup skins (docs/DESIGN.md §5.2) and renders pixel-art insets', () => {
     const soda = new MelonSoda();
     soda.setActive(true);
@@ -196,7 +144,7 @@ describe('M7 — Drift & Collision Particles, Passenger Cam Reactions & Pixel-Ar
     expect(mock.fillRectCalls).toBeGreaterThan(40);
   });
 
-  it('integrates M7 particles, passenger reactions, skin cycling, and full canvas render in Game', () => {
+  it('integrates M7 particles, skin cycling, and full canvas render in Game', () => {
     const input = new FakeInput();
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
     const audio = new FunkAudioEngine();
@@ -212,11 +160,59 @@ describe('M7 — Drift & Collision Particles, Passenger Cam Reactions & Pixel-Ar
     expect(game.melonSoda.skin).toBe('tofu-cup');
     expect(events).toContainEqual({ type: 'sodaSkinChanged', skin: 'tofu-cup' });
 
-    // Render full scene (Background + Road + Props + Kei Trucks + PlayerCar + Particles + MelonSoda + PassengerCam)
+    // Render full scene (Background + Road + Props + Kei Trucks + PlayerCar + Particles + MelonSoda)
     const mock = createMockCanvasContext();
     drawPlayerCar(mock.ctx, game.car, 640, 360);
-    drawKeiTruck(mock.ctx, 320, 220, 0.04, 0, 0.1, true);
+    drawKeiTruck(mock.ctx, 320, 220, 0.04, 0, 0.1, true, -3.5);
     game.render(mock.ctx, 0.5, 60);
     expect(mock.fillRectCalls).toBeGreaterThan(80);
+  });
+
+  it('switches OutRun multi-angle 3/4 sprite frames for PlayerCar and KeiTruck when steering and drifting', () => {
+    const car = new PlayerCar();
+    expect(car.spriteFrame).toBe(0);
+    expect(getPlayerCarSpriteFrame(car)).toBe(0);
+
+    const straightMock = createMockCanvasContext();
+    drawPlayerCar(straightMock.ctx, car, 640, 360);
+    const straightRects = straightMock.fillRectCalls;
+
+    // Slight right turn -> frame +1; hard right turn -> frame +2
+    car.steer = 0.35;
+    car.yaw = 0.14;
+    expect(car.spriteFrame).toBe(1);
+
+    car.steer = 1;
+    car.yaw = 0.42;
+    expect(car.spriteFrame).toBe(2);
+
+    // Drift left -> immediately frame -3, then deep drift -> frame -4
+    car.driftDir = -1;
+    car.driftTime = 0.1;
+    car.steer = 0;
+    expect(car.spriteFrame).toBe(-3);
+
+    car.driftTime = 0.5;
+    expect(car.spriteFrame).toBe(-4);
+
+    // Rendering in drift frame draws additional 3/4 side flank wheels, mirror & marker details
+    const driftMock = createMockCanvasContext();
+    drawPlayerCar(driftMock.ctx, car, 640, 360);
+    expect(driftMock.fillRectCalls).toBeGreaterThan(straightRects);
+
+    // KeiTruck discrete OutRun curve/turn sprite frames (-3..+3)
+    expect(getKeiTruckSpriteFrame(0)).toBe(0);
+    expect(getKeiTruckSpriteFrame(0.14)).toBe(1);
+    expect(getKeiTruckSpriteFrame(-0.3)).toBe(-2);
+    expect(getKeiTruckSpriteFrame(0.55)).toBe(3);
+
+    const truckStraightMock = createMockCanvasContext();
+    drawKeiTruck(truckStraightMock.ctx, 320, 220, 0.04, 0, 0, false, 0);
+    const truckTurnMock = createMockCanvasContext();
+    drawKeiTruck(truckTurnMock.ctx, 320, 220, 0.04, 0, 0.25, false, 3.5);
+    expect(truckTurnMock.polygonFillCalls).toBeGreaterThan(truckStraightMock.polygonFillCalls);
+    expect(
+      truckTurnMock.fillRectCalls + truckTurnMock.polygonFillCalls,
+    ).toBeGreaterThan(truckStraightMock.fillRectCalls + truckStraightMock.polygonFillCalls);
   });
 });

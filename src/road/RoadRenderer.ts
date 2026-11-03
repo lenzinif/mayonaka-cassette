@@ -159,6 +159,8 @@ export class RoadRenderer {
           const truckScale = interpolate(p1.scale, p2.scale, pct);
           const truckPpu = ((truckScale * width) / 2) * (roadWidth / 2000);
           if (truckScreenX >= -width * 0.3 && truckScreenX <= width * 1.3) {
+            const viewParallax = ((width * 0.5 - truckScreenX) / Math.max(1, width * 0.5)) * 1.4;
+            const truckRoadCurve = seg.curve + viewParallax + truck.lateralVel * 1.5;
             drawKeiTruck(
               ctx,
               truckScreenX,
@@ -167,6 +169,7 @@ export class RoadRenderer {
               truck.variant,
               truck.tiltAngle,
               truck.knockedTimer > 0,
+              truckRoadCurve,
             );
           }
           tIdx = truck.nextInSegment;

@@ -1,7 +1,10 @@
 import type { BeatJudgement, BeatJudgementTier } from '@src/audio/BeatClock';
 import { tuning } from '@src/config/tuning';
 
-export type GearNumber = 1 | 2 | 3 | 4;
+export type GearNumber = 1 | 2 | 3 | 4 | 5 | 6;
+
+export const MAX_GEAR: GearNumber = 6;
+export const GEAR_NUMBERS: readonly GearNumber[] = [1, 2, 3, 4, 5, 6];
 
 export interface ShiftResult {
   fromGear: GearNumber;
@@ -19,11 +22,12 @@ export interface ShiftResult {
 }
 
 /**
- * 4-speed arcade beat-shift gearbox (AGENTS.md §3 & §4.8, docs/DESIGN.md §4).
+ * 6-speed arcade beat-shift gearbox (AGENTS.md §3 & §4.8, docs/DESIGN.md §4).
  *
  * Pure TypeScript module (zero React imports).
- * - 4 gears with tunable top-speed ratios `[0.35, 0.60, 0.82, 1.00] * maxSpeed`.
- * - Fake torque curve peaking around 0.70 RPM with a soft redline limiter at 1.0 RPM.
+ * - 6 gears with tunable top-speed ratios `[0.24, 0.40, 0.56, 0.72, 0.86, 1.00] * maxSpeed`.
+ * - Fake torque curve peaking around 0.74 RPM with progressive high-gear taper (`tuning.accelTaper`),
+ *   pronounced low-RPM lugging in higher gears, and a soft redline limiter at 1.0 RPM.
  * - Timestamp-based beat judgement on manual shifts (`PERFECT` / `GOOD` / `OFF`).
  * - Reward is strictly Groove + filter blip (no Mario Kart speed/torque boost).
  * - Optional Auto-Shift Assist (`autoShift`), plus automatic stall-prevention drop to 1st gear.
@@ -57,6 +61,10 @@ export class Gearbox {
         return tuning.gear3MaxRatio;
       case 4:
         return tuning.gear4MaxRatio;
+      case 5:
+        return tuning.gear5MaxRatio;
+      case 6:
+        return tuning.gear6MaxRatio;
     }
   }
 
@@ -73,9 +81,11 @@ export class Gearbox {
 
   /**
    * Fake torque curve multiplier `[0, 1.15]` at the current speed & gear:
-   * - In 1st gear, strong launch torque from 0 RPM (`>= 0.88`) so standing starts feel snappy.
-   * - In gears 2–4, lugging below 0.35 RPM feels noticeably softer (`0.42..0.85`), encouraging downshifts.
-   * - Sweet spot peaks around `0.70` RPM (`1.12`).
+   * - In 1st gear, strong launch torque from 0 RPM (`>= 0.90`) so standing starts feel snappy.
+   * - In gears 2–6, lugging below 0.56 RPM feels noticeably softer (`0.26..0.78`), encouraging downshifts
+   *   after drifts, collisions, or on steep `build` climbs.
+   * - Sweet spot peaks around `0.74` RPM.
+   * - Progressive mechanical taper (`tuning.accelTaper`) stretches higher gears across musical bars.
    * - Soft redline limiter fades torque smoothly to `0` as RPM approaches `1.0`.
    */
   getTorqueFactor(speed: number, maxSpeed: number): number {
@@ -86,24 +96,28 @@ export class Gearbox {
       return 0;
     }
 
+    const gearProgress = (this.gear - 1) / (MAX_GEAR - 1);
+    const taperMultiplier = Math.max(0.38, 1 - gearProgress * tuning.accelTaper * 0.62);
+
     // Soft redline roll-off between 0.90 and 1.00 RPM
     if (rpm > 0.9) {
       const redlineProgress = (rpm - 0.9) / 0.1;
-      return Math.max(0, (1 - redlineProgress * redlineProgress) * 0.92);
+      return Math.max(0, (1 - redlineProgress * redlineProgress) * 0.92 * taperMultiplier);
     }
 
-    // Bell-shaped torque curve peaking at 0.70 RPM
-    const distFromPeak = rpm - 0.7;
-    const bell = Math.exp(-(distFromPeak * distFromPeak) / 0.14);
+    // Bell-shaped torque curve peaking at 0.74 RPM
+    const distFromPeak = rpm - 0.74;
+    const bell = Math.exp(-(distFromPeak * distFromPeak) / 0.12);
 
-    if (this.gear === 1 && rpm < 0.5) {
+    if (this.gear === 1 && rpm < 0.55) {
       // Snappy 1st gear launch
       return Math.max(0.9, 0.78 + 0.34 * bell);
     }
 
-    // Higher gears lug if shifted into too early
-    const lowRpmPenalty = rpm < 0.38 ? 0.42 + (rpm / 0.38) * 0.43 : 0.85;
-    return lowRpmPenalty + 0.28 * bell;
+    // Higher gears lug significantly if RPM drops below the powerband (< 0.56 RPM)
+    const lugFloor = Math.max(0.26, 0.48 - (this.gear - 2) * 0.055);
+    const lowRpmPenalty = rpm < 0.56 ? lugFloor + (rpm / 0.56) * (0.78 - lugFloor) : 0.78;
+    return (lowRpmPenalty + 0.34 * bell) * taperMultiplier;
   }
 
   /**
@@ -114,13 +128,13 @@ export class Gearbox {
     const speedRatio = maxSpeed > 0 ? speed / maxSpeed : 0;
 
     if (this.autoShift) {
-      if (this.gear < 4 && this.rpm >= 0.9) {
+      if (this.gear < MAX_GEAR && this.rpm >= 0.9) {
         this.gear = (this.gear + 1) as GearNumber;
         this.rpm = this.computeRpm(speed, maxSpeed, this.gear);
       } else if (this.gear > 1) {
         const lowerGear = (this.gear - 1) as GearNumber;
         const lowerRpm = this.computeRpm(speed, maxSpeed, lowerGear);
-        if (this.rpm < 0.38 && lowerRpm < 0.86) {
+        if (this.rpm < 0.58 && lowerRpm < 0.86) {
           this.gear = lowerGear;
           this.rpm = lowerRpm;
         }
@@ -137,7 +151,7 @@ export class Gearbox {
 
   /**
    * Performs a manual upshift or downshift and evaluates beat timing (docs/DESIGN.md §4).
-   * Returns `null` if already in 4th (on upshift) or 1st (on downshift).
+   * Returns `null` if already in 6th (on upshift) or 1st (on downshift).
    */
   shift(
     direction: 'up' | 'down',
@@ -146,7 +160,7 @@ export class Gearbox {
     judgement: BeatJudgement,
   ): ShiftResult | null {
     const fromGear = this.gear;
-    if (direction === 'up' && fromGear >= 4) return null;
+    if (direction === 'up' && fromGear >= MAX_GEAR) return null;
     if (direction === 'down' && fromGear <= 1) return null;
 
     const toGear = (direction === 'up' ? fromGear + 1 : fromGear - 1) as GearNumber;
@@ -159,7 +173,7 @@ export class Gearbox {
     const rpmValid =
       direction === 'up'
         ? prevRpm >= 0.72
-        : prevRpm <= 0.68 && newRpm < 0.96 && speed > maxSpeed * 0.08;
+        : prevRpm <= 0.78 && newRpm < 0.96 && speed > maxSpeed * 0.08;
 
     const validForBonus = rpmValid && isFreshBeat;
     const rewardTier: BeatJudgementTier = validForBonus ? judgement.tier : 'OFF';

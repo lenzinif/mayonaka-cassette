@@ -16,12 +16,6 @@ import type { GearNumber } from '@src/entities/Gearbox';
 import { drawMelonSodaInset, MelonSoda, type SodaSkin } from '@src/entities/MelonSoda';
 import { ParticleSystem } from '@src/entities/Particles';
 import {
-  drawPassengerCamInset,
-  PassengerCam,
-  type PassengerMood,
-  type PassengerUpdateInput,
-} from '@src/entities/PassengerCam';
-import {
   drawPlayerCar,
   PlayerCar,
   type CarEvent,
@@ -120,7 +114,6 @@ export interface TelemetrySnapshot {
   sodaDanger: number;
   sodaSpills: number;
   // M7 Art & Atmosphere telemetry
-  passengerMood: PassengerMood;
   activeParticles: number;
   // M6 Playlist Run, Stage Fork & Scoring telemetry
   stageNumber: number;
@@ -186,7 +179,6 @@ export class Game {
   readonly car = new PlayerCar();
   readonly melonSoda = new MelonSoda();
   readonly particles = new ParticleSystem();
-  readonly passenger = new PassengerCam();
   readonly traffic: TrafficManager;
   readonly bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   readonly audio: FunkAudioEngine;
@@ -268,20 +260,6 @@ export class Game {
     outerLimit: 1,
     innerGap: 0,
     branchCenter: 0.5,
-  };
-
-  private readonly passengerInputScratch: PassengerUpdateInput = {
-    speedRatio: 0,
-    steer: 0,
-    isDrifting: false,
-    driftDir: 0,
-    isOffRoad: false,
-    grooveTier: 'LOW',
-    sectionRole: 'intro',
-    beatPulse: 0,
-    downbeatPulse: 0,
-    tofuActive: false,
-    sodaDanger: 0,
   };
 
   private readonly view: RoadView = {
@@ -409,7 +387,6 @@ export class Game {
                 RENDER_HEIGHT,
                 'PERFECT',
               );
-              this.passenger.triggerHype(1.6);
             } else if (shiftRes.rewardTier === 'GOOD') {
               this.stageGoodShifts++;
               this.stageScore += 150;
@@ -569,20 +546,8 @@ export class Game {
     this.maybeStitchHorizonToMusic();
     this.checkDropSync();
 
-    // 6. Advance M7 ParticleSystem & 90s Anime PassengerCam
+    // 6. Advance M7 ParticleSystem
     this.particles.update(dt, this.car, RENDER_WIDTH, RENDER_HEIGHT, this.car.grooveTier);
-    this.passengerInputScratch.speedRatio = this.car.speedRatio;
-    this.passengerInputScratch.steer = this.car.steer;
-    this.passengerInputScratch.isDrifting = this.car.isDrifting;
-    this.passengerInputScratch.driftDir = this.car.driftDir;
-    this.passengerInputScratch.isOffRoad = this.car.isOffRoad;
-    this.passengerInputScratch.grooveTier = this.car.grooveTier;
-    this.passengerInputScratch.sectionRole = this.sectionRole;
-    this.passengerInputScratch.beatPulse = this.beatPulse;
-    this.passengerInputScratch.downbeatPulse = this.downbeatPulse;
-    this.passengerInputScratch.tofuActive = this.melonSoda.active;
-    this.passengerInputScratch.sodaDanger = this.melonSoda.dangerRatio;
-    this.passenger.update(dt, this.passengerInputScratch);
 
     this.background.update(dt, playerSeg.curve, this.car.speedRatio);
     this.bridge.offer(this.simTime, this.buildSnapshot);
@@ -628,7 +593,6 @@ export class Game {
     drawPlayerCar(ctx, this.car, width, height);
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
-    drawPassengerCamInset(ctx, this.passenger, width, alpha);
   };
 
   private getForkZoneStartZ(): number | undefined {
@@ -1027,7 +991,6 @@ export class Game {
           );
           this.audio.triggerFilterBlip(1.0);
           this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'PERFECT');
-          this.passenger.triggerHype(2.2);
           this.bridge.emit({
             type: 'dropSync',
             barIndex: dm.barIndex,
@@ -1069,9 +1032,6 @@ export class Game {
     if (event.type === 'driftEnd' && event.duration >= 0.4) {
       this.audio.triggerFilterBlip(0.65);
       this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'DRIFT_EXIT');
-      this.passenger.triggerHype(1.4);
-    } else if (event.type === 'grooveTierChanged' && (event.tier === 'HIGH' || event.tier === 'SSS')) {
-      this.passenger.triggerHype(2.0);
     }
     this.bridge.emit(event);
   };
@@ -1083,7 +1043,6 @@ export class Game {
       this.collisionShake = Math.max(this.collisionShake, 0.55);
       this.melonSoda.applyImpulse(event.side * 3.8);
       this.audio.triggerCollisionSound('traffic');
-      this.passenger.triggerHype(1.5);
       this.stageScore += 400;
     } else {
       this.stageCollisions++;
@@ -1091,7 +1050,6 @@ export class Game {
       this.car.deductGroove(tuning.grooveCollisionPenalty, this.handleCarEvent);
       this.melonSoda.applyImpulse(event.side * 7.2);
       this.audio.triggerCollisionSound(event.obstacle);
-      this.passenger.triggerShock(1.4);
     }
     this.bridge.emit(event);
   };
@@ -1103,7 +1061,6 @@ export class Game {
       this.handleCarEvent,
     );
     this.audio.triggerSodaSpillSound();
-    this.passenger.triggerShock(1.3);
     this.bridge.emit({
       type: 'sodaSpill',
       spillCount: this.melonSoda.spillCount,
@@ -1199,7 +1156,6 @@ export class Game {
       sodaSkin: this.melonSoda.skin,
       sodaDanger: this.melonSoda.dangerRatio,
       sodaSpills: this.melonSoda.spillCount,
-      passengerMood: this.passenger.mood,
       activeParticles: this.particles.activeCount,
       stageNumber: this.stageNumber,
       stagePaletteName: this.palette.name,

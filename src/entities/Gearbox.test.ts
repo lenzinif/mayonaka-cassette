@@ -22,26 +22,36 @@ describe('Gearbox (M5 Beat-Shift)', () => {
     resetTuning();
   });
 
-  it('computes per-gear top speeds and soft-limits torque at redline', () => {
+  it('computes per-gear top speeds across 6 gears and soft-limits torque at redline', () => {
     const gb = new Gearbox();
     const maxSpeed = tuning.maxSpeed;
 
-    expect(gb.getGearTopSpeed(maxSpeed, 1)).toBeCloseTo(maxSpeed * 0.35);
-    expect(gb.getGearTopSpeed(maxSpeed, 4)).toBeCloseTo(maxSpeed * 1.0);
+    expect(gb.getGearTopSpeed(maxSpeed, 1)).toBeCloseTo(maxSpeed * tuning.gear1MaxRatio);
+    expect(gb.getGearTopSpeed(maxSpeed, 4)).toBeCloseTo(maxSpeed * tuning.gear4MaxRatio);
+    expect(gb.getGearTopSpeed(maxSpeed, 6)).toBeCloseTo(maxSpeed * tuning.gear6MaxRatio);
 
-    // At 70% of 1st gear top speed, torque is near its peak (> 1.0)
-    const sweetSpotSpeed = maxSpeed * 0.35 * 0.7;
+    // At 74% of 1st gear top speed, torque is near its peak (> 1.0)
+    const sweetSpotSpeed = maxSpeed * tuning.gear1MaxRatio * 0.74;
     expect(gb.getTorqueFactor(sweetSpotSpeed, maxSpeed)).toBeGreaterThan(1.0);
 
-    // At 100% of 1st gear top speed (redline), torque drops to 0 (soft limiter)
-    const redlineSpeed = maxSpeed * 0.35;
+    // Higher gears apply progressive accelTaper and stronger low-RPM lugging
+    gb.gear = 6;
+    const lugSpeed6th = maxSpeed * 0.45;
+    const lugTorque6th = gb.getTorqueFactor(lugSpeed6th, maxSpeed);
+    gb.gear = 3;
+    const powerbandTorque3rd = gb.getTorqueFactor(lugSpeed6th, maxSpeed);
+    expect(powerbandTorque3rd).toBeGreaterThan(lugTorque6th * 1.5);
+
+    // At 100% of current gear top speed (redline), torque drops to 0 (soft limiter)
+    gb.gear = 1;
+    const redlineSpeed = maxSpeed * tuning.gear1MaxRatio;
     expect(gb.getTorqueFactor(redlineSpeed, maxSpeed)).toBe(0);
   });
 
   it('awards beat bonus on upshift at >= 0.72 RPM and prevents spamming on the same beat', () => {
     const gb = new Gearbox();
     const maxSpeed = tuning.maxSpeed;
-    const shiftSpeed = maxSpeed * 0.35 * 0.82; // 82% RPM in 1st gear
+    const shiftSpeed = maxSpeed * tuning.gear1MaxRatio * 0.82; // 82% RPM in 1st gear
 
     const res = gb.shift('up', shiftSpeed, maxSpeed, PERFECT_BEAT);
     expect(res).not.toBeNull();
@@ -60,7 +70,7 @@ describe('Gearbox (M5 Beat-Shift)', () => {
     const maxSpeed = tuning.maxSpeed;
 
     // Early upshift at low RPM (30% of 1st gear): still changes gear, no bonus
-    const earlyShift = gb.shift('up', maxSpeed * 0.35 * 0.3, maxSpeed, {
+    const earlyShift = gb.shift('up', maxSpeed * tuning.gear1MaxRatio * 0.3, maxSpeed, {
       ...PERFECT_BEAT,
       beatIndex: 20,
     });
@@ -69,7 +79,7 @@ describe('Gearbox (M5 Beat-Shift)', () => {
     expect(earlyShift?.rewardTier).toBe('OFF');
 
     // Off-beat upshift at optimal RPM: changes gear, no bonus
-    const offBeatShift = gb.shift('up', maxSpeed * 0.6 * 0.85, maxSpeed, OFF_BEAT);
+    const offBeatShift = gb.shift('up', maxSpeed * tuning.gear2MaxRatio * 0.85, maxSpeed, OFF_BEAT);
     expect(offBeatShift?.toGear).toBe(3);
     expect(offBeatShift?.rewardTier).toBe('OFF');
   });
@@ -79,12 +89,12 @@ describe('Gearbox (M5 Beat-Shift)', () => {
     const maxSpeed = tuning.maxSpeed;
     gb.autoShift = true;
 
-    gb.update(maxSpeed * 0.35 * 0.92, maxSpeed);
+    gb.update(maxSpeed * tuning.gear1MaxRatio * 0.92, maxSpeed);
     expect(gb.gear).toBe(2);
 
     // Switch back to manual and slow to a near-stop: automatically drops to 1st gear
     gb.autoShift = false;
-    gb.gear = 4;
+    gb.gear = 6;
     gb.update(maxSpeed * 0.05, maxSpeed);
     expect(gb.gear).toBe(1);
   });
