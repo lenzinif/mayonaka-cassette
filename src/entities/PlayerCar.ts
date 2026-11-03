@@ -166,7 +166,7 @@ export class PlayerCar {
   get offRoadDepth(): number {
     const absX = Math.abs(this.x);
     if (absX > this.roadOuterLimit) {
-      return Math.max(0, Math.min(1, (absX - this.roadOuterLimit) / 0.65));
+      return Math.max(0, Math.min(1, (absX - this.roadOuterLimit) / 0.55));
     }
     if (this.roadInnerGap > 0.02 && absX < this.roadInnerGap) {
       return Math.max(
@@ -382,12 +382,13 @@ export class PlayerCar {
 
     // 1. Longitudinal speed (accelerate via Gearbox torque curve / brake / coast + off-road & grade drag).
     const gearProgress = (this.gearbox.gear - 1) / (MAX_GEAR - 1);
-    // Uphill climbs (`segmentSlope > 0`) load tall gears (5th/6th) heavily so 6th gear cannot hold speed
-    // up steep `build` ramps, rewarding a downshift to 4th/5th; downhill slopes provide a gravity draft.
-    const gradeLoadFactor = 0.38 + Math.pow(gearProgress, 1.3) * 1.18;
+    // Uphill climbs (`segmentSlope > 0`) load tall gears (5th/6th) moderately so 6th gear sags from top speed,
+    // rewarding a downshift to 4th/5th, without stalling or dropping the car to a crawl.
+    const gradeLoadFactor =
+      0.26 + Math.pow(gearProgress, 1.3) * (tuning.hillClimbLoadFactor ?? 0.85);
     const slopeDragRate =
       segmentSlope > 0.01
-        ? Math.min(0.26, segmentSlope * 0.42) * gradeLoadFactor
+        ? Math.min(tuning.hillClimbDragRate ?? 0.14, segmentSlope * 0.25) * gradeLoadFactor
         : segmentSlope < -0.01
           ? Math.max(-0.09, segmentSlope * 0.16)
           : 0;
@@ -401,18 +402,29 @@ export class PlayerCar {
           (0.45 + 0.75 * gearProgress)
         : 0;
 
+    const offRoadDepth = this.offRoadDepth;
+    const isOffRoad = this.isOffRoad;
+
+    // Smooth off-road speed ceiling: scales smoothly from gearTopSpeed down to offRoadCap with penetration depth
+    const offRoadTargetCap =
+      gearTopSpeed - (gearTopSpeed - offRoadCap) * Math.pow(offRoadDepth, 1.1);
+    const targetCap = isOffRoad ? Math.min(gearTopSpeed, offRoadTargetCap) : gearTopSpeed;
+
+    // Progressive off-road drag: gentle resistance when grazing shoulder, firmer in deep grass/sand
+    const offRoadDragRate = isOffRoad
+      ? tuning.offRoadDecelRate * (0.2 + 0.8 * offRoadDepth) * offRoadDepth
+      : 0;
+
     if (controls.brake) {
       const brakeScale =
         controls.brakeAxis !== undefined && controls.brakeAxis > 0.15
           ? controls.brakeAxis
           : 1.0;
-      this.speed -= maxSpeed * (tuning.brakeRate * brakeScale + Math.max(0, slopeDragRate)) * dt;
-    } else if (this.isOffRoad && this.speed > offRoadCap) {
-      // Off-road grass drags speed down toward offRoadCap even if throttle is held
-      // (Design Pillar 3: slows down noticeably, never forces a dead stop).
-      this.speed = Math.max(offRoadCap, this.speed - maxSpeed * tuning.offRoadDecelRate * dt);
+      this.speed -=
+        maxSpeed *
+        (tuning.brakeRate * brakeScale + offRoadDragRate + Math.max(0, slopeDragRate)) *
+        dt;
     } else if (controls.accelerate) {
-      const targetCap = this.isOffRoad ? Math.min(offRoadCap, gearTopSpeed) : gearTopSpeed;
       if (this.speed <= targetCap) {
         const throttleScale =
           controls.throttleAxis !== undefined && controls.throttleAxis > 0.15
@@ -425,9 +437,17 @@ export class PlayerCar {
         // naturally dip speed into the 3rd/4th/5th gear powerband instead of staying pinned in 6th.
         const driftDriveScale =
           this.driftDir !== 0 ? Math.max(0.14, 0.58 - gearProgress * 0.44) : 1;
+        const driveScale = isOffRoad ? Math.max(0.45, 1 - offRoadDepth * 0.45) : 1;
         const netAccelRate =
-          tuning.accelRate * torque * driftDriveScale - slopeDragRate - cornerScrubRate;
+          tuning.accelRate * torque * driftDriveScale * driveScale -
+          slopeDragRate -
+          cornerScrubRate;
         this.speed = Math.min(targetCap, this.speed + maxSpeed * netAccelRate * dt);
+      } else if (isOffRoad) {
+        // Carrying more speed than the shoulder/grass permits: smoothly bleed down toward targetCap
+        const offRoadBleedRate =
+          offRoadDragRate + tuning.coastRate * 0.6 + Math.max(0, slopeDragRate);
+        this.speed = Math.max(targetCap, this.speed - maxSpeed * offRoadBleedRate * dt);
       } else if (this.gear < MAX_GEAR) {
         // Mechanical over-rev engine braking when downshifting into a lower gear above its top speed
         const overRevRatio = Math.max(0, (this.speed - targetCap) / maxSpeed);
@@ -440,7 +460,10 @@ export class PlayerCar {
         this.speed = Math.max(targetCap, this.speed - maxSpeed * aeroSettleRate * dt);
       }
     } else {
-      this.speed -= maxSpeed * (tuning.coastRate + Math.max(0, slopeDragRate) + cornerScrubRate) * dt;
+      this.speed -=
+        maxSpeed *
+        (tuning.coastRate + offRoadDragRate + Math.max(0, slopeDragRate) + cornerScrubRate) *
+        dt;
     }
 
     const hardMaxSpeed = maxSpeed * 1.065;
@@ -524,7 +547,10 @@ export class PlayerCar {
 
     // 5. Continuous Groove meter update (cruise, drift, off-road drain).
     if (this.isOffRoad) {
-      this.deductGroove(tuning.grooveOffRoadDrainRate * dt, onEvent);
+      this.deductGroove(
+        tuning.grooveOffRoadDrainRate * (0.2 + 0.8 * offRoadDepth) * dt,
+        onEvent,
+      );
     } else {
       if (this.driftDir !== 0) {
         this.addGroove(tuning.grooveDriftGainRate * dt, tofuActive, onEvent);

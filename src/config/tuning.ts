@@ -16,12 +16,14 @@ export const DEFAULT_TUNING = {
   // Speed (rates are fractions of maxSpeed per second)
   maxSpeed: 12000,
   maxSpeedKmh: 290,
-  accelRate: 0.18,
-  accelTaper: 0.7,
+  accelRate: 0.14,
+  accelTaper: 0.65,
   brakeRate: 1.0,
   coastRate: 0.18,
-  offRoadDecelRate: 0.85,
+  offRoadDecelRate: 0.52,
   offRoadMaxSpeedRatio: 0.3,
+  hillClimbDragRate: 0.14,
+  hillClimbLoadFactor: 0.85,
 
   // Steering (lateral units are road half-widths: 0 = center, ±1 = asphalt edge)
   steerRate: 2.2,
@@ -54,11 +56,11 @@ export const DEFAULT_TUNING = {
   syncHorizonStitchBars: 1.75,
 
   // Gearbox & Beat-Shift (M5 — 6-speed)
-  gear1MaxRatio: 0.24,
-  gear2MaxRatio: 0.4,
-  gear3MaxRatio: 0.56,
-  gear4MaxRatio: 0.72,
-  gear5MaxRatio: 0.86,
+  gear1MaxRatio: 0.28,
+  gear2MaxRatio: 0.46,
+  gear3MaxRatio: 0.63,
+  gear4MaxRatio: 0.79,
+  gear5MaxRatio: 0.91,
   gear6MaxRatio: 1.0,
   shiftPerfectMs: 50,
   shiftGoodMs: 100,
@@ -249,6 +251,25 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0.1,
     max: 1,
     step: 0.01,
+  },
+  {
+    group: 'Speed',
+    key: 'hillClimbDragRate',
+    label: 'Hill climb drag',
+    hint: 'Resistenza massima della pendenza in salita (evita che la macchina si pianti)',
+    unit: '/s',
+    min: 0.05,
+    max: 0.35,
+    step: 0.01,
+  },
+  {
+    group: 'Speed',
+    key: 'hillClimbLoadFactor',
+    label: 'Hill gear load',
+    hint: 'Quanto le marce alte (5ª/6ª) soffrono la salita rispetto a quelle basse (3ª/4ª)',
+    min: 0.2,
+    max: 1.5,
+    step: 0.05,
   },
 
   {

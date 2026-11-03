@@ -82,6 +82,7 @@ export interface TelemetrySnapshot {
   driftDirection: -1 | 0 | 1;
   driftTime: number;
   isOffRoad: boolean;
+  hasStartedDriving: boolean;
   lap: number;
   lapTime: number;
   lastLapTime: number | null;
@@ -218,6 +219,13 @@ export class Game {
   /** Camera Z position along the track, in world units [0, track.length). */
   position = 0;
   private prevPosition = 0;
+
+  /**
+   * Whether the player has initiated driving on the current track/stage.
+   * True only after the player accelerates, gives throttle, or shifts gear to drive forward.
+   * False at startup, and reset to false when loading a new track or restarting a playlist run.
+   */
+  hasStartedDriving = false;
 
   private simTime = 0;
   private lap = 1;
@@ -363,6 +371,7 @@ export class Game {
     this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
 
     if (resetPosition) {
+      this.hasStartedDriving = false;
       this.position = 0;
       this.prevPosition = 0;
       this.lap = 1;
@@ -391,6 +400,7 @@ export class Game {
     this.completedStages.length = 0;
     this.stageNumber = 1;
     this.palette = getStagePalette(0);
+    this.hasStartedDriving = false;
     const first = this.library.selectTrack(0);
     this.audio.loadTrack(first.beatMap, first.audioBuffer);
     this.loadBeatMapRoad(first.beatMap, true);
@@ -438,6 +448,7 @@ export class Game {
         }
 
         if (p.action === 'shiftUp' || p.action === 'shiftDown') {
+          this.hasStartedDriving = true;
           const dir = p.action === 'shiftUp' ? 'up' : 'down';
           const judgement = this.audio.judgeInputTimestamp(p.timeStamp);
           const shiftRes = this.car.shiftGear(
@@ -516,6 +527,16 @@ export class Game {
     this.controls.throttleAxis = this.input.getThrottleAxis?.();
     this.controls.brakeAxis = this.input.getBrakeAxis?.();
 
+    if (!this.hasStartedDriving) {
+      const throttleInput =
+        this.controls.accelerate ||
+        (this.controls.throttleAxis !== undefined && this.controls.throttleAxis > 0.05);
+      const isMoving = this.car.speed > 0.5 || this.position > 1;
+      if (throttleInput || isMoving) {
+        this.hasStartedDriving = true;
+      }
+    }
+
     const cameraDepth = cameraDepthFromFov(tuning.fieldOfView);
     const playerZOffset = tuning.cameraHeight * cameraDepth;
     const prevPlayerWorldZ = this.position + playerZOffset;
@@ -587,6 +608,7 @@ export class Game {
       currPlayerWorldZ,
       this.handleCollision,
       activeForkZoneStartZ,
+      this.hasStartedDriving,
     );
 
     // 4. Advance Melon Soda liquid physics (only active when Tofu Mode is ON)
@@ -603,7 +625,9 @@ export class Game {
     );
 
     this.simTime += dt;
-    this.lapTime += dt;
+    if (this.hasStartedDriving) {
+      this.lapTime += dt;
+    }
     if (this.collisionShake > 0) {
       this.collisionShake = Math.max(0, this.collisionShake - dt * 3.2);
     }
@@ -1269,6 +1293,7 @@ export class Game {
       driftDirection: this.car.driftDir,
       driftTime: this.car.driftTime,
       isOffRoad: this.car.isOffRoad,
+      hasStartedDriving: this.hasStartedDriving,
       lap: this.lap,
       lapTime: this.lapTime,
       lastLapTime: this.lastLapTime,
@@ -1341,7 +1366,7 @@ export function drawPauseOverlay(
   height: number,
 ): void {
   ctx.save();
-  ctx.fillStyle = 'rgba(7, 1, 18, 0.74)';
+  ctx.fillStyle = 'rgba(6, 1, 18, 0.78)';
   ctx.fillRect(0, 0, width, height);
 
   const boxW = 260;
@@ -1349,29 +1374,56 @@ export function drawPauseOverlay(
   const boxX = Math.round((width - boxW) * 0.5);
   const boxY = Math.round((height - boxH) * 0.5 - 12);
 
-  ctx.fillStyle = 'rgba(13, 2, 33, 0.94)';
-  ctx.fillRect(boxX, boxY, boxW, boxH);
+  ctx.fillStyle = 'rgba(13, 2, 33, 0.96)';
+  const roundRectSupported = typeof (ctx as unknown as { roundRect?: unknown }).roundRect === 'function';
+  if (roundRectSupported) {
+    ctx.beginPath();
+    (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void }).roundRect(
+      boxX,
+      boxY,
+      boxW,
+      boxH,
+      6,
+    );
+    ctx.fill();
+    ctx.strokeStyle = '#05d9e8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
 
-  ctx.strokeStyle = '#05d9e8';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(boxX, boxY, boxW, boxH);
+    ctx.beginPath();
+    (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void }).roundRect(
+      boxX + 3,
+      boxY + 3,
+      boxW - 6,
+      boxH - 6,
+      4,
+    );
+    ctx.strokeStyle = '#ff2a6d';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  } else {
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+    ctx.strokeStyle = '#05d9e8';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(boxX, boxY, boxW, boxH);
 
-  ctx.strokeStyle = '#ff2a6d';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(boxX + 3, boxY + 3, boxW - 6, boxH - 6);
+    ctx.strokeStyle = '#ff2a6d';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(boxX + 3, boxY + 3, boxW - 6, boxH - 6);
+  }
 
   ctx.fillStyle = '#ff2a6d';
-  ctx.font = '900 22px "Courier New", monospace';
+  ctx.font = '900 20px monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText('PAUSED', Math.round(width * 0.5), boxY + 28);
 
   ctx.fillStyle = '#05d9e8';
-  ctx.font = '700 9px "Courier New", monospace';
+  ctx.font = '700 9px monospace';
   ctx.fillText('PRESS [P], [ESC] OR GAMEPAD [START]', Math.round(width * 0.5), boxY + 52);
 
-  ctx.fillStyle = '#ffd319';
-  ctx.font = '700 8px "Courier New", monospace';
+  ctx.fillStyle = '#f472b6';
+  ctx.font = '700 8px monospace';
   ctx.fillText('CLICK ANYWHERE TO RESUME', Math.round(width * 0.5), boxY + 68);
 
   ctx.restore();

@@ -156,4 +156,58 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
     // Truck 3 was untouched
     expect(t3.z).toBe(14000);
   });
+
+  it('keeps trucks stationary and does not collide before the player starts driving (hasStartedDriving = false)', () => {
+    const track = buildTestTrack();
+    const tm = new TrafficManager(track, 'seed-pre-drive');
+    const truck = tm.trucks[0]!;
+    const initialZ = truck.z;
+
+    const car = new PlayerCar();
+    car.speed = 0;
+    // Place car directly in the same lane and position as the truck
+    car.x = truck.laneOffset;
+
+    const events: CollisionEvent[] = [];
+    // Simulate multiple frames before driving has started
+    for (let i = 0; i < 30; i++) {
+      tm.update(1 / 60, track, car, truck.z, truck.z, (e) => events.push(e), undefined, false);
+    }
+
+    // Truck must not have advanced in Z
+    expect(truck.z).toBe(initialZ);
+    // Zero collision events should have fired on the stationary player
+    expect(events).toHaveLength(0);
+    expect(car.speed).toBe(0);
+    expect(car.bumpVx).toBe(0);
+  });
+
+  it('evades a stationary or slower player ahead and never shunts player from behind', () => {
+    const track = buildTestTrack();
+    const tm = new TrafficManager(track, 'seed-evade');
+    const truck = tm.trucks[0]!;
+    truck.baseLaneOffset = 0;
+    truck.laneOffset = 0;
+    truck.z = 2000;
+
+    const car = new PlayerCar();
+    car.x = 0; // Directly in front of the truck
+    car.speed = 0; // Stationary player
+
+    const events: CollisionEvent[] = [];
+    // Truck is at 2000, player is at 2300 (300 units ahead in the same lane)
+    const playerZ = 2300;
+
+    // Simulate truck approaching player from behind
+    for (let i = 0; i < 60; i++) {
+      tm.update(1 / 60, track, car, playerZ, playerZ, (e) => events.push(e), undefined, true);
+    }
+
+    // AI truck should have steered away from lane 0 to avoid the stationary player
+    expect(Math.abs(truck.laneOffset)).toBeGreaterThan(0.2);
+    // No rear-end shunt outcome B should be applied to the player
+    const shuntEvents = events.filter((e) => e.outcome === 'playerShuntedOff');
+    expect(shuntEvents).toHaveLength(0);
+    expect(car.bumpVx).toBe(0);
+  });
 });

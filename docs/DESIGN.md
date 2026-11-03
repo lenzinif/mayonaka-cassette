@@ -1,4 +1,4 @@
-# Future Funk OutRun — Design Spec
+# 真夜中Cassette (Mayonaka Cassette) — Design Spec
 
 > Gameplay source of truth. Architecture rules live in `AGENTS.md`; this file describes **what** the mechanics are and **why**.
 > All numbers marked _(start)_ are initial tuning values, to be exposed in `tuning.ts` / DebugPanel.

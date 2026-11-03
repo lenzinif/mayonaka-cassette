@@ -110,7 +110,11 @@ export class TrafficManager {
     if (density <= 0 || segCount < 40) return;
 
     const rng = new SeededRandom(`${seed}:kei-traffic`);
-    const safeStartZ = Math.min(track.length * 0.15, 32 * track.segmentLength);
+    const minSafeSegments = Math.min(Math.floor(segCount * 0.35), 64);
+    const songClearSegments = isSongTrack(track)
+      ? Math.max(minSafeSegments, Math.round(track.segmentsPerBar * 3.5))
+      : minSafeSegments;
+    const safeStartZ = Math.min(track.length * 0.3, songClearSegments * track.segmentLength);
     let nextId = 1;
 
     if (isSongTrack(track)) {
@@ -152,8 +156,9 @@ export class TrafficManager {
         }
       }
     } else {
+      const startSeg = Math.max(30, Math.floor(safeStartZ / track.segmentLength));
       const stepSegs = Math.max(20, Math.round(45 / density));
-      for (let segIdx = 30; segIdx < segCount - 10; segIdx += stepSegs) {
+      for (let segIdx = startSeg; segIdx < segCount - 10; segIdx += stepSegs) {
         const laneIdx = rng.rangeInt(0, LANE_OFFSETS.length - 1);
         const laneOffset = LANE_OFFSETS[laneIdx]!;
         this.trucks.push({
@@ -231,11 +236,19 @@ export class TrafficManager {
     currPlayerWorldZ: number,
     onCollision?: (event: CollisionEvent) => void,
     forkZoneStartZ?: number,
+    hasStartedDriving = true,
   ): void {
     const trackLen = track.length;
     const segLen = track.segmentLength;
     const segCount = track.segments.length;
     if (trackLen <= 0 || segCount === 0) return;
+
+    // When the player has not yet started driving (e.g. initial start, selecting music/skins,
+    // or waiting at the starting grid), keep all AI traffic stationary and skip player collisions.
+    if (!hasStartedDriving) {
+      this.rebuildSpatialIndex(track);
+      return;
+    }
 
     if (this.collisionCooldown > 0) {
       this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
@@ -248,6 +261,9 @@ export class TrafficManager {
     this.segmentHeads.fill(-1);
 
     const maxSpeed = tuning.maxSpeed;
+    const wrappedCurrZ = ((currPlayerWorldZ % trackLen) + trackLen) % trackLen;
+    const wrappedPrevZ = ((prevPlayerWorldZ % trackLen) + trackLen) % trackLen;
+
     for (let i = 0; i < this.trucks.length; i++) {
       const t = this.trucks[i]!;
       const speedPenalty = t.knockedTimer > 0 && Math.abs(t.laneOffset) > 1 ? 0.65 : 1.0;
@@ -265,13 +281,37 @@ export class TrafficManager {
       if (t.knockedTimer > 0) {
         t.knockedTimer = Math.max(0, t.knockedTimer - dt);
         t.tiltAngle *= Math.exp(-3.2 * dt);
-      } else if (Math.abs(t.laneOffset - t.baseLaneOffset) > 0.01) {
-        // Smoothly steer back toward cruising lane once recovered
-        const returnStep = (t.baseLaneOffset - t.laneOffset) * Math.min(1, dt * 1.8);
-        t.laneOffset += returnStep;
-        t.tiltAngle = -returnStep * 4;
       } else {
-        t.tiltAngle = 0;
+        // AI Truck evasive steering: if the player is ahead in the same lane and slower/stopped, steer away smoothly
+        let deltaZToPlayer = wrappedCurrZ - t.z;
+        if (deltaZToPlayer > trackLen * 0.5) deltaZToPlayer -= trackLen;
+        if (deltaZToPlayer < -trackLen * 0.5) deltaZToPlayer += trackLen;
+
+        const truckEffectiveX = getEffectiveTruckLaneOffset(
+          t.laneOffset,
+          t.id,
+          t.z,
+          trackLen,
+          forkZoneStartZ,
+        );
+        const playerAheadClose = deltaZToPlayer > 0 && deltaZToPlayer < 750;
+        const inSameLane = Math.abs(truckEffectiveX - car.x) < 0.42;
+
+        if (playerAheadClose && inSameLane) {
+          // Player is ahead in this truck's lane: steer to an open lane
+          const evadeDir: -1 | 1 = car.x >= 0 ? -1 : 1;
+          t.baseLaneOffset = evadeDir * 0.58;
+          const evadeStep = evadeDir * Math.min(1.0, dt * 2.5);
+          t.laneOffset = Math.max(-0.85, Math.min(0.85, t.laneOffset + evadeStep));
+          t.tiltAngle = -evadeStep * 3;
+        } else if (Math.abs(t.laneOffset - t.baseLaneOffset) > 0.01) {
+          // Smoothly steer back toward cruising lane once recovered
+          const returnStep = (t.baseLaneOffset - t.laneOffset) * Math.min(1, dt * 1.8);
+          t.laneOffset += returnStep;
+          t.tiltAngle = -returnStep * 4;
+        } else {
+          t.tiltAngle = 0;
+        }
       }
 
       const segIdx = Math.floor(t.z / segLen) % segCount;
@@ -287,8 +327,6 @@ export class TrafficManager {
     //    - Combined lateral half-extent: COMBINED_HALF_X = 0.34 road half-widths.
     const COMBINED_HALF_Z = 185;
     const COMBINED_HALF_X = 0.34;
-    const wrappedCurrZ = ((currPlayerWorldZ % trackLen) + trackLen) % trackLen;
-    const wrappedPrevZ = ((prevPlayerWorldZ % trackLen) + trackLen) % trackLen;
     const playerSegIdx = Math.floor(wrappedCurrZ / segLen);
 
     for (let offset = -1; offset <= 1; offset++) {
@@ -373,6 +411,18 @@ export class TrafficManager {
             return;
           } else {
             // Dynamic Outcome B ("Da dietro"): Rear-ending head-on shunts the player hard toward off-road!
+            // Only trigger if player was actually driving faster than the truck and closing in from behind.
+            const truckForwardSpeed = truck.speedRatio * maxSpeed;
+            const playerClosingFromBehind =
+              car.speed > 50 &&
+              car.speed > truckForwardSpeed * 0.8 &&
+              (prevDeltaZ <= 0 || prevDeltaZ < currDeltaZ);
+            if (!playerClosingFromBehind) {
+              // The truck is overtaking the player from behind: do not penalize or shunt the player!
+              tIdx = truck.nextInSegment;
+              continue;
+            }
+
             const playerPushDir: -1 | 1 =
               Math.abs(signedLatDiff) > 0.04
                 ? signedLatDiff > 0
@@ -458,6 +508,9 @@ export class TrafficManager {
   private rebuildSpatialIndex(track: Track): void {
     const segCount = track.segments.length;
     const segLen = track.segmentLength;
+    if (this.segmentHeads.length < segCount) {
+      this.segmentHeads = new Int32Array(segCount);
+    }
     this.segmentHeads.fill(-1);
     for (let i = 0; i < this.trucks.length; i++) {
       const t = this.trucks[i]!;

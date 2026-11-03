@@ -39,6 +39,14 @@ export function App() {
   const [trackLoaderOpen, setTrackLoaderOpen] = useState(false);
 
   useEffect(() => {
+    if (trackLoaderOpen || inspectorOpen) {
+      gameRef.current?.setPaused(true);
+    } else if (preloadReady) {
+      gameRef.current?.setPaused(false);
+    }
+  }, [trackLoaderOpen, inspectorOpen, preloadReady]);
+
+  useEffect(() => {
     void preloader
       .preloadAll((p) => {
         setPreloadProgress({ ...p });
@@ -93,6 +101,9 @@ export function App() {
           preloader={preloader}
           onGameReady={(game) => {
             gameRef.current = game;
+            if (trackLoaderOpen || inspectorOpen) {
+              game.setPaused(true);
+            }
           }}
         />
         <HUD
@@ -101,6 +112,7 @@ export function App() {
           onToggleDebug={() => setDebugOpen((prev) => !prev)}
           onOpenTrackLoader={() => setTrackLoaderOpen(true)}
           onOpenInspector={() => setInspectorOpen(true)}
+          onRestartRun={() => gameRef.current?.restartPlaylistRun()}
         />
         <RadioSelector
           bridge={bridge}

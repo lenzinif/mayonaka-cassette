@@ -1,4 +1,4 @@
-# Future Funk OutRun — Architecture & Agent Rules
+# 真夜中Cassette (Mayonaka Cassette) — Architecture & Agent Rules
 
 ## 1. Project Vision & Design Pillars (The Yu Suzuki Ethos)
 

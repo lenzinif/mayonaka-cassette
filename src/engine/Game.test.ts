@@ -478,4 +478,37 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     expect(snap.drawnProps).toBeGreaterThanOrEqual(0);
     expect(snap.drawnTrucks).toBeGreaterThanOrEqual(0);
   });
+
+  it('keeps hasStartedDriving = false, lapTime = 0, and traffic idle until player drives', () => {
+    const input = new FakeInput();
+    const game = new Game({ input });
+    const firstTruck = game.traffic.trucks[0]!;
+    const initialTruckZ = firstTruck.z;
+
+    expect(game.hasStartedDriving).toBe(false);
+
+    // Simulate 30 frames while sitting idle at the start line (selecting music, skins, etc.)
+    for (let i = 0; i < 30; i++) {
+      game.update(1 / 60);
+    }
+
+    expect(game.hasStartedDriving).toBe(false);
+    expect(firstTruck.z).toBe(initialTruckZ);
+
+    // Now player begins driving (presses accelerate)
+    input.setDown('accelerate', true);
+    game.update(1 / 60);
+
+    expect(game.hasStartedDriving).toBe(true);
+
+    // Simulate more frames: car accelerates and traffic advances
+    for (let i = 0; i < 30; i++) {
+      game.update(1 / 60);
+    }
+    expect(firstTruck.z).toBeGreaterThan(initialTruckZ);
+
+    // Restarting run resets hasStartedDriving back to false
+    game.restartPlaylistRun();
+    expect(game.hasStartedDriving).toBe(false);
+  });
 });

@@ -50,10 +50,10 @@ export function LoadingScreen({ progress, ready, onStart }: LoadingScreenProps) 
       {/* Center Hero: Retro Neon Title & Visuals */}
       <div className="relative my-auto flex flex-col items-center text-center">
         <div className="text-4xl font-black tracking-widest text-transparent italic sm:text-6xl bg-clip-text bg-linear-to-r from-pink-500 via-fuchsia-400 to-cyan-300 drop-shadow-[0_0_25px_rgba(255,42,109,0.7)]">
-          OUTRUN
+          真夜中CASSETTE
         </div>
         <div className="mt-1 text-base font-bold tracking-[0.45em] text-cyan-200 uppercase sm:text-xl drop-shadow-[0_0_15px_rgba(5,217,232,0.6)]">
-          FUTURE FUNK
+          MAYONAKA CASSETTE
         </div>
         <div className="mt-2 text-xs tracking-[0.2em] text-fuchsia-300/80 uppercase">
           MUSIC DRIVES THE ROAD · BEAT-SHIFT GEARBOX · MELON SODA
@@ -96,7 +96,7 @@ export function LoadingScreen({ progress, ready, onStart }: LoadingScreenProps) 
 
       {/* Bottom Footer Info */}
       <div className="w-full max-w-xl border-t border-fuchsia-500/30 pt-2 text-center text-[10px] tracking-wider text-fuchsia-300/60">
-        AUTOPLAY COMPLIANT · CLIENT-SIDE DSP AUDIO ANALYSIS · ZERO ASSET TRACK GENERATION
+        Entirely vibecoded while listening to future funk
       </div>
     </div>
   );
