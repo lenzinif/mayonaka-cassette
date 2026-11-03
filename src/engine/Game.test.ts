@@ -274,3 +274,74 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     expect(collisions.length).toBe(0);
   });
 });
+
+describe('Spacetime Hybrid Sync (A1 + A2)', () => {
+  it('modulates world advancement within [1 - slowdown, 1 + speedup] bounds', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const audio = new FunkAudioEngine();
+    const game = new Game({ input, bridge, audio });
+
+    // Car cruising at 60% speed
+    game.car.speed = 7200;
+    const startPos = 10 * game.track.segmentLength;
+    game.position = startPos;
+
+    // Simulate 1 step (1/60s)
+    game.update(1 / 60);
+
+    const advancedDist = game.position - startPos;
+    const baseDist = 7200 * (1 / 60);
+
+    // Advanced distance should be scaled by A1 paceFactor / elastic factor
+    expect(advancedDist).toBeGreaterThan(0);
+    expect(advancedDist / baseDist).toBeGreaterThanOrEqual(1 - 0.16 - 0.01);
+    expect(advancedDist / baseDist).toBeLessThanOrEqual(1 + 0.25 + 0.01);
+  });
+
+  it('synchronizes relaxed driving (65% speed) with drop crest and reaches stage fork without being trapped in outro loop', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const audio = new FunkAudioEngine();
+    const library = new TrackLibrary();
+    const game = new Game({ input, bridge, audio, library });
+
+    const dropSyncs: { barIndex: number; deltaBeats: number }[] = [];
+    bridge.onEvent((ev) => {
+      if (ev.type === 'dropSync') {
+        dropSyncs.push({ barIndex: ev.barIndex, deltaBeats: ev.deltaBeats });
+      }
+    });
+
+    // Simulate relaxed driving at ~68% maxSpeed (approx 8160 world units/s, well below old 0.85 baseline of 10200)
+    // Run simulation through the first drop (bar 16) and beyond
+    const dt = 1 / 60;
+    const totalSimTime = 55; // 55 seconds (song has bar 16 drop at ~31.5s)
+    const steps = Math.floor(totalSimTime / dt);
+
+    for (let step = 0; step < steps; step++) {
+      // Simulate player maintaining 3rd-4th gear cruising speed (~8100)
+      game.car.speed = 8100;
+      game.update(dt);
+    }
+
+    // Must have crossed the first drop (bar 16) with dropSync trigger (|deltaBeats| <= 1.25)
+    expect(dropSyncs.length).toBeGreaterThanOrEqual(1);
+    const firstDrop = dropSyncs.find((d) => d.barIndex === 16);
+    expect(firstDrop).toBeDefined();
+    if (firstDrop) {
+      expect(Math.abs(firstDrop.deltaBeats)).toBeLessThanOrEqual(1.25);
+    }
+
+    // Continue simulation until near the end of the 64-bar song (~125s)
+    const remainingTime = 72; // total ~127s
+    const remainingSteps = Math.floor(remainingTime / dt);
+    for (let step = 0; step < remainingSteps; step++) {
+      game.car.speed = 8100;
+      game.update(dt);
+    }
+
+    // Car should have reached the stage fork or completed the stage, and DJ should NOT be stuck in holdOutroLoop
+    expect(audio.isOutroLooping).toBe(false);
+  });
+});

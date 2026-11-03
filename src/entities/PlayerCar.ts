@@ -425,7 +425,8 @@ export class PlayerCar {
 }
 
 /**
- * Procedural greybox 80s JDM / Testarossa rear-view car renderer (AGENTS.md §4).
+ * 16-bit pixel-art 80s Testarossa Spider convertible rear-view car renderer
+ * with procedural polygon/pixel fallback (AGENTS.md §4.3, §4.4 & §5 M7).
  */
 export function drawPlayerCar(
   ctx: CanvasRenderingContext2D,
@@ -435,94 +436,172 @@ export function drawPlayerCar(
 ): void {
   const speedRatio = Math.min(1, car.speedRatio);
   const bounceAmp = car.isOffRoad ? 3.2 * speedRatio : 0.8 * speedRatio;
-  const bounceY = Math.sin(car.bouncePhase) * bounceAmp;
-  const pitchY = car.pitch * 6;
+  const bounceY = Math.round(Math.sin(car.bouncePhase) * bounceAmp);
+  const pitchY = Math.round(car.pitch * 6);
 
-  const cx = canvasWidth / 2 + car.yaw * 5;
-  const baseY = canvasHeight - 26 + bounceY + pitchY;
-  // Subtle perspective shift instead of heavy cartoon shear
-  const skew = car.yaw * 4.5;
+  const cx = Math.round(canvasWidth / 2 + car.yaw * 5);
+  const baseY = Math.round(canvasHeight - 26 + bounceY + pitchY);
+  // Discrete arcade sprite banking offset (-6..+6 px) for crisp pixel-art stepping
+  const bank = Math.round(car.yaw * 5);
+  const treadPhase = Math.floor(car.bouncePhase * 2.5) & 1;
 
   ctx.save();
   ctx.translate(cx, baseY);
   ctx.rotate(car.yaw * 0.025);
 
-  // Drift tire smoke puffs
+  // 1. Drift tire smoke puffs (procedural fallback layer supplementing ParticleSystem)
   if (car.isDrifting) {
     const dir = -car.driftDir;
-    ctx.fillStyle = car.isOffRoad ? 'rgba(180, 120, 210, 0.38)' : 'rgba(5, 217, 232, 0.42)';
+    ctx.fillStyle = car.isOffRoad ? 'rgba(180, 120, 210, 0.35)' : 'rgba(5, 217, 232, 0.38)';
     for (let i = 0; i < 4; i++) {
       const phase = (car.bouncePhase * 0.7 + i * 1.7) % 4;
-      const r = 4 + phase * 3.5;
-      const ox = dir * (8 + phase * 9);
-      const oy = 2 - phase * 2.5;
-      ctx.beginPath();
-      ctx.arc(-38 + ox, oy, r, 0, Math.PI * 2);
-      ctx.arc(38 + ox, oy, r, 0, Math.PI * 2);
-      ctx.fill();
+      const r = Math.round(3 + phase * 3);
+      const ox = Math.round(dir * (8 + phase * 9));
+      const oy = Math.round(2 - phase * 2.5);
+      ctx.fillRect(-40 + ox - r, oy - r, r * 2, r * 2);
+      ctx.fillRect(36 + ox - r, oy - r, r * 2, r * 2);
     }
   }
 
-  // Ground shadow
-  ctx.fillStyle = 'rgba(8, 2, 20, 0.65)';
-  ctx.beginPath();
-  ctx.ellipse(0, 4, 56, 8, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // 2. Pixel-stepped ground shadow + HIGH/SSS Groove neon underglow
+  ctx.fillStyle = 'rgba(8, 2, 20, 0.7)';
+  ctx.fillRect(-54, 1, 108, 6);
+  ctx.fillRect(-48, 7, 96, 3);
+  if (car.grooveTier === 'SSS' || car.grooveTier === 'HIGH') {
+    ctx.fillStyle =
+      car.grooveTier === 'SSS' ? 'rgba(255, 211, 25, 0.42)' : 'rgba(5, 217, 232, 0.34)';
+    ctx.fillRect(-44, 2, 88, 4);
+  }
 
-  // Rear tires
+  // 3. Wide rear tires with animated pixel tread blocks
+  const leftTireX = -51 + Math.round(bank * 0.2);
+  const rightTireX = 33 + Math.round(bank * 0.2);
   ctx.fillStyle = '#12091f';
-  ctx.fillRect(-50 + skew * 0.15, -14, 16, 16);
-  ctx.fillRect(34 + skew * 0.15, -14, 16, 16);
+  ctx.fillRect(leftTireX, -15, 18, 17);
+  ctx.fillRect(rightTireX, -15, 18, 17);
 
-  // Lower chassis / diffuser
-  ctx.fillStyle = '#241138';
-  trapezoid(ctx, -48 + skew * 0.2, -4, 96, -44 + skew * 0.3, -12, 88);
+  ctx.fillStyle = treadPhase === 0 ? '#2b1847' : '#1e1035';
+  for (let ty = -13; ty <= -3; ty += 4) {
+    ctx.fillRect(leftTireX + 2, ty + treadPhase, 14, 2);
+    ctx.fillRect(rightTireX + 2, ty + treadPhase, 14, 2);
+  }
 
-  // Main rear body (Testarossa wedge)
+  // 4. Lower aerodynamic diffuser & undertray fins
+  ctx.fillStyle = '#1f0d33';
+  trapezoid(ctx, -48 + bank * 0.2, -3, 96, -45 + bank * 0.3, -12, 90);
+  ctx.fillStyle = '#381a5c';
+  for (let fx = -32; fx <= 32; fx += 16) {
+    ctx.fillRect(fx + Math.round(bank * 0.25) - 1, -10, 2, 7);
+  }
+
+  // 5. Main rear body (Testarossa wide-body wedge) + pixel fender highlights
   ctx.fillStyle = '#ff2a6d';
-  trapezoid(ctx, -50 + skew * 0.25, -10, 100, -44 + skew * 0.45, -28, 88);
+  trapezoid(ctx, -50 + bank * 0.25, -10, 100, -44 + bank * 0.45, -28, 88);
 
-  // Side strakes (Testarossa ribs)
-  ctx.fillStyle = '#b81d52';
-  ctx.fillRect(-46 + skew * 0.35, -22, 92, 2);
-  ctx.fillRect(-47 + skew * 0.3, -18, 94, 2);
+  // Upper fender shoulder highlights
+  ctx.fillStyle = '#ff70a6';
+  ctx.fillRect(-45 + Math.round(bank * 0.42), -28, 18, 2);
+  ctx.fillRect(27 + Math.round(bank * 0.42), -28, 18, 2);
 
-  // Upper deck & cabin
+  // Iconic Pininfarina side strakes & rear cooling louvers
+  ctx.fillStyle = '#9e1446';
+  ctx.fillRect(-47 + Math.round(bank * 0.35), -22, 94, 2);
+  ctx.fillRect(-48 + Math.round(bank * 0.3), -18, 96, 2);
+  ctx.fillRect(-49 + Math.round(bank * 0.26), -14, 98, 2);
+
+  // 6. Upper engine deck & convertible tonneau cover
   ctx.fillStyle = '#d91b5c';
-  trapezoid(ctx, -44 + skew * 0.45, -28, 88, -30 + skew * 0.75, -42, 60);
+  trapezoid(ctx, -44 + bank * 0.45, -28, 88, -32 + bank * 0.72, -41, 64);
 
-  // Rear windshield (cyan/violet reflection)
-  ctx.fillStyle = '#1a0c33';
-  trapezoid(ctx, -34 + skew * 0.55, -29, 68, -24 + skew * 0.8, -40, 48);
+  // Mid-engine cooling vents on rear deck
+  ctx.fillStyle = '#240b36';
+  for (let vy = -38; vy <= -31; vy += 3) {
+    ctx.fillRect(-14 + Math.round(bank * 0.6), vy, 28, 2);
+  }
+
+  // 7. Open-top Spider cockpit: Driver (left) + 90s Anime Co-Pilot (right) + windshield frame
+  const cabinShift = Math.round(bank * 0.78);
+  // Windshield frame & cyan glass reflection
+  ctx.fillStyle = '#180a2e';
+  trapezoid(ctx, -34 + cabinShift, -32, 68, -26 + cabinShift, -44, 52);
   ctx.fillStyle = '#05d9e8';
-  ctx.globalAlpha = 0.55;
-  trapezoid(ctx, -30 + skew * 0.6, -30, 26, -21 + skew * 0.82, -39, 18);
+  ctx.fillRect(-25 + cabinShift, -44, 50, 2);
+  ctx.globalAlpha = 0.45;
+  trapezoid(ctx, -30 + cabinShift, -33, 24, -23 + cabinShift, -42, 16);
   ctx.globalAlpha = 1;
 
-  // Tail-light visor bar
-  ctx.fillStyle = '#160826';
-  ctx.fillRect(-44 + skew * 0.35, -24, 88, 7);
-
-  // Tail lights (glow brighter when braking)
-  const lightColor = car.braking ? '#fff3b0' : '#ff4f9a';
-  const glowColor = car.braking ? '#ff2a6d' : '#ff2975';
-  ctx.fillStyle = glowColor;
-  ctx.fillRect(-42 + skew * 0.35, -23, 26, 5);
-  ctx.fillRect(16 + skew * 0.35, -23, 26, 5);
-  ctx.fillStyle = lightColor;
-  ctx.fillRect(-40 + skew * 0.35, -22, 22, 3);
-  ctx.fillRect(18 + skew * 0.35, -22, 22, 3);
-
-  // Center neon license plate
+  // Driver silhouette (left seat) with retro visor shades
+  ctx.fillStyle = '#120624';
+  ctx.fillRect(-20 + cabinShift, -39, 10, 8);
   ctx.fillStyle = '#05d9e8';
-  ctx.fillRect(-9 + skew * 0.3, -16, 18, 7);
-  ctx.fillStyle = '#0d0221';
-  ctx.fillRect(-7 + skew * 0.3, -14, 14, 3);
+  ctx.fillRect(-18 + cabinShift, -36, 6, 2);
 
-  // Dual exhaust tips
+  // 90s Anime Passenger silhouette (right seat) with wind-blown magenta/violet pixel hair
+  const hairWave = treadPhase === 0 ? 1 : -1;
+  ctx.fillStyle = '#7b2cbf';
+  ctx.fillRect(8 + cabinShift, -40, 11, 9);
+  ctx.fillStyle = '#ff4f9a';
+  ctx.fillRect(10 + cabinShift + hairWave, -41, 9, 3);
+  ctx.fillRect(16 + cabinShift + hairWave, -37, 5, 4);
+  // Passenger cyan jacket shoulder
+  ctx.fillStyle = '#05d9e8';
+  ctx.fillRect(7 + cabinShift, -32, 12, 3);
+
+  // Center rear-view mirror
   ctx.fillStyle = '#f6e7ff';
-  ctx.fillRect(-26 + skew * 0.2, -7, 6, 3);
-  ctx.fillRect(20 + skew * 0.2, -7, 6, 3);
+  ctx.fillRect(-3 + cabinShift, -41, 6, 2);
+
+  // 8. Recessed black tail-light louver bar & twin slotted neon tail lamps
+  const tailShift = Math.round(bank * 0.35);
+  ctx.fillStyle = '#140624';
+  ctx.fillRect(-45 + tailShift, -25, 90, 8);
+
+  const outerTailColor = car.braking ? '#ff2a6d' : '#d91b5c';
+  const innerTailColor = car.braking ? '#fff3b0' : '#ff5c93';
+  ctx.fillStyle = outerTailColor;
+  ctx.fillRect(-43 + tailShift, -24, 27, 6);
+  ctx.fillRect(16 + tailShift, -24, 27, 6);
+  ctx.fillStyle = innerTailColor;
+  ctx.fillRect(-41 + tailShift, -23, 10, 4);
+  ctx.fillRect(-28 + tailShift, -23, 10, 4);
+  ctx.fillRect(18 + tailShift, -23, 10, 4);
+  ctx.fillRect(31 + tailShift, -23, 10, 4);
+
+  // Tail-light horizontal black louver slits
+  ctx.fillStyle = '#140624';
+  ctx.fillRect(-43 + tailShift, -21, 27, 1);
+  ctx.fillRect(16 + tailShift, -21, 27, 1);
+
+  // Brake light bloom halo when braking
+  if (car.braking) {
+    ctx.fillStyle = 'rgba(255, 42, 109, 0.38)';
+    ctx.fillRect(-46 + tailShift, -27, 33, 12);
+    ctx.fillRect(13 + tailShift, -27, 33, 12);
+  }
+
+  // 9. Center JDM neon license plate ("FUNK-88")
+  const plateShift = Math.round(bank * 0.3);
+  ctx.fillStyle = '#05d9e8';
+  ctx.fillRect(-10 + plateShift, -17, 20, 8);
+  ctx.fillStyle = '#0d0221';
+  ctx.fillRect(-8 + plateShift, -15, 16, 4);
+  ctx.fillStyle = '#ffd319';
+  ctx.fillRect(-6 + plateShift, -14, 5, 2);
+  ctx.fillRect(1 + plateShift, -14, 5, 2);
+
+  // 10. Quad pixel-art chrome exhaust tips + high-RPM / drift backfire glow
+  const exShift = Math.round(bank * 0.2);
+  ctx.fillStyle = '#e0fbfc';
+  ctx.fillRect(-30 + exShift, -8, 4, 4);
+  ctx.fillRect(-24 + exShift, -8, 4, 4);
+  ctx.fillRect(20 + exShift, -8, 4, 4);
+  ctx.fillRect(26 + exShift, -8, 4, 4);
+
+  ctx.fillStyle = car.isDrifting || car.rpm > 0.8 ? '#ffd319' : '#241138';
+  ctx.fillRect(-29 + exShift, -7, 2, 2);
+  ctx.fillRect(-23 + exShift, -7, 2, 2);
+  ctx.fillRect(21 + exShift, -7, 2, 2);
+  ctx.fillRect(27 + exShift, -7, 2, 2);
 
   ctx.restore();
 }

@@ -2,6 +2,20 @@ import { tuning } from '@src/config/tuning';
 
 export type SodaSkin = 'melon-soda' | 'tofu-cup' | 'pocari' | 'boss-coffee';
 
+export const SODA_SKINS: readonly SodaSkin[] = [
+  'melon-soda',
+  'tofu-cup',
+  'pocari',
+  'boss-coffee',
+] as const;
+
+export const SODA_SKIN_LABELS: Readonly<Record<SodaSkin, string>> = {
+  'melon-soda': 'MELON SODA',
+  'tofu-cup': 'TOFU WATER CUP',
+  pocari: 'POCARI SWEAT',
+  'boss-coffee': 'BOSS COFFEE',
+};
+
 export type SodaSloshState = 'CALM' | 'SLOSHING' | 'CRESTING' | 'SPILLING';
 
 interface SplashDroplet {
@@ -120,6 +134,13 @@ export class MelonSoda {
   toggle(): boolean {
     this.setActive(!this.active);
     return this.active;
+  }
+
+  /** Cycles through the 4 unlockable cosmetic drink skins (docs/DESIGN.md §5.2). */
+  cycleSkin(): SodaSkin {
+    const idx = SODA_SKINS.indexOf(this.skin);
+    this.skin = SODA_SKINS[(idx + 1) % SODA_SKINS.length]!;
+    return this.skin;
   }
 
   /** Explicitly sets Tofu Mode state. */
@@ -433,19 +454,27 @@ export function drawMelonSodaInset(
   ctx.lineWidth = isSpilling || isCresting ? 1.5 : 1;
   ctx.strokeRect(0.5, 0.5, boxW - 1, boxH - 1);
 
-  // Header strip with live state label ("CALM", "SLOSH", "CREST!", "SPILL!")
+  // Header strip with live state label ("CALM", "SLOSH", "CREST!", "SPILL!") + skin short label
   ctx.fillStyle = isSpilling ? '#ff2a6d' : isCresting ? '#522608' : '#1b0938';
   ctx.fillRect(1, 1, boxW - 2, 13);
 
   ctx.fillStyle = isSpilling ? '#ffffff' : isCresting ? '#ffd319' : '#14f1d9';
   ctx.font = 'bold 8px monospace';
+  const skinShort =
+    soda.skin === 'tofu-cup'
+      ? 'TOFU CUP'
+      : soda.skin === 'pocari'
+        ? 'POCARI'
+        : soda.skin === 'boss-coffee'
+          ? 'BOSS CAN'
+          : 'SODA';
   const headerText = isSpilling
     ? 'SPILL! -GROOVE'
     : isCresting
-      ? 'RIM CREST! // x2'
+      ? `CREST! ${skinShort}`
       : soda.sloshState === 'SLOSHING'
-        ? 'SLOSHING // x2'
-        : 'TOFU MODE // x2';
+        ? `SLOSH // ${skinShort}`
+        : `${skinShort} // x2`;
   ctx.fillText(headerText, 5, 10);
 
   // Danger meter bar on right side of header
@@ -460,9 +489,9 @@ export function drawMelonSodaInset(
     6,
   );
 
-  // 2. Cup-holder saucer tray at bottom center
+  // 2. Cup-holder saucer tray & pixel-art pedestal base at bottom center
   const cx = Math.floor(boxW / 2);
-  const cy = 50;
+  const cy = 48;
 
   ctx.fillStyle = '#241138';
   ctx.fillRect(cx - 36, 70, 72, 5);
@@ -500,22 +529,78 @@ export function drawMelonSodaInset(
     ctx.globalAlpha = 1;
   }
 
-  // 3. Draw glass interior & multi-mode wave surface around (cx, cy)
+  // 3. Draw container exterior/pedestal, interior clip & multi-mode wave surface around (cx, cy)
   ctx.save();
   ctx.translate(cx, cy);
 
-  // Clip interior of the kissaten diner glass trapezoid (top width 38, bottom width 24, height 44)
+  const isCan = soda.skin === 'pocari' || soda.skin === 'boss-coffee';
+  const topHalfW = isCan ? 16 : 19;
+  const botHalfW = isCan ? 16 : 12;
+
+  // If Melon Soda kissaten pedestal glass, draw pixel-art glass stem & foot + striped bendy straw
+  if (soda.skin === 'melon-soda') {
+    // Glass pedestal stem & foot
+    ctx.fillStyle = '#9bd4e8';
+    ctx.fillRect(-4, 18, 8, 3);
+    ctx.fillRect(-11, 20, 22, 2);
+    // Red-and-white striped retro bendy straw emerging from the left rim
+    for (let sy = -31; sy < -16; sy += 2) {
+      ctx.fillStyle = (sy & 2) === 0 ? '#ff2a6d' : '#ffffff';
+      ctx.fillRect(-15, sy, 3, 2);
+    }
+    ctx.fillStyle = '#ff2a6d';
+    ctx.fillRect(-20, -31, 6, 2);
+  } else if (soda.skin === 'tofu-cup') {
+    // Initial D pleated white paper cup exterior silhouette & rolled rim
+    ctx.fillStyle = '#e8eef5';
+    ctx.beginPath();
+    ctx.moveTo(-20, -22);
+    ctx.lineTo(20, -22);
+    ctx.lineTo(13, 21);
+    ctx.lineTo(-13, 21);
+    ctx.closePath();
+    ctx.fill();
+    // Rolled white paper cup lip
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(-21, -24, 42, 3);
+  } else if (isCan) {
+    // Aluminum drink can body (Pocari blue or Boss Coffee gold/navy)
+    ctx.fillStyle = soda.skin === 'pocari' ? '#0066cc' : '#c88a2b';
+    ctx.fillRect(-17, -21, 34, 42);
+    // Metallic silver top & bottom can rims + pull tab
+    ctx.fillStyle = '#d8e4f0';
+    ctx.fillRect(-16, -23, 32, 2);
+    ctx.fillRect(-16, 20, 32, 2);
+    ctx.fillRect(-3, -25, 6, 2);
+    // Decorative top band / wave strip above cutaway window
+    if (soda.skin === 'pocari') {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-16, -18, 32, 2);
+    } else {
+      ctx.fillStyle = '#1b0938';
+      ctx.fillRect(-16, -19, 32, 3);
+      ctx.fillStyle = '#ffd319';
+      ctx.fillRect(-3, -19, 6, 3);
+    }
+  }
+
+  // Clip interior of the glass trapezoid (or cutaway sight-window on cans)
   ctx.save();
   ctx.beginPath();
-  ctx.moveTo(-19, -22);
-  ctx.lineTo(19, -22);
-  ctx.lineTo(12, 20);
-  ctx.lineTo(-12, 20);
-  ctx.closePath();
+  if (isCan) {
+    ctx.rect(-14, -15, 28, 33);
+  } else {
+    ctx.moveTo(-topHalfW, -22);
+    ctx.lineTo(topHalfW, -22);
+    ctx.lineTo(botHalfW, 18);
+    ctx.lineTo(-botHalfW, 18);
+    ctx.closePath();
+  }
   ctx.clip();
 
-  // Glass interior dark tint
-  ctx.fillStyle = 'rgba(18, 10, 38, 0.8)';
+  // Interior dark backdrop
+  ctx.fillStyle =
+    soda.skin === 'tofu-cup' ? 'rgba(28, 36, 58, 0.88)' : 'rgba(18, 10, 38, 0.84)';
   ctx.fillRect(-24, -26, 48, 50);
 
   // Wet condensation trails on left/right inner glass walls from recent sloshes
@@ -523,14 +608,14 @@ export function drawMelonSodaInset(
     ctx.fillStyle = liquidColor;
     ctx.globalAlpha = 0.28 * soda.wetLeft;
     const hLeft = soda.wetLeft * 15;
-    ctx.fillRect(-19, -7 - hLeft, 3, hLeft + 4);
+    ctx.fillRect(-topHalfW, -7 - hLeft, 3, hLeft + 4);
     ctx.globalAlpha = 1;
   }
   if (soda.wetRight > 0.05) {
     ctx.fillStyle = liquidColor;
     ctx.globalAlpha = 0.28 * soda.wetRight;
     const hRight = soda.wetRight * 15;
-    ctx.fillRect(16, -7 - hRight, 3, hRight + 4);
+    ctx.fillRect(topHalfW - 3, -7 - hRight, 3, hRight + 4);
     ctx.globalAlpha = 1;
   }
 
@@ -540,7 +625,6 @@ export function drawMelonSodaInset(
   const baseLevelY = -7 + heave * 0.85;
   const slopeScale = 14 / threshold;
   const waveYAt = (xNorm: number): number => {
-    // xNorm in [-1, 1]
     const linearTilt = xNorm * theta * slopeScale;
     const sWave = Math.sin(xNorm * Math.PI) * crest * (6.5 / threshold);
     const ripple =
@@ -548,7 +632,7 @@ export function drawMelonSodaInset(
     return baseLevelY - linearTilt - sWave + ripple;
   };
 
-  // Draw lower deep-green soda gradient layer
+  // Draw lower deep liquid gradient layer
   ctx.fillStyle = liquidDeepColor;
   ctx.beginPath();
   ctx.moveTo(-22, 24);
@@ -560,7 +644,7 @@ export function drawMelonSodaInset(
   ctx.closePath();
   ctx.fill();
 
-  // Draw upper fizzy neon-green soda body following the curved wave
+  // Draw upper liquid body following the curved wave
   ctx.fillStyle = liquidColor;
   ctx.beginPath();
   ctx.moveTo(-22, 10);
@@ -586,83 +670,98 @@ export function drawMelonSodaInset(
   ctx.stroke();
 
   if (soda.skin === 'melon-soda') {
+    // Fluted kissaten vertical glass rib highlights
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
+    ctx.fillRect(-10, -20, 2, 36);
+    ctx.fillRect(0, -20, 2, 36);
+    ctx.fillRect(9, -20, 2, 36);
+
     // Rising carbonation fizz bubbles
     ctx.fillStyle = '#e0fff0';
     for (let b = 0; b < 6; b++) {
       const bx = -11 + b * 4.4 + Math.sin(phase * 2 + b) * 1.2;
       const topLimit = waveYAt(bx / 22) + 2;
-      const by = 18 - ((phase * 14 + b * 6.5) % Math.max(4, 18 - topLimit));
+      const by = 16 - ((phase * 14 + b * 6.5) % Math.max(4, 16 - topLimit));
       if (by > topLimit) {
-        ctx.fillRect(Math.round(bx), Math.round(by), 1.5, 1.5);
+        ctx.fillRect(Math.round(bx), Math.round(by), 2, 2);
       }
     }
 
-    // Two independent buoyant translucent ice cubes riding the local wave height
+    // Two independent buoyant pixel-art ice cubes riding the local wave height
     const icePositions = [-8, 7] as const;
     for (let i = 0; i < icePositions.length; i++) {
-      const ix = icePositions[i]! + floatTilt * 2.5;
-      const iy = waveYAt(ix / 22) + 2.5;
+      const ix = Math.round(icePositions[i]! + floatTilt * 2.5);
+      const iy = Math.round(waveYAt(ix / 22) + 2);
       ctx.save();
       ctx.translate(ix, iy);
       ctx.rotate(floatTilt * 0.4 + (i === 0 ? -0.12 : 0.15));
-      ctx.fillStyle = 'rgba(225, 255, 252, 0.58)';
-      ctx.fillRect(-3.5, -3, 7, 6);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-      ctx.lineWidth = 0.75;
-      ctx.strokeRect(-3.5, -3, 7, 6);
+      ctx.fillStyle = 'rgba(225, 255, 252, 0.62)';
+      ctx.fillRect(-3, -3, 6, 5);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(-3, -3, 5, 1);
+      ctx.fillRect(-3, -3, 1, 4);
       ctx.restore();
     }
 
-    // Buoyant Vanilla Ice Cream Scoop + Red Maraschino Cherry bobbing & tilting on the wave
-    const scoopX = floatTilt * 3.8;
-    const scoopY = waveYAt(scoopX / 22) + 1.2 + floatY * 0.35;
+    // Buoyant pixel-art Vanilla Ice Cream Scoop + Maraschino Cherry bobbing & tilting on the wave
+    const scoopX = Math.round(floatTilt * 3.8);
+    const scoopY = Math.round(waveYAt(scoopX / 22) + 1 + floatY * 0.35);
     ctx.save();
     ctx.translate(scoopX, scoopY);
     ctx.rotate(floatTilt * 0.55);
 
+    // Pixel-stepped dome for vanilla scoop
     ctx.fillStyle = '#fff6d6';
-    ctx.beginPath();
-    ctx.arc(0, 0, 6.5, Math.PI * 1.05, -0.05);
-    ctx.fill();
-
-    // Scalloped ice cream base rim
+    ctx.fillRect(-6, -4, 12, 4);
+    ctx.fillRect(-5, -6, 10, 2);
+    ctx.fillRect(-3, -7, 6, 1);
+    // Scalloped cream base
     ctx.fillStyle = '#ffebb3';
-    ctx.fillRect(-6, -1, 12, 2);
+    ctx.fillRect(-7, -1, 14, 2);
 
-    // Maraschino cherry + stem
+    // Pixel-art Maraschino cherry + highlight + stem
     ctx.fillStyle = '#ff2a6d';
-    ctx.beginPath();
-    ctx.arc(1, -7.5, 2.8, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.fillRect(-1, -10, 5, 4);
+    ctx.fillRect(0, -11, 3, 6);
     ctx.fillStyle = '#ff9ebb';
-    ctx.fillRect(0, -8.5, 1.2, 1.2);
+    ctx.fillRect(0, -10, 1, 1);
 
     ctx.strokeStyle = '#ff5c93';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(1, -10);
-    ctx.quadraticCurveTo(4, -14, 6, -15);
+    ctx.moveTo(1, -11);
+    ctx.quadraticCurveTo(4, -15, 6, -16);
     ctx.stroke();
 
     ctx.restore();
+  } else if (soda.skin === 'tofu-cup') {
+    // Subtle water surface specular glint in the Initial D paper cup
+    const glintX = Math.round(floatTilt * 4);
+    const glintY = Math.round(waveYAt(glintX / 22) + 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(glintX - 5, glintY, 10, 1);
   }
 
-  ctx.restore(); // end glass interior clip
+  ctx.restore(); // end interior clip
 
-  // 4. Glass rim & fluted outline
+  // 4. Container rim & outline
   ctx.strokeStyle = isSpilling ? '#ff2a6d' : isCresting ? '#ffd319' : '#c8f6ff';
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.moveTo(-19, -22);
-  ctx.lineTo(-12, 20);
-  ctx.lineTo(12, 20);
-  ctx.lineTo(19, -22);
-  ctx.stroke();
+  if (isCan) {
+    ctx.strokeRect(-14.5, -15.5, 29, 34);
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(-topHalfW, -22);
+    ctx.lineTo(-botHalfW, 18);
+    ctx.lineTo(botHalfW, 18);
+    ctx.lineTo(topHalfW, -22);
+    ctx.stroke();
+  }
 
-  // Spill threshold warning ticks at the glass lip
+  // Spill threshold warning ticks at the lip
   ctx.fillStyle = isSpilling || isCresting ? '#ff2a6d' : '#14f1d9';
-  ctx.fillRect(-22, -21, 3, 2);
-  ctx.fillRect(19, -21, 3, 2);
+  ctx.fillRect(-topHalfW - 3, -21, 3, 2);
+  ctx.fillRect(topHalfW, -21, 3, 2);
 
   // 5. Render interpolated splash droplets arcing over the rim onto the saucer tray
   ctx.fillStyle = liquidColor;

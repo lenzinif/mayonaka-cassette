@@ -43,10 +43,14 @@ export const DEFAULT_TUNING = {
   audioOffRoadPitchDip: 0.09,
   bpmPulseStrength: 1.0,
 
-  // Song-Driven Road (M4)
-  referenceSpeedRatio: 0.85,
+  // Song-Driven Road (M4 & Spacetime Sync)
+  referenceSpeedRatio: 0.76,
   roadCurveEnergyScale: 0.6,
   roadHillEnergyScale: 0.65,
+  syncElasticGain: 0.12,
+  syncMaxSpeedup: 0.25,
+  syncMaxSlowdown: 0.16,
+  syncHorizonStitchBars: 1.75,
 
   // Gearbox & Beat-Shift (M5)
   gear1MaxRatio: 0.35,
@@ -402,6 +406,43 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0,
     max: 1.5,
     step: 0.05,
+  },
+  {
+    group: 'Song Road',
+    key: 'syncElasticGain',
+    label: 'Elastic sync gain',
+    hint: 'Intensità del riallineamento micro A1 per ogni battito di scarto',
+    min: 0.02,
+    max: 0.35,
+    step: 0.01,
+  },
+  {
+    group: 'Song Road',
+    key: 'syncMaxSpeedup',
+    label: 'Max speedup scale',
+    hint: 'Massima accelerazione elastica del passo stradale per recuperare lag',
+    min: 0.05,
+    max: 0.5,
+    step: 0.01,
+  },
+  {
+    group: 'Song Road',
+    key: 'syncMaxSlowdown',
+    label: 'Max slowdown scale',
+    hint: 'Massimo rallentamento elastico del passo stradale per compensare lead',
+    min: 0.05,
+    max: 0.4,
+    step: 0.01,
+  },
+  {
+    group: 'Song Road',
+    key: 'syncHorizonStitchBars',
+    label: 'Horizon stitch threshold',
+    hint: 'Soglia di ritardo in battute oltre la quale scatta la ricucitura all’orizzonte A2',
+    unit: 'bars',
+    min: 0.75,
+    max: 4.0,
+    step: 0.25,
   },
 
   {

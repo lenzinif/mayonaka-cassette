@@ -88,4 +88,72 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
     expect(car.speed).toBeGreaterThan(tuning.maxSpeed * 0.2);
     expect(car.bumpVx).toBeLessThan(-2.5);
   });
+
+  it('translates visible trucks by deltaZ without pop-in during an A2 horizon stitch', () => {
+    const track = buildTestTrack();
+    const tm = new TrafficManager();
+    // Manually add 3 trucks:
+    // Truck 1: in source window (visible to player at fromZ = 2000)
+    // Truck 2: in destination window (not visible before, but would be in view after +4000 shift)
+    // Truck 3: far ahead (beyond both windows)
+    tm.trucks.push(
+      {
+        id: 1,
+        z: 2500, // 500 units ahead of player
+        baseLaneOffset: 0,
+        laneOffset: 0,
+        lateralVel: 0,
+        tiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.45,
+        variant: 0,
+        segmentIndex: 12,
+        nextInSegment: -1,
+      },
+      {
+        id: 2,
+        z: 6300, // In destination window [6000, 8000)
+        baseLaneOffset: 0.58,
+        laneOffset: 0.58,
+        lateralVel: 0,
+        tiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.45,
+        variant: 1,
+        segmentIndex: 31,
+        nextInSegment: -1,
+      },
+      {
+        id: 3,
+        z: 14000, // Far away
+        baseLaneOffset: -0.58,
+        laneOffset: -0.58,
+        lateralVel: 0,
+        tiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.45,
+        variant: 2,
+        segmentIndex: 70,
+        nextInSegment: -1,
+      },
+    );
+
+    const fromZ = 2000;
+    const deltaZ = 4000;
+    const windowWorldSpan = 2000;
+
+    tm.shiftVisibleWindowTrucks(track, fromZ, deltaZ, windowWorldSpan);
+
+    const t1 = tm.trucks.find((t) => t.id === 1)!;
+    const t2 = tm.trucks.find((t) => t.id === 2)!;
+    const t3 = tm.trucks.find((t) => t.id === 3)!;
+
+    // Truck 1 was at 2500 (relative offset +500 from player at 2000).
+    // After player jumps to 6000, truck 1 must be at 6500 (relative offset +500).
+    expect(t1.z).toBe(6500);
+    // Truck 2 was in the destination window [6000, 8000), so it was pushed beyond 8000
+    expect(t2.z).toBeGreaterThanOrEqual(8000);
+    // Truck 3 was untouched
+    expect(t3.z).toBe(14000);
+  });
 });

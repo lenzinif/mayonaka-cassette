@@ -13,7 +13,14 @@ import { tuning } from '@src/config/tuning';
 import type { InputSource } from '@src/core/InputManager';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GearNumber } from '@src/entities/Gearbox';
-import { drawMelonSodaInset, MelonSoda } from '@src/entities/MelonSoda';
+import { drawMelonSodaInset, MelonSoda, type SodaSkin } from '@src/entities/MelonSoda';
+import { ParticleSystem } from '@src/entities/Particles';
+import {
+  drawPassengerCamInset,
+  PassengerCam,
+  type PassengerMood,
+  type PassengerUpdateInput,
+} from '@src/entities/PassengerCam';
 import {
   drawPlayerCar,
   PlayerCar,
@@ -37,9 +44,12 @@ import {
 } from '@src/road/RoadSegment';
 import {
   generateSongRoad,
+  getSectionPaceFactor,
+  isSongTrack,
+  restoreCanonicalTrack,
+  stitchHorizonToTargetZ,
   worldZToBar,
   worldZToBeat,
-  type SongTrack,
 } from '@src/road/SongRoadGenerator';
 import { Background } from './Background';
 
@@ -106,8 +116,12 @@ export interface TelemetrySnapshot {
   groove: number;
   grooveTier: GrooveTier;
   tofuMode: boolean;
+  sodaSkin: SodaSkin;
   sodaDanger: number;
   sodaSpills: number;
+  // M7 Art & Atmosphere telemetry
+  passengerMood: PassengerMood;
+  activeParticles: number;
   // M6 Playlist Run, Stage Fork & Scoring telemetry
   stageNumber: number;
   stagePaletteName: string;
@@ -134,6 +148,7 @@ export type GameEvent =
   | { type: 'dropSync'; barIndex: number; deltaBeats: number }
   | { type: 'songRoadGenerated'; title: string; totalBars: number; chunkCount: number }
   | { type: 'tofuModeToggled'; active: boolean }
+  | { type: 'sodaSkinChanged'; skin: SodaSkin }
   | { type: 'autoShiftToggled'; enabled: boolean }
   | { type: 'sodaSpill'; spillCount: number; grooveLost: number }
   | { type: 'forkChoiceChanged'; choice: 'left' | 'right'; source: 'lane' | 'input' }
@@ -160,10 +175,6 @@ export interface GameOptions {
   library?: TrackLibrary;
 }
 
-function isSongTrack(track: Track): track is SongTrack {
-  return 'barLengthWorld' in track && 'chunks' in track;
-}
-
 /**
  * Pure TypeScript game orchestrator (AGENTS.md §2: zero React imports).
  *
@@ -174,6 +185,8 @@ export class Game {
   track: Track;
   readonly car = new PlayerCar();
   readonly melonSoda = new MelonSoda();
+  readonly particles = new ParticleSystem();
+  readonly passenger = new PassengerCam();
   readonly traffic: TrafficManager;
   readonly bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   readonly audio: FunkAudioEngine;
@@ -227,6 +240,7 @@ export class Game {
   private readonly hasCustomTrack: boolean;
   private activeRoadBeatMap: BeatMap;
   private readonly crossedDropBars = new Set<number>();
+  private horizonStitchCooldown = 0;
 
   private readonly input: InputSource;
   private readonly roadRenderer = new RoadRenderer();
@@ -254,6 +268,20 @@ export class Game {
     outerLimit: 1,
     innerGap: 0,
     branchCenter: 0.5,
+  };
+
+  private readonly passengerInputScratch: PassengerUpdateInput = {
+    speedRatio: 0,
+    steer: 0,
+    isDrifting: false,
+    driftDir: 0,
+    isOffRoad: false,
+    grooveTier: 'LOW',
+    sectionRole: 'intro',
+    beatPulse: 0,
+    downbeatPulse: 0,
+    tofuActive: false,
+    sodaDanger: 0,
   };
 
   private readonly view: RoadView = {
@@ -303,6 +331,7 @@ export class Game {
       const ratio = this.position / prevLength;
       this.position = (ratio * songTrack.length) % songTrack.length;
       this.prevPosition = this.position;
+      this.horizonStitchCooldown = 0;
     }
 
     this.updateRoadProgressTelemetry();
@@ -350,6 +379,9 @@ export class Game {
     }
 
     this.prevPosition = this.position;
+    if (this.horizonStitchCooldown > 0) {
+      this.horizonStitchCooldown = Math.max(0, this.horizonStitchCooldown - dt);
+    }
 
     // 1. Process timestamped discrete key presses (Beat-Shift, Tofu Mode, Auto-Shift, Fork Choice)
     const presses = this.input.consumePresses?.();
@@ -371,15 +403,26 @@ export class Game {
             if (shiftRes.rewardTier === 'PERFECT') {
               this.stagePerfectShifts++;
               this.stageScore += judgement.isDownbeat ? 500 : 350;
+              this.particles.emitBoostOrShiftBurst(
+                this.car,
+                RENDER_WIDTH,
+                RENDER_HEIGHT,
+                'PERFECT',
+              );
+              this.passenger.triggerHype(1.6);
             } else if (shiftRes.rewardTier === 'GOOD') {
               this.stageGoodShifts++;
               this.stageScore += 150;
+              this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'GOOD');
             }
           }
         } else if (p.action === 'tofuMode') {
           const active = this.melonSoda.toggle();
           if (active) this.stageTofuUsed = true;
           this.bridge.emit({ type: 'tofuModeToggled', active });
+        } else if (p.action === 'cycleSodaSkin') {
+          const skin = this.melonSoda.cycleSkin();
+          this.bridge.emit({ type: 'sodaSkinChanged', skin });
         } else if (p.action === 'autoShift') {
           this.car.gearbox.autoShift = !this.car.gearbox.autoShift;
           this.bridge.emit({ type: 'autoShiftToggled', enabled: this.car.gearbox.autoShift });
@@ -440,7 +483,8 @@ export class Game {
       this.stageMaxGroove = Math.round(this.car.groove);
     }
 
-    const nextPos = this.position + this.car.speed * dt;
+    const effectiveSpeed = this.computeElasticWorldSpeed();
+    const nextPos = this.position + effectiveSpeed * dt;
     const wrappedAcrossStageEnd = nextPos >= this.track.length;
     if (wrappedAcrossStageEnd) {
       this.handleStageOrLapEnd(nextPos);
@@ -522,7 +566,23 @@ export class Game {
       });
     }
 
+    this.maybeStitchHorizonToMusic();
     this.checkDropSync();
+
+    // 6. Advance M7 ParticleSystem & 90s Anime PassengerCam
+    this.particles.update(dt, this.car, RENDER_WIDTH, RENDER_HEIGHT, this.car.grooveTier);
+    this.passengerInputScratch.speedRatio = this.car.speedRatio;
+    this.passengerInputScratch.steer = this.car.steer;
+    this.passengerInputScratch.isDrifting = this.car.isDrifting;
+    this.passengerInputScratch.driftDir = this.car.driftDir;
+    this.passengerInputScratch.isOffRoad = this.car.isOffRoad;
+    this.passengerInputScratch.grooveTier = this.car.grooveTier;
+    this.passengerInputScratch.sectionRole = this.sectionRole;
+    this.passengerInputScratch.beatPulse = this.beatPulse;
+    this.passengerInputScratch.downbeatPulse = this.downbeatPulse;
+    this.passengerInputScratch.tofuActive = this.melonSoda.active;
+    this.passengerInputScratch.sodaDanger = this.melonSoda.dangerRatio;
+    this.passenger.update(dt, this.passengerInputScratch);
 
     this.background.update(dt, playerSeg.curve, this.car.speedRatio);
     this.bridge.offer(this.simTime, this.buildSnapshot);
@@ -566,7 +626,9 @@ export class Game {
     this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
     this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic);
     drawPlayerCar(ctx, this.car, width, height);
+    this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
+    drawPassengerCamInset(ctx, this.passenger, width, alpha);
   };
 
   private getForkZoneStartZ(): number | undefined {
@@ -709,6 +771,9 @@ export class Game {
         this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2);
       }
       this.earlyCrossfadeStarted = false;
+      if (isSongTrack(this.track)) {
+        restoreCanonicalTrack(this.track);
+      }
       this.position = nextPos % this.track.length;
       this.lastLapTime = this.lapTime;
       this.crossedDropBars.clear();
@@ -745,6 +810,9 @@ export class Game {
       // Completed the final track of the playlist -> emit End-of-Run Grade Screen summary!
       const runSummary = this.buildRunSummary();
       this.bridge.emit({ type: 'runCompleted', summary: runSummary });
+      if (isSongTrack(this.track)) {
+        restoreCanonicalTrack(this.track);
+      }
       this.position = nextPos % this.track.length;
       this.lastLapTime = this.lapTime;
       this.crossedDropBars.clear();
@@ -822,6 +890,125 @@ export class Game {
     this.stageTofuUsed = this.melonSoda.active;
   }
 
+  /**
+   * Computes the elastic road advancement speed (Micro Level A1), modulating dZ/dt within
+   * [1 - syncMaxSlowdown, 1 + syncMaxSpeedup] to converge on upcoming drop crests and stage forks.
+   */
+  private computeElasticWorldSpeed(): number {
+    if (!isSongTrack(this.track) || this.hasCustomTrack || this.car.speedRatio < 0.05) {
+      return this.car.speed;
+    }
+
+    const paceFactor = getSectionPaceFactor(this.track, this.roadBarIndex, this.sectionRole);
+
+    // 1. Convergence on visible upcoming anchor (next uncrossed drop marker or stage fork)
+    let nextAnchor: { distRemaining: number; beatsRemaining: number } | null = null;
+
+    for (const dm of this.track.dropMarkers) {
+      if (this.crossedDropBars.has(dm.barIndex)) continue;
+      if (dm.worldZ > this.position) {
+        const dropBeat = dm.barIndex * 4;
+        const beatsRemaining = dropBeat - this.audioBeatIndex;
+        const distRemaining = dm.worldZ - this.position;
+        if (beatsRemaining > 0.4 && beatsRemaining <= 32 && distRemaining > 0) {
+          nextAnchor = { distRemaining, beatsRemaining };
+          break;
+        }
+      }
+    }
+
+    if (!nextAnchor) {
+      const totalBeats = this.track.totalBars * 4;
+      const beatsRemaining = totalBeats - this.audioBeatIndex;
+      const barsRemaining = beatsRemaining / 4;
+      if (barsRemaining <= FORK_APPROACH_BARS + 2 && beatsRemaining > 0.4) {
+        const distRemaining = this.track.length - this.position;
+        if (distRemaining > 0) {
+          nextAnchor = { distRemaining, beatsRemaining };
+        }
+      }
+    }
+
+    const minScale = 1 - tuning.syncMaxSlowdown;
+    const maxScale = 1 + tuning.syncMaxSpeedup;
+
+    if (nextAnchor) {
+      const bpm = this.audio.beatMap.bpm > 0 ? this.audio.beatMap.bpm : 120;
+      const timeRemainingSec = nextAnchor.beatsRemaining * (60 / bpm);
+      if (timeRemainingSec > 0.01) {
+        const targetSpeed = nextAnchor.distRemaining / timeRemainingSec;
+        const ratio = targetSpeed / Math.max(1, this.car.speed);
+        const scale = Math.max(minScale, Math.min(maxScale, ratio));
+        return this.car.speed * scale;
+      }
+    }
+
+    // 2. Continuous alignment between anchors
+    const roadBeat = worldZToBeat(this.track, this.position);
+    const lagBeats = this.audioBeatIndex - roadBeat;
+    const paceInv = paceFactor > 0 ? 1 / paceFactor : 1;
+    const rawScale = paceInv + lagBeats * tuning.syncElasticGain;
+    const scale = Math.max(minScale, Math.min(maxScale, rawScale));
+
+    return this.car.speed * scale;
+  }
+
+  /**
+   * Evaluates macro lag between audio clock and road position (Macro Level A2).
+   * If lag exceeds tuning.syncHorizonStitchBars and no drop marker is in the near view,
+   * executes a seamless horizon phase stitch and shifts visible Kei Trucks.
+   */
+  private maybeStitchHorizonToMusic(): void {
+    if (!isSongTrack(this.track) || this.hasCustomTrack) return;
+    if (this.car.speedRatio < 0.12) return;
+    if (this.forkActive) return;
+    if (this.horizonStitchCooldown > 0) return;
+
+    // Do not stitch if an upcoming drop marker is already visible in front of the car
+    const safeAheadWorldZ = Math.floor(tuning.drawDistance * 0.75) * this.track.segmentLength;
+    const hasImminentDrop = this.track.dropMarkers.some(
+      (dm) =>
+        !this.crossedDropBars.has(dm.barIndex) &&
+        dm.worldZ >= this.position &&
+        dm.worldZ <= this.position + safeAheadWorldZ,
+    );
+    if (hasImminentDrop) return;
+
+    const audioBarFloat = this.audioBeatIndex / 4;
+    const roadBarFloat = this.position / this.track.barLengthWorld;
+    const lagBars = audioBarFloat - roadBarFloat;
+
+    const isForkTailApproach =
+      audioBarFloat >= this.totalBars - (FORK_APPROACH_BARS + 2) &&
+      this.totalBars - roadBarFloat > FORK_APPROACH_BARS + 2.5;
+
+    if (lagBars >= tuning.syncHorizonStitchBars || isForkTailApproach) {
+      const targetZ = Math.min(
+        this.track.length - (FORK_APPROACH_BARS + 1) * this.track.barLengthWorld,
+        audioBarFloat * this.track.barLengthWorld,
+      );
+      const res = stitchHorizonToTargetZ(
+        this.track,
+        this.position,
+        targetZ,
+        Math.floor(tuning.drawDistance),
+      );
+      if (res !== null) {
+        this.traffic.shiftVisibleWindowTrucks(
+          this.track,
+          this.position,
+          res.deltaZ,
+          res.copiedWindowSegs * this.track.segmentLength,
+        );
+        this.position += res.deltaZ;
+        this.prevPosition += res.deltaZ;
+        this.horizonStitchCooldown = 1.5;
+        this.updateRoadProgressTelemetry();
+        this.updateForkState();
+      }
+    }
+  }
+
   private checkDropSync(): void {
     if (!isSongTrack(this.track)) return;
     for (const dm of this.track.dropMarkers) {
@@ -839,6 +1026,8 @@ export class Game {
             this.handleCarEvent,
           );
           this.audio.triggerFilterBlip(1.0);
+          this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'PERFECT');
+          this.passenger.triggerHype(2.2);
           this.bridge.emit({
             type: 'dropSync',
             barIndex: dm.barIndex,
@@ -879,16 +1068,22 @@ export class Game {
   private readonly handleCarEvent = (event: CarEvent): void => {
     if (event.type === 'driftEnd' && event.duration >= 0.4) {
       this.audio.triggerFilterBlip(0.65);
+      this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'DRIFT_EXIT');
+      this.passenger.triggerHype(1.4);
+    } else if (event.type === 'grooveTierChanged' && (event.tier === 'HIGH' || event.tier === 'SSS')) {
+      this.passenger.triggerHype(2.0);
     }
     this.bridge.emit(event);
   };
 
   private readonly handleCollision = (event: CollisionEvent): void => {
+    this.particles.emitCollisionBurst(event, this.car, RENDER_WIDTH, RENDER_HEIGHT);
     if (event.outcome === 'truckKnockedOff') {
       // Sideswiping a Kei Truck off-road in a high-speed drift feels empowering: milder shake & impulse
       this.collisionShake = Math.max(this.collisionShake, 0.55);
       this.melonSoda.applyImpulse(event.side * 3.8);
       this.audio.triggerCollisionSound('traffic');
+      this.passenger.triggerHype(1.5);
       this.stageScore += 400;
     } else {
       this.stageCollisions++;
@@ -896,6 +1091,7 @@ export class Game {
       this.car.deductGroove(tuning.grooveCollisionPenalty, this.handleCarEvent);
       this.melonSoda.applyImpulse(event.side * 7.2);
       this.audio.triggerCollisionSound(event.obstacle);
+      this.passenger.triggerShock(1.4);
     }
     this.bridge.emit(event);
   };
@@ -907,6 +1103,7 @@ export class Game {
       this.handleCarEvent,
     );
     this.audio.triggerSodaSpillSound();
+    this.passenger.triggerShock(1.3);
     this.bridge.emit({
       type: 'sodaSpill',
       spillCount: this.melonSoda.spillCount,
@@ -999,8 +1196,11 @@ export class Game {
       groove: Math.round(this.car.groove),
       grooveTier: this.car.grooveTier,
       tofuMode: this.melonSoda.active,
+      sodaSkin: this.melonSoda.skin,
       sodaDanger: this.melonSoda.dangerRatio,
       sodaSpills: this.melonSoda.spillCount,
+      passengerMood: this.passenger.mood,
+      activeParticles: this.particles.activeCount,
       stageNumber: this.stageNumber,
       stagePaletteName: this.palette.name,
       playlistIndex: this.library.currentIndex,

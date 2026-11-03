@@ -3,25 +3,52 @@ import type { StagePalette } from '@src/road/palette';
 
 const MOUNTAIN_POINTS = 64;
 const MOUNTAIN_SPAN = 960;
+const STAR_COUNT = 36;
+const CITY_TOWERS = 24;
 
 /**
- * Procedural synthwave skybox: vertical gradient sky, striped retro sun, and scrolling
- * neon-rimmed mountain silhouette. Precomputes ridge heights once (zero per-frame allocations).
+ * Procedural synthwave skybox: vertical gradient sky, twinkling pixel-art starfield,
+ * striped retro sun, scrolling neon-rimmed mountain silhouette, and parallax pixel city skyline
+ * (AGENTS.md §3, §4.3, §4.4 & §5 M7).
+ *
+ * Precomputes ridge heights, star coordinates, and city tower heights once at construction
+ * (zero per-frame allocations).
  */
 export class Background {
   private readonly ridgeHeights = new Float32Array(MOUNTAIN_POINTS);
+  private readonly starX = new Float32Array(STAR_COUNT);
+  private readonly starY = new Float32Array(STAR_COUNT);
+  private readonly starPhase = new Float32Array(STAR_COUNT);
+  private readonly towerWidths = new Uint8Array(CITY_TOWERS);
+  private readonly towerHeights = new Uint8Array(CITY_TOWERS);
   private scrollX = 0;
   private sunOffset = 0;
+  private skyTime = 0;
 
   constructor() {
     for (let i = 0; i < MOUNTAIN_POINTS; i++) {
       const t = (i / MOUNTAIN_POINTS) * Math.PI * 2;
-      const h = Math.sin(t * 2) * 16 + Math.sin(t * 5 + 1.1) * 10 + Math.cos(t * 11 + 0.4) * 5 + 24;
+      const h =
+        Math.sin(t * 2) * 16 + Math.sin(t * 5 + 1.1) * 10 + Math.cos(t * 11 + 0.4) * 5 + 24;
       this.ridgeHeights[i] = Math.max(6, h);
+    }
+
+    // Deterministic pixel-art starfield in upper sky
+    for (let i = 0; i < STAR_COUNT; i++) {
+      this.starX[i] = ((i * 73 + 19) % 100) / 100;
+      this.starY[i] = ((i * 41 + 11) % 68) / 100;
+      this.starPhase[i] = (i * 1.37) % (Math.PI * 2);
+    }
+
+    // Deterministic pixel-art distant skyline towers
+    for (let i = 0; i < CITY_TOWERS; i++) {
+      this.towerWidths[i] = 10 + ((i * 7 + 3) % 10);
+      this.towerHeights[i] = 6 + ((i * 13 + 5) % 16);
     }
   }
 
   update(dt: number, segmentCurve: number, speedRatio: number): void {
+    this.skyTime += dt;
     this.scrollX = (this.scrollX + segmentCurve * speedRatio * 90 * dt) % MOUNTAIN_SPAN;
     if (this.scrollX < 0) this.scrollX += MOUNTAIN_SPAN;
 
@@ -50,6 +77,19 @@ export class Background {
     skyGrad.addColorStop(1, palette.skyHorizon);
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, horizonY + 2);
+
+    // 1b. Twinkling pixel-art stars in upper sky
+    const starScroll = this.scrollX * 0.25;
+    for (let i = 0; i < STAR_COUNT; i++) {
+      const sx = Math.round((this.starX[i]! * width - starScroll + width * 2) % width);
+      const sy = Math.round(this.starY[i]! * (horizonY - 38)) + 4;
+      const twinkle = Math.sin(this.skyTime * 3.2 + this.starPhase[i]!);
+      if (twinkle > -0.25) {
+        ctx.fillStyle = i % 3 === 0 ? palette.mountainRim : '#fff3b0';
+        const size = twinkle > 0.65 || pulse > 0.6 ? 2 : 1;
+        ctx.fillRect(sx, sy, size, size);
+      }
+    }
 
     // 2. Retro striped synthwave sun (pulses with BPM)
     // Sits on the horizon behind mountains; strictly clipped to the sky (never bleeds below horizonY).
@@ -123,5 +163,30 @@ export class Background {
     ctx.strokeStyle = palette.mountainRim;
     ctx.lineWidth = 1.2 + pulse * 1.1;
     ctx.stroke();
+
+    // 5. Pixel-art distant city skyline silhouettes & glowing windows along horizon base
+    const citySpan = 480;
+    const cityScroll = (this.scrollX * 0.65) % citySpan;
+    const towerSpacing = citySpan / CITY_TOWERS;
+    for (let pass = -1; pass <= Math.ceil(width / citySpan); pass++) {
+      const baseOffset = pass * citySpan - cityScroll;
+      for (let t = 0; t < CITY_TOWERS; t++) {
+        const tx = Math.round(baseOffset + t * towerSpacing);
+        const tw = this.towerWidths[t]!;
+        if (tx + tw < 0 || tx > width) continue;
+        const th = this.towerHeights[t]!;
+        const ty = horizonY - th;
+        ctx.fillStyle = '#0d0221';
+        ctx.fillRect(tx, ty, tw, th + 1);
+        // Tiny neon pixel window lights pulsing on the beat
+        if (th >= 10) {
+          ctx.fillStyle = t % 2 === 0 ? palette.mountainRim : palette.sunTop;
+          ctx.fillRect(tx + 2, ty + 2, 2, 2);
+          if (tw >= 14) {
+            ctx.fillRect(tx + tw - 4, ty + 4, 2, 2);
+          }
+        }
+      }
+    }
   }
 }

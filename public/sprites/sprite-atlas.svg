@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 64" width="256" height="64" shape-rendering="crispEdges">
+  <!-- Future Funk OutRun M7 Pixel-Art Sprite Sheet (Testarossa Spider, Kei Truck, Palm, Melon Soda, 90s Anime Co-Pilot) -->
+  <rect width="256" height="64" fill="#0d0221" />
+
+  <!-- Tile 0 (0..63): 80s Testarossa Spider Rear View -->
+  <g transform="translate(8, 12)">
+    <rect x="2" y="36" width="44" height="4" fill="#18082c" />
+    <rect x="0" y="26" width="8" height="12" fill="#12091f" />
+    <rect x="40" y="26" width="8" height="12" fill="#12091f" />
+    <rect x="2" y="16" width="44" height="14" fill="#ff2a6d" />
+    <rect x="3" y="20" width="42" height="2" fill="#9e1446" />
+    <rect x="3" y="24" width="42" height="2" fill="#9e1446" />
+    <rect x="6" y="8" width="36" height="8" fill="#d91b5c" />
+    <rect x="10" y="2" width="28" height="6" fill="#180a2e" />
+    <rect x="12" y="2" width="12" height="2" fill="#05d9e8" />
+    <rect x="26" y="1" width="8" height="6" fill="#7b2cbf" />
+    <rect x="28" y="0" width="6" height="2" fill="#ff4f9a" />
+    <rect x="4" y="17" width="40" height="4" fill="#140624" />
+    <rect x="5" y="18" width="12" height="2" fill="#fff3b0" />
+    <rect x="31" y="18" width="12" height="2" fill="#fff3b0" />
+    <rect x="20" y="24" width="8" height="4" fill="#05d9e8" />
+  </g>
+
+  <!-- Tile 1 (64..111): Japanese Kei Truck Rear View -->
+  <g transform="translate(72, 8)">
+    <rect x="2" y="40" width="6" height="10" fill="#12091f" />
+    <rect x="24" y="40" width="6" height="10" fill="#12091f" />
+    <rect x="2" y="2" width="28" height="20" fill="#e8f7ff" />
+    <rect x="6" y="5" width="20" height="10" fill="#1a0c33" />
+    <rect x="4" y="18" width="24" height="10" fill="#05d9e8" />
+    <rect x="0" y="26" width="32" height="16" fill="#b8d8eb" />
+    <rect x="2" y="38" width="7" height="3" fill="#ff2a6d" />
+    <rect x="23" y="38" width="7" height="3" fill="#ff2a6d" />
+    <rect x="13" y="38" width="6" height="3" fill="#ffd319" />
+  </g>
+
+  <!-- Tile 2 (112..159): Neon Synthwave Palm & Billboard -->
+  <g transform="translate(120, 6)">
+    <rect x="14" y="22" width="4" height="30" fill="#3a1d5c" />
+    <rect x="15" y="22" width="2" height="30" fill="#6c34a3" />
+    <rect x="2" y="14" width="28" height="4" fill="#14f1d9" />
+    <rect x="6" y="10" width="20" height="4" fill="#ff3cac" />
+  </g>
+
+  <!-- Tile 3 (160..207): Kissaten Melon Cream Soda Glass -->
+  <g transform="translate(168, 8)">
+    <rect x="6" y="8" width="20" height="34" fill="#120a26" stroke="#c8f6ff" stroke-width="2" />
+    <rect x="8" y="18" width="16" height="22" fill="#00f59b" />
+    <rect x="8" y="16" width="16" height="3" fill="#9effdc" />
+    <rect x="11" y="11" width="10" height="6" fill="#fff6d6" />
+    <rect x="15" y="7" width="4" height="4" fill="#ff2a6d" />
+  </g>
+
+  <!-- Tile 4 (208..255): 90s Anime Co-Pilot Portrait -->
+  <g transform="translate(212, 8)">
+    <rect x="4" y="6" width="28" height="32" fill="#3b1766" />
+    <rect x="8" y="12" width="20" height="18" fill="#ffe3d1" />
+    <rect x="6" y="6" width="24" height="7" fill="#7b2cbf" />
+    <rect x="8" y="8" width="20" height="2" fill="#ff4f9a" />
+    <rect x="10" y="17" width="4" height="4" fill="#1a0933" />
+    <rect x="22" y="17" width="4" height="4" fill="#1a0933" />
+    <rect x="11" y="18" width="2" height="2" fill="#ffd319" />
+    <rect x="23" y="18" width="2" height="2" fill="#ffd319" />
+    <rect x="15" y="24" width="6" height="3" fill="#ff2a6d" />
+    <rect x="6" y="32" width="24" height="12" fill="#05d9e8" />
+  </g>
+</svg>

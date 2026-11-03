@@ -7,6 +7,7 @@ export type Action =
   | 'shiftUp'
   | 'shiftDown'
   | 'tofuMode'
+  | 'cycleSodaSkin'
   | 'autoShift'
   | 'forkLeft'
   | 'forkRight';
@@ -39,6 +40,7 @@ const KEY_BINDINGS: Readonly<Record<string, Action>> = {
   KeyC: 'drift',
   ControlLeft: 'drift',
   KeyT: 'tofuMode',
+  KeyV: 'cycleSodaSkin',
   KeyG: 'autoShift',
   Digit1: 'forkLeft',
   Numpad1: 'forkLeft',
@@ -71,6 +73,7 @@ export class InputManager implements InputSource {
     shiftUp: 0,
     shiftDown: 0,
     tofuMode: 0,
+    cycleSodaSkin: 0,
     autoShift: 0,
     forkLeft: 0,
     forkRight: 0,

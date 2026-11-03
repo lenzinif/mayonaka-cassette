@@ -4,8 +4,19 @@ import { DEFAULT_TUNING, tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
 import { getChunksForRole, ROAD_CHUNKS, type RoadChunk } from './RoadChunks';
 import { easeIn, easeInOut } from './RoadProjection';
-import { createPoint, type RoadSegment, type Track } from './RoadSegment';
+import { createPoint, type RoadSegment, type RoadSprite, type Track } from './RoadSegment';
 import { HILL } from './TrackBuilder';
+
+export interface CanonicalSegmentData {
+  /** Curvatura originale di ciascun segmento (lunghezza = segments.length). */
+  readonly curve: Float32Array;
+  /** Quota worldY di p1 per ciascun segmento (lunghezza = segments.length). */
+  readonly p1WorldY: Float32Array;
+  /** Quota worldY di p2 per ciascun segmento (lunghezza = segments.length). */
+  readonly p2WorldY: Float32Array;
+  /** Copia immutabile delle liste di sprite originali per segmento. */
+  readonly sprites: readonly (readonly RoadSprite[])[];
+}
 
 export interface PlacedRoadChunk {
   chunkId: string;
@@ -35,6 +46,7 @@ export interface SongTrack extends Track {
   referenceSpeed: number;
   chunks: PlacedRoadChunk[];
   dropMarkers: DropMarker[];
+  readonly canonical: CanonicalSegmentData;
 }
 
 export interface SongRoadOptions {
@@ -250,6 +262,28 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     }
   }
 
+  // Pre-allocate immutable canonical blueprint for zero-GC runtime restoration & horizon stitching
+  const count = segments.length;
+  const canonicalCurve = new Float32Array(count);
+  const canonicalP1WorldY = new Float32Array(count);
+  const canonicalP2WorldY = new Float32Array(count);
+  const canonicalSprites: (readonly RoadSprite[])[] = new Array(count);
+
+  for (let i = 0; i < count; i++) {
+    const s = segments[i]!;
+    canonicalCurve[i] = s.curve;
+    canonicalP1WorldY[i] = s.p1.worldY;
+    canonicalP2WorldY[i] = s.p2.worldY;
+    canonicalSprites[i] = s.sprites.slice();
+  }
+
+  const canonical: CanonicalSegmentData = {
+    curve: canonicalCurve,
+    p1WorldY: canonicalP1WorldY,
+    p2WorldY: canonicalP2WorldY,
+    sprites: canonicalSprites,
+  };
+
   return {
     segments,
     segmentLength,
@@ -262,6 +296,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     referenceSpeed,
     chunks: placedChunks,
     dropMarkers,
+    canonical,
   };
 }
 
@@ -278,6 +313,177 @@ export function worldZToBeat(track: Pick<SongTrack, 'barLengthWorld'>, z: number
 /** Converts a 0-based bar index to its starting world Z coordinate along a `SongTrack`. */
 export function barToWorldZ(track: Pick<SongTrack, 'barLengthWorld'>, barIndex: number): number {
   return barIndex * track.barLengthWorld;
+}
+
+/** Type guard checking if a track is a generated `SongTrack` with canonical blueprint. */
+export function isSongTrack(track: Track): track is SongTrack {
+  return 'barLengthWorld' in track && 'chunks' in track && 'canonical' in track;
+}
+
+/**
+ * Returns the section pace factor based on the bar index and section role.
+ * - First 4 bars of track (barIndex < 4): linear ramp from 0.55 to 0.85 (launch from 0 km/h).
+ * - breakdown (sharp hairpin curves): 0.86.
+ * - intro (after bar 4) and outro: 0.92.
+ * - build and drop: 1.00.
+ */
+export function getSectionPaceFactor(
+  _track: SongTrack,
+  barIndex: number,
+  sectionRole: SectionRole,
+): number {
+  if (barIndex < 4) {
+    const clampedBar = Math.max(0, barIndex);
+    return 0.55 + (clampedBar / 4) * (0.85 - 0.55);
+  }
+  switch (sectionRole) {
+    case 'breakdown':
+      return 0.86;
+    case 'intro':
+    case 'outro':
+      return 0.92;
+    case 'build':
+    case 'drop':
+    default:
+      return 1.0;
+  }
+}
+
+export interface HorizonStitchResult {
+  /** Delta Z (in world units, exact multiple of 2 * RUMBLE_LENGTH * segmentLength) applied to position. */
+  deltaZ: number;
+  /** Segment index before stitch. */
+  fromSegIndex: number;
+  /** Segment index after stitch. */
+  toSegIndex: number;
+  /** Number of visible segments copied in-place. */
+  copiedWindowSegs: number;
+}
+
+/**
+ * Executes a zero-pop-in macro phase realignment (A2) to sync the road with the audio clock.
+ *
+ * Copies the visible window [0..drawDistance - 24] in-place with vertical deltaY offset,
+ * blends the final 24 segments in the horizon fog, and quantizes deltaZ to exact rumble-strip
+ * cycles (2 * RUMBLE_LENGTH * segmentLength) so striping and visual pixels are 100% continuous.
+ */
+export function stitchHorizonToTargetZ(
+  track: SongTrack,
+  currentZ: number,
+  rawTargetZ: number,
+  drawDistance: number,
+): HorizonStitchResult | null {
+  const segLen = track.segmentLength;
+  const segCount = track.segments.length;
+  if (segCount === 0 || segLen <= 0) return null;
+
+  const fromSegIndex = Math.floor(currentZ / segLen);
+  const rawDeltaSegs = Math.floor((rawTargetZ - currentZ) / segLen);
+
+  const rumbleStep = 2 * RUMBLE_LENGTH; // 6 segments
+  const deltaSegs = rumbleStep * Math.round(rawDeltaSegs / rumbleStep);
+
+  // Safety checks: minimum 12 segments forward, and ensure enough room before track end
+  if (deltaSegs < 12) return null;
+
+  const toSegIndex = fromSegIndex + deltaSegs;
+  if (fromSegIndex < 0 || toSegIndex + drawDistance + 16 >= segCount) {
+    return null;
+  }
+
+  // Zone 1: Solid visible window (0 .. copyCount - 1), where copyCount = drawDistance - 24
+  const copyCount = Math.max(1, drawDistance - 24);
+  const deltaY =
+    track.canonical.p1WorldY[toSegIndex]! - track.segments[fromSegIndex]!.p1.worldY;
+
+  for (let n = 0; n < copyCount; n++) {
+    const srcSeg = track.segments[fromSegIndex + n]!;
+    const destSeg = track.segments[toSegIndex + n]!;
+
+    destSeg.curve = srcSeg.curve;
+    destSeg.p1.worldY = srcSeg.p1.worldY + deltaY;
+    destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
+
+    // Preserve drop marker neon billboards if the destination segment is a drop marker
+    const isDestDropMarker = track.dropMarkers.some(
+      (dm) => dm.segmentIndex === toSegIndex + n,
+    );
+    if (isDestDropMarker) {
+      const dropBillboards = track.canonical.sprites[toSegIndex + n]!.filter(
+        (s) => s.kind === 'billboard',
+      );
+      destSeg.sprites = [
+        ...srcSeg.sprites.filter((s) => s.kind !== 'billboard'),
+        ...dropBillboards,
+      ];
+    } else {
+      destSeg.sprites = srcSeg.sprites.slice();
+    }
+  }
+
+  // Zone 2: Horizon fog transition zone (copyCount .. drawDistance - 1, 24 segments)
+  const blendCount = drawDistance - copyCount;
+  const lastCopied = track.segments[toSegIndex + copyCount - 1]!;
+  const startY = lastCopied.p2.worldY;
+  const startCurve = lastCopied.curve;
+
+  const targetY = track.canonical.p1WorldY[toSegIndex + drawDistance]!;
+  const targetCurve = track.canonical.curve[toSegIndex + drawDistance]!;
+
+  let prevY = startY;
+  for (let k = 0; k < blendCount; k++) {
+    const segIdx = toSegIndex + copyCount + k;
+    const seg = track.segments[segIdx]!;
+    const t = (k + 1) / blendCount;
+    const segCurve = easeInOut(startCurve, targetCurve, t);
+    const nextY = easeInOut(startY, targetY, t);
+
+    seg.curve = segCurve;
+    seg.p1.worldY = prevY;
+    seg.p2.worldY = nextY;
+    prevY = nextY;
+
+    // Restore canonical sprites in the horizon fog
+    seg.sprites = track.canonical.sprites[segIdx]!.slice();
+  }
+
+  // Restore canonical geometry for segments outside the active window
+  for (let i = 0; i < toSegIndex; i++) {
+    const seg = track.segments[i]!;
+    seg.curve = track.canonical.curve[i]!;
+    seg.p1.worldY = track.canonical.p1WorldY[i]!;
+    seg.p2.worldY = track.canonical.p2WorldY[i]!;
+    seg.sprites = track.canonical.sprites[i]!.slice();
+  }
+  for (let i = toSegIndex + drawDistance; i < segCount; i++) {
+    const seg = track.segments[i]!;
+    seg.curve = track.canonical.curve[i]!;
+    seg.p1.worldY = track.canonical.p1WorldY[i]!;
+    seg.p2.worldY = track.canonical.p2WorldY[i]!;
+    seg.sprites = track.canonical.sprites[i]!.slice();
+  }
+
+  return {
+    deltaZ: deltaSegs * segLen,
+    fromSegIndex,
+    toSegIndex,
+    copiedWindowSegs: copyCount,
+  };
+}
+
+/**
+ * Resets all segments of a `SongTrack` to their initial canonical geometry and sprite lists (zero GC).
+ */
+export function restoreCanonicalTrack(track: SongTrack): void {
+  const { segments, canonical } = track;
+  const count = segments.length;
+  for (let i = 0; i < count; i++) {
+    const s = segments[i]!;
+    s.curve = canonical.curve[i]!;
+    s.p1.worldY = canonical.p1WorldY[i]!;
+    s.p2.worldY = canonical.p2WorldY[i]!;
+    s.sprites = canonical.sprites[i]!.slice();
+  }
 }
 
 function normalizeSections(beatMap: BeatMap): BeatSection[] {

@@ -1,5 +1,7 @@
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
+import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
+import type { PassengerMood } from '@src/entities/PassengerCam';
 import type { GrooveTier } from '@src/entities/PlayerCar';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
@@ -113,6 +115,8 @@ export function HUD({
           2000,
           event.active ? 'emerald' : 'cyan',
         );
+      } else if (event.type === 'sodaSkinChanged') {
+        showToast(`CUP SKIN // ${SODA_SKIN_LABELS[event.skin]}`, 1500, 'cyan');
       } else if (event.type === 'autoShiftToggled') {
         showToast(
           event.enabled ? 'AUTO-SHIFT ASSIST // ON' : 'MANUAL BEAT-SHIFT // ON',
@@ -171,7 +175,9 @@ export function HUD({
   const groove = snap?.groove ?? 15;
   const grooveTier: GrooveTier = snap?.grooveTier ?? 'LOW';
   const tofuMode = snap?.tofuMode ?? false;
+  const sodaSkin: SodaSkin = snap?.sodaSkin ?? 'melon-soda';
   const sodaSpills = snap?.sodaSpills ?? 0;
+  const passengerMood: PassengerMood = snap?.passengerMood ?? 'VIBING';
   const stageNumber = snap?.stageNumber ?? 1;
   const stagePaletteName = snap?.stagePaletteName ?? 'SUNSET BOULEVARD';
   const stageScore = snap?.stageScore ?? 0;
@@ -272,55 +278,71 @@ export function HUD({
           </div>
         </div>
 
-        {/* Top-Right Action Buttons */}
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="rounded border border-cyan-400/30 bg-[#0d0221]/80 px-2.5 py-1 text-xs tabular-nums text-cyan-300">
-            {fps} FPS
+        {/* Top-Right Action Buttons + Static 90s Anime Passenger Cam Frame Label (AGENTS.md §4.9) */}
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="rounded border border-cyan-400/30 bg-[#0d0221]/80 px-2.5 py-1 text-xs tabular-nums text-cyan-300">
+              {fps} FPS
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                triggerSyntheticKey('KeyT');
+                e.currentTarget.blur();
+              }}
+              className={`pointer-events-auto cursor-pointer rounded border px-2.5 py-1 text-xs font-semibold tracking-wider transition ${
+                tofuMode
+                  ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                  : 'border-emerald-500/45 bg-[#0d1f26]/85 text-emerald-300/90 hover:border-emerald-300'
+              }`}
+            >
+              {tofuMode ? `TOFU ON (${sodaSpills} SPILLS) [T]` : 'TOFU MODE [T]'}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                triggerSyntheticKey('KeyV');
+                e.currentTarget.blur();
+              }}
+              className="pointer-events-auto cursor-pointer rounded border border-amber-400/50 bg-[#1f1209]/85 px-2.5 py-1 text-xs font-semibold tracking-wider text-amber-200 transition hover:border-amber-300"
+              title="Cycle Dashboard Cup Skin (Melon Soda / Tofu Cup / Pocari / Boss Coffee)"
+            >
+              SKIN: {SODA_SKIN_LABELS[sodaSkin]} [V]
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                onOpenTrackLoader();
+                e.currentTarget.blur();
+              }}
+              className="pointer-events-auto cursor-pointer rounded border border-cyan-400/55 bg-[#0e1b38]/85 px-2.5 py-1 text-xs font-semibold tracking-wider text-cyan-200 transition hover:border-pink-400 hover:text-pink-200"
+            >
+              LOAD TRACK [M]
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                onOpenInspector();
+                e.currentTarget.blur();
+              }}
+              className="pointer-events-auto cursor-pointer rounded border border-fuchsia-400/45 bg-[#1a0933]/85 px-2.5 py-1 text-xs font-semibold tracking-wider text-fuchsia-200 transition hover:border-cyan-400 hover:text-cyan-200"
+            >
+              ANALYZE
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                onToggleDebug();
+                e.currentTarget.blur();
+              }}
+              className="pointer-events-auto cursor-pointer rounded border border-pink-500/50 bg-[#1a0933]/85 px-2.5 py-1 text-xs font-semibold tracking-wider text-pink-300 transition hover:border-cyan-400 hover:text-cyan-200"
+            >
+              {debugOpen ? 'CLOSE TUNING [F2]' : 'TUNING [F2]'}
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              triggerSyntheticKey('KeyT');
-              e.currentTarget.blur();
-            }}
-            className={`pointer-events-auto cursor-pointer rounded border px-2.5 py-1 text-xs font-semibold tracking-wider transition ${
-              tofuMode
-                ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
-                : 'border-emerald-500/45 bg-[#0d1f26]/85 text-emerald-300/90 hover:border-emerald-300'
-            }`}
-          >
-            {tofuMode ? `TOFU ON (${sodaSpills} SPILLS) [T]` : 'TOFU MODE [T]'}
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              onOpenTrackLoader();
-              e.currentTarget.blur();
-            }}
-            className="pointer-events-auto cursor-pointer rounded border border-cyan-400/55 bg-[#0e1b38]/85 px-2.5 py-1 text-xs font-semibold tracking-wider text-cyan-200 transition hover:border-pink-400 hover:text-pink-200"
-          >
-            LOAD TRACK [M]
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              onOpenInspector();
-              e.currentTarget.blur();
-            }}
-            className="pointer-events-auto cursor-pointer rounded border border-fuchsia-400/45 bg-[#1a0933]/85 px-2.5 py-1 text-xs font-semibold tracking-wider text-fuchsia-200 transition hover:border-cyan-400 hover:text-cyan-200"
-          >
-            ANALYZE
-          </button>
-          <button
-            type="button"
-            onClick={(e) => {
-              onToggleDebug();
-              e.currentTarget.blur();
-            }}
-            className="pointer-events-auto cursor-pointer rounded border border-pink-500/50 bg-[#1a0933]/85 px-2.5 py-1 text-xs font-semibold tracking-wider text-pink-300 transition hover:border-cyan-400 hover:text-cyan-200"
-          >
-            {debugOpen ? 'CLOSE TUNING [F2]' : 'TUNING [F2]'}
-          </button>
+          <div className="text-[9px] tracking-[0.2em] text-fuchsia-300/80 uppercase">
+            90S ANIME CO-PILOT CAM // {passengerMood}
+          </div>
         </div>
       </div>
 
@@ -368,7 +390,8 @@ export function HUD({
             <span className="text-cyan-300">G</span> AUTO-SHIFT
           </div>
           <div>
-            <span className="text-amber-300">T</span> TOFU MODE (×2 GROOVE) ·{' '}
+            <span className="text-amber-300">T</span> TOFU MODE (×2) ·{' '}
+            <span className="text-amber-200">V</span> CUP SKIN ·{' '}
             <span className="text-fuchsia-300">M</span> LOAD MUSIC
           </div>
         </div>
