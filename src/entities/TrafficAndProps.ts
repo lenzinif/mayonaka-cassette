@@ -86,6 +86,9 @@ export class TrafficManager {
     outerLimit: 1,
     innerGap: 0,
     branchCenter: 0.5,
+    activeLeftEdge: -1,
+    activeRightEdge: 1,
+    recenterProgress: 0,
   };
 
   constructor(track?: Track, seed = 'default-traffic') {
@@ -237,6 +240,7 @@ export class TrafficManager {
     onCollision?: (event: CollisionEvent) => void,
     forkZoneStartZ?: number,
     hasStartedDriving = true,
+    forkChoice: 'left' | 'right' = 'right',
   ): void {
     const trackLen = track.length;
     const segLen = track.segmentLength;
@@ -293,6 +297,7 @@ export class TrafficManager {
           t.z,
           trackLen,
           forkZoneStartZ,
+          forkChoice,
         );
         const playerAheadClose = deltaZToPlayer > 0 && deltaZToPlayer < 750;
         const inSameLane = Math.abs(truckEffectiveX - car.x) < 0.42;
@@ -354,6 +359,7 @@ export class TrafficManager {
           truck.z,
           trackLen,
           forkZoneStartZ,
+          forkChoice,
         );
         const signedLatDiff = car.x - truckEffectiveX;
         const prevSignedLatDiff = car.prevX - truckEffectiveX;
@@ -463,6 +469,7 @@ export class TrafficManager {
       wrappedCurrZ,
       trackLen,
       forkZoneStartZ,
+      forkChoice,
       this.forkBoundsScratch,
     );
     if (Math.abs(car.x) <= forkBounds.outerLimit + 0.02) return;
@@ -482,6 +489,7 @@ export class TrafficManager {
           seg.p1.worldZ,
           trackLen,
           forkZoneStartZ,
+          forkChoice,
         );
         const hitW = propHitHalfWidth(sp.kind);
         if (Math.abs(car.x - effectiveOffset) < hitW) {

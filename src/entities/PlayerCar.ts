@@ -153,8 +153,13 @@ export class PlayerCar {
   private roadOuterLimit = 1;
   /** Current inner median island half-width (0 on normal road, up to 0.52 in Y-fork). */
   private roadInnerGap = 0;
+  private roadActiveLeftEdge = -1;
+  private roadActiveRightEdge = 1;
 
   get isOffRoad(): boolean {
+    if (this.roadActiveLeftEdge !== -1 || this.roadActiveRightEdge !== 1) {
+      return this.x < this.roadActiveLeftEdge || this.x > this.roadActiveRightEdge;
+    }
     const absX = Math.abs(this.x);
     return absX > this.roadOuterLimit || (this.roadInnerGap > 0.02 && absX < this.roadInnerGap);
   }
@@ -164,6 +169,15 @@ export class PlayerCar {
    * and the central V-chevron median island in the stage fork.
    */
   get offRoadDepth(): number {
+    if (this.roadActiveLeftEdge !== -1 || this.roadActiveRightEdge !== 1) {
+      if (this.x > this.roadActiveRightEdge) {
+        return Math.max(0, Math.min(1, (this.x - this.roadActiveRightEdge) / 0.55));
+      }
+      if (this.x < this.roadActiveLeftEdge) {
+        return Math.max(0, Math.min(1, (this.roadActiveLeftEdge - this.x) / 0.55));
+      }
+      return 0;
+    }
     const absX = Math.abs(this.x);
     if (absX > this.roadOuterLimit) {
       return Math.max(0, Math.min(1, (absX - this.roadOuterLimit) / 0.55));
@@ -370,6 +384,8 @@ export class PlayerCar {
     this.braking = controls.brake;
     this.roadOuterLimit = forkBounds ? forkBounds.outerLimit : 1;
     this.roadInnerGap = forkBounds ? forkBounds.innerGap : 0;
+    this.roadActiveLeftEdge = forkBounds ? forkBounds.activeLeftEdge : -1;
+    this.roadActiveRightEdge = forkBounds ? forkBounds.activeRightEdge : 1;
 
     const maxSpeed = tuning.maxSpeed;
     const prevSpeed = this.speed;

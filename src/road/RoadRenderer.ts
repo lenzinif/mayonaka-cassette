@@ -5,6 +5,8 @@ import type { StagePalette } from './palette';
 import { exponentialFog, interpolate, percentRemaining, project } from './RoadProjection';
 import {
   findSegment,
+  getChosenForkCenter,
+  getChosenForkHalfWidth,
   getEffectivePropOffset,
   getEffectiveTruckLaneOffset,
   type RoadSegment,
@@ -171,6 +173,7 @@ export class RoadRenderer {
           p1.worldZ,
           trackLength,
           view.forkZoneStartZ,
+          view.forkChoice,
         );
         const sx = p1.screenX + p1.screenW * effectiveOffset;
         if (sx < -width * 0.35 || sx > width * 1.35) continue;
@@ -202,6 +205,7 @@ export class RoadRenderer {
               truck.z,
               trackLength,
               view.forkZoneStartZ,
+              view.forkChoice,
             );
             const truckScreenX =
               interpolate(p1.screenX, p2.screenX, pct) +
@@ -262,25 +266,43 @@ export class RoadRenderer {
       const span = Math.max(1, trackLength - forkZoneStartZ);
       const t1 = Math.max(0, Math.min(1, (p1.worldZ - forkZoneStartZ) / span));
       const t2 = Math.max(0, Math.min(1, (p2.worldZ - forkZoneStartZ) / span));
+      const choice: 'left' | 'right' = forkChoice ?? 'right';
 
-      const outerW1 = w1 * (1 + t1 * 0.68);
-      const outerW2 = w2 * (1 + t2 * 0.68);
+      if (t2 <= 0.18) {
+        // Phase 1: Pre-split widening zone with center chevron warning strip
+        const outerW1 = w1 * (1 + (t1 / 0.18) * 0.2);
+        const outerW2 = w2 * (1 + (t2 / 0.18) * 0.2);
 
-      // Outer rumble strips
-      ctx.fillStyle = palette.rumble[stripe];
-      polygon(ctx, x1 - outerW1 - r1, y1, x1 - outerW1, y1, x2 - outerW2, y2, x2 - outerW2 - r2, y2);
-      polygon(ctx, x1 + outerW1 + r1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + outerW2 + r2, y2);
+        ctx.fillStyle = palette.rumble[stripe];
+        polygon(ctx, x1 - outerW1 - r1, y1, x1 - outerW1, y1, x2 - outerW2, y2, x2 - outerW2 - r2, y2);
+        polygon(ctx, x1 + outerW1 + r1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + outerW2 + r2, y2);
 
-      if (t2 > 0.2) {
-        // Diverging Left & Right asphalt branches with a central V-chevron median island
-        const split1 = Math.max(0, (t1 - 0.2) / 0.8);
-        const split2 = Math.max(0, (t2 - 0.2) / 0.8);
-        const gap1 = w1 * split1 * 0.52;
-        const gap2 = w2 * split2 * 0.52;
+        ctx.fillStyle = palette.road[stripe];
+        polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
+        const c1 = r1 * 0.65;
+        const c2 = r2 * 0.65;
+        ctx.fillStyle = stripe === 0 ? '#ffd319' : '#ff2a6d';
+        polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
+      } else if (t2 <= 0.65) {
+        // Phase 2: Diverging Left & Right asphalt branches with a central V-chevron median island
+        const split1 = Math.max(0, (t1 - 0.18) / (0.65 - 0.18));
+        const split2 = Math.max(0, (t2 - 0.18) / (0.65 - 0.18));
+        const splitEase1 = split1 * split1 * (3 - 2 * split1);
+        const splitEase2 = split2 * split2 * (3 - 2 * split2);
+
+        const outerW1 = w1 * (1.2 + splitEase1 * 0.48);
+        const outerW2 = w2 * (1.2 + splitEase2 * 0.48);
+        const gap1 = w1 * splitEase1 * 0.52;
+        const gap2 = w2 * splitEase2 * 0.52;
+
+        // Outer rumble strips
+        ctx.fillStyle = palette.rumble[stripe];
+        polygon(ctx, x1 - outerW1 - r1, y1, x1 - outerW1, y1, x2 - outerW2, y2, x2 - outerW2 - r2, y2);
+        polygon(ctx, x1 + outerW1 + r1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + outerW2 + r2, y2);
 
         // Left branch asphalt
         ctx.fillStyle =
-          forkChoice === 'left'
+          choice === 'left'
             ? stripe === 0
               ? '#392858'
               : '#31214c'
@@ -289,7 +311,7 @@ export class RoadRenderer {
 
         // Right branch asphalt
         ctx.fillStyle =
-          forkChoice === 'right'
+          choice === 'right'
             ? stripe === 0
               ? '#392858'
               : '#31214c'
@@ -299,10 +321,10 @@ export class RoadRenderer {
         // Inner median V-curbs
         const ir1 = r1 * 0.7;
         const ir2 = r2 * 0.7;
-        ctx.fillStyle = forkChoice === 'left' ? '#05d9e8' : palette.rumble[stripe];
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
         polygon(ctx, x1 - gap1 - ir1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - gap2 - ir2, y2);
 
-        ctx.fillStyle = forkChoice === 'right' ? '#ffd319' : palette.rumble[stripe];
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
         polygon(ctx, x1 + gap1, y1, x1 + gap1 + ir1, y1, x2 + gap2 + ir2, y2, x2 + gap2, y2);
 
         // Center guide lines down each branch
@@ -314,20 +336,72 @@ export class RoadRenderer {
           const rightMid1 = x1 + (outerW1 + gap1) * 0.5;
           const rightMid2 = x2 + (outerW2 + gap2) * 0.5;
 
-          ctx.fillStyle = forkChoice === 'left' ? '#05d9e8' : palette.lane;
+          ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
           polygon(ctx, leftMid1 - l1, y1, leftMid1 + l1, y1, leftMid2 + l2, y2, leftMid2 - l2, y2);
 
-          ctx.fillStyle = forkChoice === 'right' ? '#ffd319' : palette.lane;
+          ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
           polygon(ctx, rightMid1 - l1, y1, rightMid1 + l1, y1, rightMid2 + l2, y2, rightMid2 - l2, y2);
         }
       } else {
-        // Pre-split widening zone with center chevron warning strip
-        ctx.fillStyle = palette.road[stripe];
-        polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
-        const c1 = r1 * 0.65;
-        const c2 = r2 * 0.65;
-        ctx.fillStyle = stripe === 0 ? '#ffd319' : '#ff2a6d';
-        polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
+        // Phase 3: Seamless convergence of the chosen branch back to the center road!
+        const cCenter1 = getChosenForkCenter(t1, choice) * w1;
+        const cCenter2 = getChosenForkCenter(t2, choice) * w2;
+        const cHalfW1 = getChosenForkHalfWidth(t1) * w1;
+        const cHalfW2 = getChosenForkHalfWidth(t2) * w2;
+
+        const cLeft1 = x1 + cCenter1 - cHalfW1;
+        const cRight1 = x1 + cCenter1 + cHalfW1;
+        const cLeft2 = x2 + cCenter2 - cHalfW2;
+        const cRight2 = x2 + cCenter2 + cHalfW2;
+
+        // Chosen branch outer rumble strips
+        ctx.fillStyle = palette.rumble[stripe];
+        polygon(ctx, cLeft1 - r1, y1, cLeft1, y1, cLeft2, y2, cLeft2 - r2, y2);
+        polygon(ctx, cRight1, y1, cRight1 + r1, y1, cRight2 + r2, y2, cRight2, y2);
+
+        // Chosen branch asphalt
+        ctx.fillStyle = stripe === 0 ? '#392858' : '#31214c';
+        polygon(ctx, cLeft1, y1, cRight1, y1, cRight2, y2, cLeft2, y2);
+
+        // Chosen branch center guide line (smoothly merges to normal road center line)
+        if (stripe === 0) {
+          const l1 = Math.max(1, w1 / 32);
+          const l2 = Math.max(1, w2 / 32);
+          const mid1 = x1 + cCenter1;
+          const mid2 = x2 + cCenter2;
+          ctx.fillStyle = choice === 'left' ? '#05d9e8' : '#ffd319';
+          polygon(ctx, mid1 - l1, y1, mid1 + l1, y1, mid2 + l2, y2, mid2 - l2, y2);
+        }
+
+        // Unchosen branch curves outward and fades away into distance
+        const u2 = (t2 - 0.65) / 0.35;
+        const unchosenAlpha = Math.max(0, 1 - u2 * 1.4);
+        if (unchosenAlpha > 0.02) {
+          ctx.save();
+          ctx.globalAlpha = unchosenAlpha;
+          const uSign = choice === 'left' ? 1 : -1;
+          const u1 = Math.max(0, (t1 - 0.65) / 0.35);
+          const e1 = u1 * u1 * (3 - 2 * u1);
+          const e2 = u2 * u2 * (3 - 2 * u2);
+
+          const uCenter1 = uSign * (1.1 + 0.35 * e1) * w1;
+          const uCenter2 = uSign * (1.1 + 0.35 * e2) * w2;
+          const uHalfW1 = 0.58 * (1 - 0.2 * e1) * w1;
+          const uHalfW2 = 0.58 * (1 - 0.2 * e2) * w2;
+
+          const uLeft1 = x1 + uCenter1 - uHalfW1;
+          const uRight1 = x1 + uCenter1 + uHalfW1;
+          const uLeft2 = x2 + uCenter2 - uHalfW2;
+          const uRight2 = x2 + uCenter2 + uHalfW2;
+
+          ctx.fillStyle = palette.rumble[stripe];
+          polygon(ctx, uLeft1 - r1, y1, uLeft1, y1, uLeft2, y2, uLeft2 - r2, y2);
+          polygon(ctx, uRight1, y1, uRight1 + r1, y1, uRight2 + r2, y2, uRight2, y2);
+
+          ctx.fillStyle = palette.road[stripe];
+          polygon(ctx, uLeft1, y1, uRight1, y1, uRight2, y2, uLeft2, y2);
+          ctx.restore();
+        }
       }
 
       if (seg.fog < 0.975) {

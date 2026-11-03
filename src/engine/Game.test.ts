@@ -245,9 +245,11 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
       if (ev.type === 'collision') collisions.push(ev);
     });
 
-    // Place car near the end of the Y-fork (where branch asphalt is [0.52, 1.68] and props are shifted outward)
-    game.position = game.track.length - 800;
-    // 1. Driving at x = 1.25 (center of the widened right branch) must be ON-ROAD and hit zero props!
+    // 1. In Phase 2 of the Y-fork (where branch asphalt is [0.52, 1.68] and props are shifted outward),
+    // driving at x = 1.25 (center of the widened right branch) must be ON-ROAD and hit zero props!
+    const forkStartZ = game.getForkZoneStartZ()!;
+    const span = game.track.length - forkStartZ;
+    game.position = forkStartZ + span * 0.45;
     game.car.x = 1.25;
     game.car.prevX = 1.25;
     game.car.speed = 6000;
@@ -262,11 +264,23 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     expect(game.car.isOffRoad).toBe(true);
     expect(game.car.offRoadDepth).toBeGreaterThan(0.5);
 
-    // 3. Crossing the finish line from the outer right branch (x = 1.35) recenters the car onto the new road
+    // 3. In Phase 3 (t > 0.65), as the player drives forward, the chosen branch converges
+    //    smoothly back towards center (0.0). Car is smoothly guided inward.
+    game.position = forkStartZ + span * 0.70;
+    game.car.x = 1.05;
+    game.car.prevX = 1.05;
+    const prevX = game.car.x;
+    for (let i = 0; i < 30; i++) {
+      game.update(1 / 120);
+    }
+    expect(game.car.x).toBeLessThan(prevX);
+    expect(game.car.isOffRoad).toBe(false);
+
+    // 4. Crossing the finish line recenters/safely bounds the car onto the new road
     //    without triggering a phantom wrap-around collision against segment 0 props.
     game.position = game.track.length - 20;
-    game.car.x = 1.35;
-    game.car.prevX = 1.35;
+    game.car.x = 0.5;
+    game.car.prevX = 0.5;
     game.car.speed = 6000;
     game.update(1 / 60);
 

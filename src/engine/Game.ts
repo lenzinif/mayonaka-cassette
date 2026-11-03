@@ -33,6 +33,8 @@ import { cameraDepthFromFov, interpolate } from '@src/road/RoadProjection';
 import { RoadRenderer, type RoadView } from '@src/road/RoadRenderer';
 import {
   findSegment,
+  getChosenForkCenter,
+  getChosenForkHalfWidth,
   getForkCrossSection,
   type ForkCrossSection,
   type Track,
@@ -330,6 +332,9 @@ export class Game {
     outerLimit: 1,
     innerGap: 0,
     branchCenter: 0.5,
+    activeLeftEdge: -1,
+    activeRightEdge: 1,
+    recenterProgress: 0,
   };
 
   private readonly view: RoadView = {
@@ -550,6 +555,7 @@ export class Game {
       this.position,
       this.track.length,
       forkZoneStartZ,
+      this.forkChoice,
       this.forkBoundsScratch,
     );
 
@@ -581,6 +587,34 @@ export class Game {
 
     const effectiveSpeed = this.computeElasticWorldSpeed();
     const nextPos = this.position + effectiveSpeed * dt;
+
+    // Smoothly align car.x with the chosen fork branch as it converges back to center
+    if (
+      forkZoneStartZ !== undefined &&
+      this.position >= forkZoneStartZ &&
+      this.track.length > forkZoneStartZ
+    ) {
+      const span = Math.max(1, this.track.length - forkZoneStartZ);
+      const tPrev = Math.max(0, Math.min(1, (this.position - forkZoneStartZ) / span));
+      const tNext = Math.max(0, Math.min(1, (nextPos - forkZoneStartZ) / span));
+      if (tNext > 0.65) {
+        const centerPrev = getChosenForkCenter(tPrev, this.forkChoice);
+        const centerNext = getChosenForkCenter(tNext, this.forkChoice);
+        const deltaCenter = centerNext - centerPrev;
+        this.car.x += deltaCenter;
+        this.car.prevX += deltaCenter;
+
+        const halfW = getChosenForkHalfWidth(tNext);
+        const maxOffset = halfW * 0.85;
+        const relX = this.car.x - centerNext;
+        if (Math.abs(relX) > maxOffset) {
+          const pull = (Math.sign(relX) * maxOffset - relX) * Math.min(1, dt * 5.0);
+          this.car.x += pull;
+          this.car.prevX += pull;
+        }
+      }
+    }
+
     const wrappedAcrossStageEnd = nextPos >= this.track.length;
     if (wrappedAcrossStageEnd) {
       this.handleStageOrLapEnd(nextPos);
@@ -609,6 +643,7 @@ export class Game {
       this.handleCollision,
       activeForkZoneStartZ,
       this.hasStartedDriving,
+      this.forkChoice,
     );
 
     // 4. Advance Melon Soda liquid physics (only active when Tofu Mode is ON)
@@ -748,7 +783,7 @@ export class Game {
     this.renderTimeMs = this.renderTimeMs * 0.85 + renderElapsed * 0.15;
   };
 
-  private getForkZoneStartZ(): number | undefined {
+  getForkZoneStartZ(): number | undefined {
     if (!this.library.hasMultipleTracks || this.hasCustomTrack || !isSongTrack(this.track)) {
       return undefined;
     }
@@ -759,11 +794,13 @@ export class Game {
   private setForkManualChoice(choice: 'left' | 'right'): void {
     this.forkManualLock = choice;
     this.forkChoice = choice;
+    this.forkLastSign = choice === 'left' ? -1 : 1;
     const forkZoneStartZ = this.getForkZoneStartZ();
     const bounds = getForkCrossSection(
       this.position,
       this.track.length,
       forkZoneStartZ,
+      choice,
       this.forkBoundsScratch,
     );
     const targetX = choice === 'left' ? -bounds.branchCenter : bounds.branchCenter;
@@ -796,21 +833,24 @@ export class Game {
 
       // Physical OutRun lane steering determines branch choice; if the player manually pressed 1/2,
       // steering across the center line (>0.3) releases the lock and follows the car.
-      if (this.forkManualLock === 'left' && this.car.x > 0.3) {
-        this.forkManualLock = null;
-      } else if (this.forkManualLock === 'right' && this.car.x < -0.3) {
-        this.forkManualLock = null;
-      }
+      // Once convergence begins (forkProgress >= 0.65), the choice is committed and locked.
+      if (this.forkProgress < 0.65 || this.forkLastSign === 0) {
+        if (this.forkManualLock === 'left' && this.car.x > 0.3) {
+          this.forkManualLock = null;
+        } else if (this.forkManualLock === 'right' && this.car.x < -0.3) {
+          this.forkManualLock = null;
+        }
 
-      const nextChoice: 'left' | 'right' =
-        this.forkManualLock ?? (this.car.x < 0 ? 'left' : 'right');
-      const nextSign = nextChoice === 'left' ? -1 : 1;
-      if (nextSign !== this.forkLastSign) {
-        this.forkLastSign = nextSign;
-        this.forkChoice = nextChoice;
-        this.bridge.emit({ type: 'forkChoiceChanged', choice: nextChoice, source: 'lane' });
-      } else {
-        this.forkChoice = nextChoice;
+        const nextChoice: 'left' | 'right' =
+          this.forkManualLock ?? (this.car.x < 0 ? 'left' : 'right');
+        const nextSign = nextChoice === 'left' ? -1 : 1;
+        if (nextSign !== this.forkLastSign) {
+          this.forkLastSign = nextSign;
+          this.forkChoice = nextChoice;
+          this.bridge.emit({ type: 'forkChoiceChanged', choice: nextChoice, source: 'lane' });
+        } else {
+          this.forkChoice = nextChoice;
+        }
       }
 
       // Running ahead (docs/DESIGN.md §3): reaching the final 2 bars before the fork early
@@ -940,27 +980,19 @@ export class Game {
   }
 
   /**
-   * Maps the player's lateral offset `car.x` from the chosen Y-fork branch (`[-1.68, -0.52]` or
-   * `[+0.52, +1.68]`) back into the normal road bounds (`[-0.85, +0.85]`) when crossing the finish line.
+   * Re-centers/safely bounds the player's lateral offset `car.x` when crossing the finish line.
+   * Because Phase 3 of the fork (t in [0.65, 1.0]) smoothly converges the chosen branch back
+   * to center (0.0) and standard width (1.0), the car is already near standard road center.
+   * This provides a gentle safety clamp to [-0.85, +0.85], resets bump velocity, and damps
+   * residual steering so the player starts the next stage smoothly in flow state.
    */
   private recenterCarAfterFork(): void {
-    if (!this.forkActive) {
-      if (Math.abs(this.car.x) > 0.9) {
-        this.car.x = Math.sign(this.car.x) * 0.85;
-        this.car.prevX = this.car.x;
-      }
-      return;
+    if (Math.abs(this.car.x) > 0.85) {
+      this.car.x = Math.sign(this.car.x) * 0.85;
+      this.car.prevX = this.car.x;
     }
-
-    // At the end of the fork (t = 1), each branch spans from innerGap (0.52) to outerLimit (1.68)
-    // with center at ±1.10 and half-width 0.58. Map relative offset within the chosen branch to [-0.75, +0.75].
-    const branchCenter = this.forkChoice === 'left' ? -1.1 : 1.1;
-    const branchHalfWidth = 0.58;
-    const relX = (this.car.x - branchCenter) / branchHalfWidth;
-    const mappedX = Math.max(-0.82, Math.min(0.82, relX * 0.65));
-    this.car.x = mappedX;
-    this.car.prevX = mappedX;
     this.car.bumpVx = 0;
+    this.car.steer *= 0.3;
   }
 
   private buildRunSummary(): RunSummary {
