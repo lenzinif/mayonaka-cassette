@@ -24,6 +24,10 @@ export class Background {
   private scrollX = 0;
   private sunOffset = 0;
   private skyTime = 0;
+  private cachedSkyCtx: CanvasRenderingContext2D | null = null;
+  private cachedSkyHorizonY = -1;
+  private cachedSkyPalette: StagePalette | null = null;
+  private cachedSkyGrad: CanvasGradient | null = null;
 
   constructor() {
     for (let i = 0; i < MOUNTAIN_POINTS; i++) {
@@ -70,12 +74,23 @@ export class Background {
     const pulse = beatPulse * tuning.bpmPulseStrength;
     const downPulse = downbeatPulse * tuning.bpmPulseStrength;
 
-    // 1. Sky gradient
-    const skyGrad = ctx.createLinearGradient(0, 0, 0, horizonY);
-    skyGrad.addColorStop(0, palette.skyTop);
-    skyGrad.addColorStop(0.62, palette.skyMid);
-    skyGrad.addColorStop(1, palette.skyHorizon);
-    ctx.fillStyle = skyGrad;
+    // 1. Sky gradient (cached across frames unless palette or height changes)
+    if (
+      this.cachedSkyCtx !== ctx ||
+      this.cachedSkyHorizonY !== horizonY ||
+      this.cachedSkyPalette !== palette ||
+      !this.cachedSkyGrad
+    ) {
+      const grad = ctx.createLinearGradient(0, 0, 0, horizonY);
+      grad.addColorStop(0, palette.skyTop);
+      grad.addColorStop(0.62, palette.skyMid);
+      grad.addColorStop(1, palette.skyHorizon);
+      this.cachedSkyCtx = ctx;
+      this.cachedSkyHorizonY = horizonY;
+      this.cachedSkyPalette = palette;
+      this.cachedSkyGrad = grad;
+    }
+    ctx.fillStyle = this.cachedSkyGrad;
     ctx.fillRect(0, 0, width, horizonY + 2);
 
     // 1b. Twinkling pixel-art stars in upper sky
@@ -92,7 +107,7 @@ export class Background {
     }
 
     // 2. Retro striped synthwave sun (pulses with BPM)
-    // Sits on the horizon behind mountains; strictly clipped to the sky (never bleeds below horizonY).
+    // Drawn without stencil-clip masks; chord-bounded scanlines + ground fill below horizonY occlude cleanly.
     const sunX = width * 0.5 - this.sunOffset;
     const sunY = horizonY - 18;
     const sunR = 58 + pulse * 4.5 + downPulse * 2.5;
@@ -100,25 +115,25 @@ export class Background {
     sunGrad.addColorStop(0, palette.sunTop);
     sunGrad.addColorStop(1, palette.sunBottom);
 
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(0, 0, width, horizonY);
-    ctx.clip();
-
     ctx.beginPath();
     ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-    ctx.clip();
     ctx.fillStyle = sunGrad;
-    ctx.fillRect(sunX - sunR, sunY - sunR, sunR * 2, sunR * 2);
+    ctx.fill();
 
-    // Horizontal scanline cutouts across the lower half of the sun
+    // Horizontal scanline cutouts across the lower half of the sun (chord-clipped analytically)
     ctx.fillStyle = palette.skyMid;
+    const sunRSq = sunR * sunR;
     for (let i = 0; i < 6; i++) {
       const bandY = sunY + 4 + i * 9;
-      const bandH = 1.5 + i * 0.9;
-      ctx.fillRect(sunX - sunR, bandY, sunR * 2, bandH);
+      if (bandY >= horizonY) break;
+      const bandH = Math.min(1.5 + i * 0.9, horizonY - bandY);
+      const dy = bandY + bandH * 0.5 - sunY;
+      const dySq = dy * dy;
+      if (dySq < sunRSq) {
+        const halfChord = Math.sqrt(sunRSq - dySq);
+        ctx.fillRect(sunX - halfChord - 0.5, bandY, halfChord * 2 + 1, bandH);
+      }
     }
-    ctx.restore();
 
     // Subtle horizon beat glow on kick/downbeat (kept in the sky above horizonY)
     if (pulse > 0.05) {

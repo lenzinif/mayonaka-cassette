@@ -532,6 +532,25 @@ export function drawKeiTruck(
   const cargoTopColor = TRUCK_CARGO_TOP_COLORS[v]!;
   const cargoSideColor = TRUCK_CARGO_SIDE_COLORS[v]!;
 
+  // Distant low-LOD silhouette (<10px wide): 5 crisp pixel rects, zero save/restore/quad overhead
+  if (w < 10) {
+    const sx = Math.round(screenX - w * 0.5);
+    const sy = Math.round(screenY);
+    const cabH = Math.max(2, Math.round(h * 0.42));
+    const cargoH = Math.max(1, Math.round(h * 0.24));
+    const bedH = Math.max(1, h - cabH - cargoH);
+    ctx.fillStyle = cabColor;
+    ctx.fillRect(sx, sy - h, w, cabH);
+    ctx.fillStyle = cargoColor;
+    ctx.fillRect(sx, sy - bedH - cargoH, w, cargoH);
+    ctx.fillStyle = bedColor;
+    ctx.fillRect(sx, sy - bedH, w, bedH);
+    ctx.fillStyle = '#ff0055';
+    ctx.fillRect(sx, sy - Math.max(2, bedH), 1, 1);
+    ctx.fillRect(sx + w - 1, sy - Math.max(2, bedH), 1, 1);
+    return;
+  }
+
   const effectiveTurn = tiltAngle * 1.4 + roadCurve * 0.085;
   const frame = getKeiTruckSpriteFrame(effectiveTurn);
   const absFrame = Math.abs(frame);

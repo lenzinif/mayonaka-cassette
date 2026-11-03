@@ -80,12 +80,48 @@ export class Gearbox {
   }
 
   /**
-   * Fake torque curve multiplier `[0, 1.15]` at the current speed & gear:
-   * - In 1st gear, strong launch torque from 0 RPM (`>= 0.90`) so standing starts feel snappy.
-   * - In gears 2–6, lugging below 0.56 RPM feels noticeably softer (`0.26..0.78`), encouraging downshifts
-   *   after drifts, collisions, or on steep `build` climbs.
-   * - Sweet spot peaks around `0.74` RPM.
-   * - Progressive mechanical taper (`tuning.accelTaper`) stretches higher gears across musical bars.
+   * Returns the lower RPM boundary of `gear`'s active turbo powerband.
+   * Derived from the hand-off speed of `gear - 1` so dropping below the previous gear's
+   * shift window causes authentic off-boost lugging unless the player downshifts.
+   */
+  getBandStartRpm(gear: GearNumber = this.gear): number {
+    if (gear <= 1) return 0;
+    const prevRatio = this.getGearRatio((gear - 1) as GearNumber);
+    const curRatio = this.getGearRatio(gear);
+    return (prevRatio / Math.max(0.01, curRatio)) * 0.74;
+  }
+
+  /**
+   * True when `gear > 1` and current RPM has dropped below `gear`'s operating powerband
+   * (engine is off-boost / bogging and needs a downshift).
+   */
+  isLugging(speed: number, maxSpeed: number, gear: GearNumber = this.gear): boolean {
+    if (gear <= 1) return false;
+    const rpm = this.computeRpm(speed, maxSpeed, gear);
+    return rpm < this.getBandStartRpm(gear);
+  }
+
+  /**
+   * Returns the ideal gear `(1..6)` that places `speed` squarely inside the turbo powerband.
+   */
+  getOptimalGearForSpeed(speed: number, maxSpeed: number): GearNumber {
+    for (let g = 1; g < MAX_GEAR; g++) {
+      const gear = g as GearNumber;
+      if (this.computeRpm(speed, maxSpeed, gear) <= 0.88) {
+        return gear;
+      }
+    }
+    return MAX_GEAR;
+  }
+
+  /**
+   * Fake torque curve multiplier `[0, 1.18]` at the current speed & gear:
+   * - In 1st gear, strong launch torque from 0 RPM (`>= 0.92`) so standing starts feel snappy.
+   * - In gears 2–6, each gear has a real operating band starting at `getBandStartRpm(gear)`.
+   *   Dropping below `bandStart` drops the engine off-boost into severe low-RPM lugging (`0.12..0.56`),
+   *   making downshifts essential on `build` climbs, after `breakdown` hairpins/drifts, or after collisions.
+   * - Turbo powerband peaks at `0.74..0.82` RPM.
+   * - Progressive mechanical taper (`tuning.accelTaper`) spaces gears across musical bars.
    * - Soft redline limiter fades torque smoothly to `0` as RPM approaches `1.0`.
    */
   getTorqueFactor(speed: number, maxSpeed: number): number {
@@ -97,27 +133,41 @@ export class Gearbox {
     }
 
     const gearProgress = (this.gear - 1) / (MAX_GEAR - 1);
-    const taperMultiplier = Math.max(0.38, 1 - gearProgress * tuning.accelTaper * 0.62);
+    const taperMultiplier = Math.max(
+      0.32,
+      1 - Math.pow(gearProgress, 1.1) * tuning.accelTaper * 0.65,
+    );
 
-    // Soft redline roll-off between 0.90 and 1.00 RPM
-    if (rpm > 0.9) {
-      const redlineProgress = (rpm - 0.9) / 0.1;
+    // Soft redline roll-off between 0.91 and 1.00 RPM
+    if (rpm > 0.91) {
+      const redlineProgress = (rpm - 0.91) / 0.09;
       return Math.max(0, (1 - redlineProgress * redlineProgress) * 0.92 * taperMultiplier);
     }
 
-    // Bell-shaped torque curve peaking at 0.74 RPM
-    const distFromPeak = rpm - 0.74;
-    const bell = Math.exp(-(distFromPeak * distFromPeak) / 0.12);
-
-    if (this.gear === 1 && rpm < 0.55) {
-      // Snappy 1st gear launch
-      return Math.max(0.9, 0.78 + 0.34 * bell);
+    if (this.gear === 1) {
+      // Snappy 1st gear launch with bell peak at 0.74 RPM
+      const distFromPeak1 = rpm - 0.74;
+      const bell1 = Math.exp(-(distFromPeak1 * distFromPeak1) / 0.09);
+      return Math.max(0.92, 0.78 + 0.36 * bell1);
     }
 
-    // Higher gears lug significantly if RPM drops below the powerband (< 0.56 RPM)
-    const lugFloor = Math.max(0.26, 0.48 - (this.gear - 2) * 0.055);
-    const lowRpmPenalty = rpm < 0.56 ? lugFloor + (rpm / 0.56) * (0.78 - lugFloor) : 0.78;
-    return (lowRpmPenalty + 0.34 * bell) * taperMultiplier;
+    const bandStart = this.getBandStartRpm(this.gear);
+    const peakRpm = 0.74 + gearProgress * 0.08;
+
+    // Off-boost lugging when RPM falls below the gear's operating band
+    if (rpm < bandStart) {
+      const lugRatio = Math.max(0, rpm / Math.max(0.1, bandStart));
+      const lugFloor = Math.max(0.12, 0.36 - gearProgress * 0.24);
+      const lugCurve = Math.pow(lugRatio, 2.2);
+      return (lugFloor + lugCurve * (0.56 - lugFloor)) * taperMultiplier;
+    }
+
+    // Active turbo powerband above bandStart
+    const distFromPeak = rpm - peakRpm;
+    const bell = Math.exp(-(distFromPeak * distFromPeak) / 0.042);
+    const spoolRamp = Math.min(1, (rpm - bandStart) / Math.max(0.08, peakRpm - bandStart));
+    const inBandBase = 0.56 + 0.24 * spoolRamp;
+    return (inBandBase + 0.38 * bell) * taperMultiplier;
   }
 
   /**
@@ -134,7 +184,8 @@ export class Gearbox {
       } else if (this.gear > 1) {
         const lowerGear = (this.gear - 1) as GearNumber;
         const lowerRpm = this.computeRpm(speed, maxSpeed, lowerGear);
-        if (this.rpm < 0.58 && lowerRpm < 0.86) {
+        const bandStart = this.getBandStartRpm(this.gear);
+        if (this.rpm < Math.max(0.58, bandStart) && lowerRpm <= 0.88) {
           this.gear = lowerGear;
           this.rpm = lowerRpm;
         }
@@ -173,7 +224,7 @@ export class Gearbox {
     const rpmValid =
       direction === 'up'
         ? prevRpm >= 0.72
-        : prevRpm <= 0.78 && newRpm < 0.96 && speed > maxSpeed * 0.08;
+        : prevRpm <= 0.84 && newRpm >= 0.48 && newRpm <= 0.96 && speed > maxSpeed * 0.08;
 
     const validForBonus = rpmValid && isFreshBeat;
     const rewardTier: BeatJudgementTier = validForBonus ? judgement.tier : 'OFF';

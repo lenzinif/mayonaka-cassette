@@ -257,11 +257,11 @@ export class MelonSoda {
     // is a relaxing recovery, not a violent impact. Heavily attenuate unloading jerk
     // so corner exit glides the liquid smoothly to rest without whipping over the opposite rim.
     const isUnloadingLat = motion.lateralAccel * jLat < 0;
-    const effectiveJLat = isUnloadingLat ? jLat * 0.25 : jLat;
+    const effectiveJLat = isUnloadingLat ? jLat * 0.15 : jLat;
 
     const jerkBlend = 1 - Math.exp(-28 * dt);
-    const clampedJLat = this.graceTimer > 0 ? 0 : Math.max(-35, Math.min(35, effectiveJLat));
-    const clampedJLon = this.graceTimer > 0 ? 0 : Math.max(-35, Math.min(35, jLon));
+    const clampedJLat = this.graceTimer > 0 ? 0 : Math.max(-30, Math.min(30, effectiveJLat));
+    const clampedJLon = this.graceTimer > 0 ? 0 : Math.max(-30, Math.min(30, jLon));
     this.smoothedJerkLat += (clampedJLat - this.smoothedJerkLat) * jerkBlend;
     this.smoothedJerkLon += (clampedJLon - this.smoothedJerkLon) * jerkBlend;
 
@@ -269,7 +269,7 @@ export class MelonSoda {
     // Scaled realistically so grazing the rumble strip creates a palpable buzz
     // without instantly blowing the cup rim.
     const offRoadWave = motion.isOffRoad
-      ? Math.sin(this.bubblePhase * 7.5) * (0.2 + motion.speedRatio * 0.8) * 6.5
+      ? Math.sin(this.bubblePhase * 7.5) * (0.2 + motion.speedRatio * 0.8) * 5.0
       : 0;
 
     // 2. Mode 1: Fundamental pendulum slosh (driven by BOTH sustained G-force AND jerk!)
@@ -278,10 +278,12 @@ export class MelonSoda {
     const c1 = tuning.sodaDamping;
     const g = tuning.sodaSensitivity;
 
+    // Gentle progressive tilt during cornering/braking: committed turns tilt the liquid
+    // by ~25-40% of the cup, leaving ample headroom so corner exit never spills.
     const sustainedDrive =
-      (motion.lateralAccel * 6.0 + motion.longitudinalAccel * 4.2) * g;
+      (motion.lateralAccel * 2.8 + motion.longitudinalAccel * 2.6) * g;
     const jerkDrive =
-      (this.smoothedJerkLat * 0.55 + this.smoothedJerkLon * 0.38 + offRoadWave) * g;
+      (this.smoothedJerkLat * 0.50 + this.smoothedJerkLon * 0.35 + offRoadWave) * g;
 
     const thetaAccel = -k1 * this.theta - c1 * this.thetaVel + sustainedDrive + jerkDrive;
     this.thetaVel += thetaAccel * dt;

@@ -425,4 +425,57 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     expect(fillRectCalls.length).toBeGreaterThan(0);
     expect(fillTextCalls.some((c) => c[0] === 'PAUSED')).toBe(true);
   });
+
+  it('measures real-time physics and render profiling metrics for M8 Performance Profiler', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(60);
+    const game = new Game({ input, bridge });
+
+    const mockCtx = {
+      canvas: { width: 640, height: 360 },
+      save: () => {},
+      restore: () => {},
+      fillRect: () => {},
+      strokeRect: () => {},
+      fillText: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      quadraticCurveTo: () => {},
+      arc: () => {},
+      ellipse: () => {},
+      rect: () => {},
+      clip: () => {},
+      fill: () => {},
+      stroke: () => {},
+      translate: () => {},
+      rotate: () => {},
+      scale: () => {},
+      setTransform: () => {},
+      setLineDash: () => {},
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      drawImage: () => {},
+    } as unknown as CanvasRenderingContext2D;
+
+    // Run 3 simulation steps and 1 render pass
+    game.update(1 / 120);
+    game.update(1 / 120);
+    game.render(mockCtx, 1, 60);
+    game.update(1 / 120);
+
+    const snap = bridge.getSnapshot();
+    expect(snap).toBeDefined();
+    if (!snap) return;
+
+    expect(snap.fps).toBe(60);
+    expect(snap.frameTimeMs).toBeGreaterThan(0);
+    expect(snap.simTimeMs).toBeGreaterThanOrEqual(0);
+    expect(snap.renderTimeMs).toBeGreaterThanOrEqual(0);
+    expect(snap.drawnSegments).toBeGreaterThan(0);
+    expect(snap.fixedStepsLastFrame).toBeGreaterThanOrEqual(1);
+    expect(snap.drawnProps).toBeGreaterThanOrEqual(0);
+    expect(snap.drawnTrucks).toBeGreaterThanOrEqual(0);
+  });
 });

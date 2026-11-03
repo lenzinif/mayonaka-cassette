@@ -17,12 +17,10 @@ export interface DriveControls {
 export type DriftDirection = -1 | 0 | 1;
 
 /**
- * Discrete OutRun-style 3-state sprite frame index for the player car:
- * - `0`: straight rear view & small steering adjustments
- * - `±1`: light / medium cornering turn (~18° 3/4 rear-side view)
- * - `±2`: heavy turn / drift powerslide (~36° wide 3/4 side-rear view)
+ * Player car sprite frame: pure rear-view sprite (frame 0).
+ * Steering and drifting lean and banking stretch are rendered dynamically via yaw.
  */
-export type CarSpriteFrame = -2 | -1 | 0 | 1 | 2;
+export type CarSpriteFrame = 0;
 
 export interface CarRearRig {
   centerX: number;
@@ -34,6 +32,10 @@ export interface CarRearRig {
   spriteFrame: CarSpriteFrame;
 }
 
+/**
+ * 4 discrete Groove tiers with hysteresis (AGENTS.md §5 M5).
+ * SSS corresponds to Funky Overdrive.
+ */
 export type GrooveTier = 'LOW' | 'MEDIUM' | 'HIGH' | 'SSS';
 
 export type CarEvent =
@@ -492,38 +494,18 @@ export class PlayerCar {
 }
 
 /**
- * Discrete OutRun 3-state sprite projection tables indexed by `absFrame = Math.abs(frame)` (`0..2`):
- * - `0`: Straight rear view & small steering adjustments (0°)
- * - `1`: Light / medium cornering turn (~18° 3/4 rear-side view)
- * - `2`: Heavy turn / drift powerslide (~34° wide 3/4 side-rear view)
+ * Computes the discrete sprite frame for `car`.
+ * The player car uses a dedicated rear-view sprite (frame 0) with continuous arcade banking
+ * and layer stretching during steering and drifting.
  */
-const CAR_REAR_COS = [1.0, 0.9, 0.78] as const;
-const CAR_TAIL_SHIFT = [0, 8, 16] as const;
-const CAR_SIDE_SPAN = [0, 18, 34] as const;
-const CAR_NOSE_LIFT = [0, 6, 12] as const;
-
-/**
- * Computes the discrete 3-state OutRun sprite frame (`-2..+2`) for `car`:
- * - `0`: Straight & small steering adjustments (`|turnSignal| < 0.24` when not drifting).
- * - `±1`: Light/normal cornering turn (`|turnSignal| >= 0.24`).
- * - `±2`: Heavy turn / drift powerslide (`car.driftDir !== 0` or heavy collision yaw).
- */
-export function getPlayerCarSpriteFrame(car: PlayerCar): CarSpriteFrame {
-  if (car.driftDir !== 0) {
-    return (car.driftDir * 2) as CarSpriteFrame;
-  }
-
-  const turnSignal = car.yaw * 0.85 + car.steer * 0.2;
-  const absSignal = Math.abs(turnSignal);
-  if (absSignal < 0.24) return 0;
-  const dir = turnSignal > 0 ? 1 : -1;
-  if (absSignal < 0.65) return (dir * 1) as CarSpriteFrame;
-  return (dir * 2) as CarSpriteFrame;
+export function getPlayerCarSpriteFrame(car?: PlayerCar): CarSpriteFrame {
+  void car;
+  return 0;
 }
 
 /**
  * Computes the exact projected screen-space coordinates of the player car's rear tires
- * and exhaust tips for the current multi-angle sprite frame (zero allocations).
+ * and exhaust tip for particle anchoring (smoke, sparks, and exhaust backfires).
  */
 export function computePlayerCarRearRig(
   car: PlayerCar,
@@ -536,37 +518,35 @@ export function computePlayerCarRearRig(
   const bounceY = Math.round(Math.sin(car.bouncePhase) * bounceAmp);
   const pitchY = Math.round(car.pitch * 6);
 
-  const frame = getPlayerCarSpriteFrame(car);
-  const absFrame = Math.abs(frame);
-  const dir = Math.sign(frame);
-  const rearCos = CAR_REAR_COS[absFrame]!;
-  const tailShift = CAR_TAIL_SHIFT[absFrame]!;
-
   const cx = Math.round(canvasWidth * 0.5 + car.yaw * 5);
   const baseY = Math.round(canvasHeight - 26 + bounceY + pitchY);
-  const rearCenterShift = -dir * tailShift;
+  const bank = Math.round(car.yaw * 6);
+  const tireShift = Math.round(bank * 0.2);
+  const exShift = Math.round(bank * 0.22);
 
-  out.centerX = cx + rearCenterShift;
+  out.centerX = cx;
   out.baseY = baseY;
-  out.leftTireX = cx + rearCenterShift + Math.round(-30 * rearCos);
-  out.rightTireX = cx + rearCenterShift + Math.round(30 * rearCos);
-  out.leftExhaustX = cx + rearCenterShift + Math.round(-20 * rearCos);
-  out.rightExhaustX = cx + rearCenterShift + Math.round(20 * rearCos);
-  out.spriteFrame = frame;
+  out.leftTireX = cx - 30 + tireShift;
+  out.rightTireX = cx + 30 + tireShift;
+  out.leftExhaustX = cx + 18 + exShift;
+  out.rightExhaustX = cx + 22 + exShift;
+  out.spriteFrame = 0;
   return out;
 }
 
 /**
- * 16-bit pixel-art 1980s Honda City ("Tall-Boy" Boxy Hatchback + Motocompo) multi-angle renderer
- * (AGENTS.md §4.3, §4.4 & §5 M7).
+ * 16-bit pixel-art 1980s Honda City ("Tall-Boy" Boxy Hatchback + Motocompo) rear-view renderer
+ * with progressive steering lean and banking stretch ("allungamento durante sterzate")
+ * (Design Pillars 1 & 3, AGENTS.md §4.3, §4.4 & §5 M7).
  *
- * Uses a unified 3-station 3D box projection (`Station A` rear tailgate, `Station B` A-pillar cowl,
- * `Station C` stubby front nose) across 3 discrete states per side (`0`, `±1`, `±2`):
- * - Tall, narrow boxy 80s Japanese subcompact silhouette with unpainted black plastic bumpers,
- *   3-color vertical/rectangular 80s tail lamps, single peashooter exhaust, and 12-inch white
- *   turbo-fan steelie wheels.
- * - Large panoramic rear hatchback window revealing the driver and a stowed yellow foldable
- *   Honda Motocompo mini-scooter in the trunk.
+ * Renders the Honda City purely from behind:
+ * - Tall, narrow boxy 80s Japanese subcompact silhouette with unpainted black plastic bumper,
+ *   3-color boxy 80s tail lamps, and single peashooter exhaust.
+ * - Large panoramic rear hatchback window revealing the driver (left) and the stowed yellow
+ *   foldable Honda Motocompo mini-scooter in the trunk (right).
+ * - Multi-layer arcade sprite lean & stretching during steering and drifting:
+ *   each vertical station (tires -> bumper -> tailgate -> rear window -> roof) offsets
+ *   proportionally to yaw along with canvas tilt, creating crisp, authentic retro raster lean.
  */
 export function drawPlayerCar(
   ctx: CanvasRenderingContext2D,
@@ -579,477 +559,126 @@ export function drawPlayerCar(
   const bounceY = Math.round(Math.sin(car.bouncePhase) * bounceAmp);
   const pitchY = Math.round(car.pitch * 6);
 
-  const frame = getPlayerCarSpriteFrame(car);
-  const absFrame = Math.abs(frame);
-  const dir = Math.sign(frame);
-
-  const rearCos = CAR_REAR_COS[absFrame]!;
-  const tailShift = CAR_TAIL_SHIFT[absFrame]!;
-  const sideSpan = CAR_SIDE_SPAN[absFrame]!;
-  const noseLift = CAR_NOSE_LIFT[absFrame]!;
-
   const cx = Math.round(canvasWidth / 2 + car.yaw * 5);
   const baseY = Math.round(canvasHeight - 26 + bounceY + pitchY);
+
+  // Progressive banking / shear offset for authentic OutRun sprite stretch during steering:
+  // Layers shift proportionally from bottom (tires ~0.2) to top (roof ~0.78)
+  const bank = Math.round(car.yaw * 6);
   const treadPhase = Math.floor(car.bouncePhase * 2.5) & 1;
 
   ctx.save();
   ctx.translate(cx, baseY);
+  ctx.rotate(car.yaw * 0.025);
 
-  // Unified 3-Station 3D Box Geometry for the "Tall-Boy" 80s Hatchback:
-  // - Station A (v = 0.00): Rear bumper, tailgate & rear roof header
-  // - Station B (v = 0.68): Front A-pillar & windshield cowl
-  // - Station C (v = 1.00): Stubby boxy front nose & round/square headlights
-  const halfW = Math.round(36 * rearCos);
-  const roofHalfW = Math.round(30 * rearCos);
-  const noseHalfW = Math.round(33 * rearCos);
+  const halfW = 36;
+  const roofHalfW = 30;
 
-  const xA = -dir * tailShift;
-  const yA = 0;
-  const xB = xA + dir * Math.round(sideSpan * 0.7);
-  const yB = -Math.round(noseLift * 0.7);
-  const xC = xA + dir * sideSpan;
-  const yC = -noseLift;
-
-  const xA_left = xA - halfW;
-  const xA_right = xA + halfW;
-  const xA_roofLeft = xA - roofHalfW;
-  const xA_roofRight = xA + roofHalfW;
-
-  const xA_outer = xA + dir * halfW;
-  const xA_inner = xA - dir * halfW;
-  const xA_roofOuter = xA + dir * roofHalfW;
-  const xA_roofInner = xA - dir * roofHalfW;
-
-  const xB_outer = xB + dir * halfW;
-  const xB_roofOuter = xB + dir * roofHalfW;
-  const xB_roofInner = xB - dir * roofHalfW;
-
-  const xC_outer = xC + dir * noseHalfW;
-  const xC_inner = xC - dir * noseHalfW;
-
-  // Vertical stations (relative to ground at y=0)
-  const chassisBotY = -4;
-  const bumperTopY = -12;
-  const beltlineY = -27;
-  const roofTopY = -46;
-  const noseTopY = -20;
+  // Layer banking shifts (allungamento durante sterzate)
+  const tireShift = Math.round(bank * 0.2);
+  const bumperShift = Math.round(bank * 0.25);
+  const exShift = Math.round(bank * 0.22);
+  const plateShift = Math.round(bank * 0.32);
+  const tailgateShift = Math.round(bank * 0.38);
+  const cabinShift = Math.round(bank * 0.6);
+  const roofShift = Math.round(bank * 0.78);
 
   // 1. Drift tire smoke puffs (procedural fallback layer supplementing ParticleSystem)
   if (car.isDrifting) {
     const smokeDir = -car.driftDir;
-    const leftRearTireX = xA - Math.round(30 * rearCos);
-    const rightRearTireX = xA + Math.round(30 * rearCos);
+    const leftSmokeX = -30 + tireShift;
+    const rightSmokeX = 30 + tireShift;
     ctx.fillStyle = car.isOffRoad ? 'rgba(180, 120, 210, 0.35)' : 'rgba(5, 217, 232, 0.38)';
     for (let i = 0; i < 4; i++) {
       const phase = (car.bouncePhase * 0.7 + i * 1.7) % 4;
       const r = Math.round(3 + phase * 3);
       const ox = Math.round(smokeDir * (7 + phase * 8));
       const oy = Math.round(2 - phase * 2.5);
-      ctx.fillRect(leftRearTireX + ox - r, oy - r, r * 2, r * 2);
-      ctx.fillRect(rightRearTireX + ox - r, oy - r, r * 2, r * 2);
+      ctx.fillRect(leftSmokeX + ox - r, oy - r, r * 2, r * 2);
+      ctx.fillRect(rightSmokeX + ox - r, oy - r, r * 2, r * 2);
     }
   }
 
-  // 2. Clean dark ground shadow (no orange/yellow lines)
+  // 2. Pixel-stepped ground shadow + HIGH/SSS Groove neon underglow
   ctx.fillStyle = 'rgba(8, 2, 20, 0.7)';
-  if (absFrame === 0) {
-    ctx.fillRect(xA_left - 3, 1, halfW * 2 + 6, 5);
-    ctx.fillRect(xA_left + 2, 6, halfW * 2 - 4, 2);
-  } else {
-    quad(
-      ctx,
-      xA_inner - dir * 2,
-      5,
-      xA_outer + dir * 3,
-      5,
-      xC_outer + dir * 2,
-      yC + 3,
-      xC_inner,
-      yC + 3,
-    );
+  ctx.fillRect(-halfW - 3 + Math.round(bumperShift * 0.5), 1, halfW * 2 + 6, 5);
+  ctx.fillRect(-halfW + 2 + Math.round(bumperShift * 0.5), 6, halfW * 2 - 4, 2);
+  if (car.grooveTier === 'SSS' || car.grooveTier === 'HIGH') {
+    ctx.fillStyle =
+      car.grooveTier === 'SSS' ? 'rgba(255, 211, 25, 0.42)' : 'rgba(5, 217, 232, 0.34)';
+    ctx.fillRect(-halfW + 4 + Math.round(bumperShift * 0.5), 2, halfW * 2 - 8, 4);
   }
 
-  // 3. Narrow 12-inch 80s rear tires (drawn before side flank so exposed side wheel sits cleanly on top)
-  const tireW = Math.max(9, Math.round(12 * rearCos));
-  const leftTireX = xA_left + 1;
-  const rightTireX = xA_right - tireW - 1;
+  // 3. 12-inch 80s rear tires with animated tread blocks and white steelie wheel covers
+  const tireW = 12;
+  const leftTireX = -halfW + 1 + tireShift;
+  const rightTireX = halfW - tireW - 1 + tireShift;
   ctx.fillStyle = '#12091f';
   ctx.fillRect(leftTireX, -13, tireW, 15);
   ctx.fillRect(rightTireX, -13, tireW, 15);
 
   ctx.fillStyle = treadPhase === 0 ? '#2b1847' : '#1e1035';
-  const treadW = Math.max(4, tireW - 4);
   for (let ty = -11; ty <= -3; ty += 4) {
-    ctx.fillRect(leftTireX + 2, ty + treadPhase, treadW, 2);
-    ctx.fillRect(rightTireX + 2, ty + treadPhase, treadW, 2);
+    ctx.fillRect(leftTireX + 2, ty + treadPhase, tireW - 4, 2);
+    ctx.fillRect(rightTireX + 2, ty + treadPhase, tireW - 4, 2);
   }
 
-  // 4. 3/4 Perspective Front Hood, Roof Top & Tall Side Panel (when turning or drifting: absFrame >= 1)
-  if (absFrame >= 1) {
-    // 4a. Stubby sloped Honda City front hood (Station B beltline -> Station C nose)
-    ctx.fillStyle = '#e01e60';
-    quad(
-      ctx,
-      xB - dir * Math.round(halfW * 0.7),
-      yB + beltlineY,
-      xB_outer,
-      yB + beltlineY,
-      xC_outer,
-      yC + noseTopY,
-      xC_inner + dir * Math.round(noseHalfW * 0.35),
-      yC + noseTopY,
-    );
+  // 4. Unpainted Matte-Black 80s Plastic Rear Bumper & Single Peashooter Exhaust Pipe
+  const bumperHalfW = halfW + 1;
+  const bumperTopY = -12;
+  ctx.fillStyle = '#1b102e';
+  ctx.fillRect(-bumperHalfW + bumperShift, bumperTopY, bumperHalfW * 2, 8);
+  // Bumper top step highlight & recessed impact groove
+  ctx.fillStyle = '#32204f';
+  ctx.fillRect(-bumperHalfW + bumperShift + 1, bumperTopY, bumperHalfW * 2 - 2, 1);
+  ctx.fillStyle = '#10071f';
+  ctx.fillRect(-bumperHalfW + bumperShift + 2, -8, bumperHalfW * 2 - 4, 2);
 
-    // Iconic Honda City asymmetrical hood air scoop / louver bulge
-    const scoopX1 = Math.round((xB_outer + xC_outer) * 0.5) - dir * Math.round(8 * rearCos);
-    const scoopY1 = Math.round((yB + beltlineY + yC + noseTopY) * 0.5) - 1;
-    ctx.fillStyle = '#180a2e';
-    ctx.fillRect(
-      Math.min(scoopX1, scoopX1 + dir * 7),
-      scoopY1,
-      Math.max(4, Math.abs(dir * 7)),
-      3,
-    );
-
-    // 4b. 3D Boxy Roof Top Quad (Station A roof -> Station B windshield header)
-    ctx.fillStyle = '#ff5c93';
-    quad(
-      ctx,
-      xA_roofInner,
-      yA + roofTopY,
-      xA_roofOuter,
-      yA + roofTopY,
-      xB_roofOuter,
-      yB + roofTopY + 1,
-      xB_roofInner,
-      yB + roofTopY + 1,
-    );
-    // Black rubber roof drip-rail molding along outer roof edge
-    ctx.fillStyle = '#180a2e';
-    quad(
-      ctx,
-      xA_roofOuter - dir,
-      yA + roofTopY,
-      xA_roofOuter,
-      yA + roofTopY,
-      xB_roofOuter,
-      yB + roofTopY + 1,
-      xB_roofOuter - dir,
-      yB + roofTopY + 1,
-    );
-
-    // 4c. Tall Side Greenhouse Frame (Station A beltline..roof -> Station B beltline..roof)
-    ctx.fillStyle = '#d91b5c';
-    quad(
-      ctx,
-      xA_outer,
-      yA + beltlineY,
-      xA_roofOuter,
-      yA + roofTopY,
-      xB_roofOuter,
-      yB + roofTopY + 1,
-      xB_outer,
-      yB + beltlineY,
-    );
-
-    // Two tall 80s side windows (Rear quarter window + Front door window separated by B-pillar)
-    const winRearBotX1 = Math.round(xA_outer + (xB_outer - xA_outer) * 0.1);
-    const winRearBotY1 = Math.round(yA + beltlineY - 2 + (yB - yA) * 0.1);
-    const winRearBotX2 = Math.round(xA_outer + (xB_outer - xA_outer) * 0.46);
-    const winRearBotY2 = Math.round(yA + beltlineY - 2 + (yB - yA) * 0.46);
-    const winRearTopX2 = Math.round(xA_roofOuter + (xB_roofOuter - xA_roofOuter) * 0.46);
-    const winRearTopY2 = Math.round(yA + roofTopY + 3 + (yB - yA) * 0.46);
-    const winRearTopX1 = Math.round(xA_roofOuter + (xB_roofOuter - xA_roofOuter) * 0.12);
-    const winRearTopY1 = Math.round(yA + roofTopY + 3 + (yB - yA) * 0.12);
-
-    ctx.fillStyle = '#160a2c';
-    quad(
-      ctx,
-      winRearBotX1,
-      winRearBotY1,
-      winRearBotX2,
-      winRearBotY2,
-      winRearTopX2,
-      winRearTopY2,
-      winRearTopX1,
-      winRearTopY1,
-    );
-
-    const winFrontBotX1 = Math.round(xA_outer + (xB_outer - xA_outer) * 0.54);
-    const winFrontBotY1 = Math.round(yA + beltlineY - 2 + (yB - yA) * 0.54);
-    const winFrontBotX2 = Math.round(xA_outer + (xB_outer - xA_outer) * 0.9);
-    const winFrontBotY2 = Math.round(yA + beltlineY - 2 + (yB - yA) * 0.9);
-    const winFrontTopX2 = Math.round(xA_roofOuter + (xB_roofOuter - xA_roofOuter) * 0.88);
-    const winFrontTopY2 = Math.round(yA + roofTopY + 3 + (yB - yA) * 0.88);
-    const winFrontTopX1 = Math.round(xA_roofOuter + (xB_roofOuter - xA_roofOuter) * 0.54);
-    const winFrontTopY1 = Math.round(yA + roofTopY + 3 + (yB - yA) * 0.54);
-
-    quad(
-      ctx,
-      winFrontBotX1,
-      winFrontBotY1,
-      winFrontBotX2,
-      winFrontBotY2,
-      winFrontTopX2,
-      winFrontTopY2,
-      winFrontTopX1,
-      winFrontTopY1,
-    );
-
-    // Cyan sky reflection bar at top of both side windows
-    ctx.fillStyle = '#05d9e8';
-    quad(
-      ctx,
-      winRearTopX1,
-      winRearTopY1,
-      winRearTopX2,
-      winRearTopY2,
-      winRearTopX2,
-      winRearTopY2 + 2,
-      winRearTopX1,
-      winRearTopY1 + 2,
-    );
-    quad(
-      ctx,
-      winFrontTopX1,
-      winFrontTopY1,
-      winFrontTopX2,
-      winFrontTopY2,
-      winFrontTopX2,
-      winFrontTopY2 + 2,
-      winFrontTopX1,
-      winFrontTopY1 + 2,
-    );
-
-    // 4d. Lower Side Doors & Front Fender Panel (Station A -> Station B -> Station C)
-    ctx.fillStyle = '#e01e60';
-    ctx.beginPath();
-    ctx.moveTo(xA_outer, yA + chassisBotY);
-    ctx.lineTo(xA_outer, yA + beltlineY);
-    ctx.lineTo(xB_outer, yB + beltlineY);
-    ctx.lineTo(xC_outer, yC + noseTopY);
-    ctx.lineTo(xC_outer, yC + chassisBotY);
-    ctx.closePath();
-    ctx.fill();
-
-    // Crisp beltline shoulder highlight along exposed side
-    ctx.fillStyle = '#ff70a6';
-    quad(
-      ctx,
-      xA_outer,
-      yA + beltlineY,
-      xB_outer,
-      yB + beltlineY,
-      xB_outer,
-      yB + beltlineY + 2,
-      xA_outer,
-      yA + beltlineY + 2,
-    );
-
-    // White/silver 80s lower door decal stripe ("CITY R" two-tone accent)
-    ctx.fillStyle = '#eef6ff';
-    quad(
-      ctx,
-      xA_outer,
-      yA - 13,
-      xC_outer,
-      yC - 13,
-      xC_outer,
-      yC - 10,
-      xA_outer,
-      yA - 10,
-    );
-
-    // Unpainted matte-black 80s plastic side rub-strip & wrap-around bumper ends
-    ctx.fillStyle = '#180c29';
-    quad(
-      ctx,
-      xA_outer,
-      yA - 17,
-      xC_outer,
-      yC - 16,
-      xC_outer,
-      yC - 13,
-      xA_outer,
-      yA - 14,
-    );
-    // Lower black rocker sill & front bumper wrap
-    quad(
-      ctx,
-      xA_outer,
-      yA + chassisBotY,
-      xC_outer,
-      yC + chassisBotY,
-      xC_outer,
-      yC - 9,
-      xA_outer,
-      yA - 9,
-    );
-
-    // Amber front corner blinker & bright round headlight on nose tip (Station C)
-    const lampX = dir > 0 ? xC_outer - 3 : xC_outer;
-    ctx.fillStyle = '#e0fbfc';
-    ctx.fillRect(lampX, yC + noseTopY + 2, 3, 4);
-    ctx.fillStyle = '#ff9e00';
-    ctx.fillRect(lampX, yC + noseTopY + 6, 3, 3);
-
-    // Boxy black plastic 80s door mirror at A-pillar (Station B)
-    const mirrorX = dir > 0 ? xB_outer - 2 : xB_outer - 3;
-    ctx.fillStyle = '#180c29';
-    ctx.fillRect(mirrorX, yB + beltlineY - 4, 5, 4);
-    ctx.fillStyle = '#05d9e8';
-    ctx.fillRect(mirrorX + 1, yB + beltlineY - 3, 3, 2);
-
-    // 4e. Small 12-inch Side Wheels with iconic white 80s 4-lug turbo-fan / steelie covers
-    const wheelW = Math.max(6, Math.round(5 + absFrame * 2.5));
-    const rearWheelX = Math.round(xA_outer + (xC_outer - xA_outer) * 0.18);
-    const rearWheelY = Math.round(yA - 6 + (yC - yA) * 0.18);
-    const steerShift = Math.round(car.steer * 2);
-    const frontWheelX = Math.round(xA_outer + (xC_outer - xA_outer) * 0.8) + steerShift;
-    const frontWheelY = Math.round(yA - 6 + (yC - yA) * 0.8);
-
-    // Rear side wheel arch & white 80s wheel cover
-    ctx.fillStyle = '#12091f';
-    ctx.fillRect(rearWheelX - Math.floor(wheelW * 0.5), rearWheelY - 7, wheelW, 14);
-    ctx.fillStyle = treadPhase === 0 ? '#eef6ff' : '#c8ddf2';
-    ctx.fillRect(
-      rearWheelX - Math.max(1, Math.floor(wheelW * 0.32)),
-      rearWheelY - 4,
-      Math.max(2, Math.round(wheelW * 0.64)),
-      8,
-    );
-    ctx.fillStyle = '#180c29';
-    ctx.fillRect(rearWheelX - 1, rearWheelY - 1 + treadPhase, 2, 2);
-
-    // Front side wheel arch & white 80s wheel cover
-    const frontW = Math.max(5, wheelW - 1);
-    ctx.fillStyle = '#12091f';
-    ctx.fillRect(frontWheelX - Math.floor(frontW * 0.5), frontWheelY - 6, frontW, 12);
-    ctx.fillStyle = treadPhase === 0 ? '#c8ddf2' : '#eef6ff';
-    ctx.fillRect(
-      frontWheelX - Math.max(1, Math.floor(frontW * 0.32)),
-      frontWheelY - 3,
-      Math.max(2, Math.round(frontW * 0.64)),
-      6,
-    );
-  }
-
-  // 5. Rear Face — Tall Greenhouse & Panoramic Hatchback Window (Station A: y = -27..-46)
-  ctx.fillStyle = '#ff2a6d';
-  trapezoid(
-    ctx,
-    xA_left,
-    beltlineY,
-    halfW * 2,
-    xA_roofLeft,
-    roofTopY,
-    roofHalfW * 2,
-  );
-
-  // Flat boxy roof cap highlight & center tiny radio antenna
-  ctx.fillStyle = '#ff70a6';
-  ctx.fillRect(xA_roofLeft + 1, roofTopY, roofHalfW * 2 - 2, 2);
+  // Single small 80s peashooter exhaust pipe under right side of rear bumper
+  const exX = 20 + exShift;
   ctx.fillStyle = '#c8ddf2';
-  ctx.fillRect(xA - 1, roofTopY - 4, 2, 4);
+  ctx.fillRect(exX - 2, -4, 4, 4);
+  ctx.fillStyle = car.isDrifting || car.rpm > 0.8 ? '#ffd319' : '#10071f';
+  ctx.fillRect(exX - 1, -3, 2, 2);
 
-  // Large rear hatchback glass window with black rubber weatherstrip
-  const glassBotHalfW = Math.max(10, halfW - 4);
-  const glassTopHalfW = Math.max(8, roofHalfW - 4);
-  ctx.fillStyle = '#140824';
+  // 5. Lower Boxy Tailgate Sheetmetal (y = -12..-27)
+  // Leaning trapezoid between bumperShift and tailgateShift shears the body with the turn
+  ctx.fillStyle = '#ff2a6d';
   trapezoid(
     ctx,
-    xA - glassBotHalfW - 1,
-    beltlineY - 1,
-    (glassBotHalfW + 1) * 2,
-    xA - glassTopHalfW - 1,
-    roofTopY + 2,
-    (glassTopHalfW + 1) * 2,
+    -halfW + bumperShift,
+    bumperTopY,
+    halfW * 2,
+    -halfW + tailgateShift,
+    -27,
+    halfW * 2,
   );
-  ctx.fillStyle = '#180c30';
-  trapezoid(
-    ctx,
-    xA - glassBotHalfW,
-    beltlineY - 2,
-    glassBotHalfW * 2,
-    xA - glassTopHalfW,
-    roofTopY + 3,
-    glassTopHalfW * 2,
-  );
-
-  // Diagonal cyan glass reflection on the left side of the rear window
-  ctx.fillStyle = 'rgba(5, 217, 232, 0.28)';
-  quad(
-    ctx,
-    xA - glassBotHalfW + 2,
-    beltlineY - 3,
-    xA - Math.round(glassBotHalfW * 0.35),
-    beltlineY - 3,
-    xA - Math.round(glassTopHalfW * 0.15),
-    roofTopY + 4,
-    xA - glassTopHalfW + 2,
-    roofTopY + 4,
-  );
-
-  // Driver head & headrest silhouette inside cabin (left-hand side)
-  const drvX = xA - Math.round(12 * rearCos);
-  const drvW = Math.max(6, Math.round(10 * rearCos));
-  ctx.fillStyle = '#100520';
-  ctx.fillRect(drvX - Math.floor(drvW * 0.5), -41, drvW, 11);
-  ctx.fillStyle = '#05d9e8';
-  ctx.fillRect(drvX - Math.max(2, Math.floor(drvW * 0.35)), -39, Math.max(4, drvW - 3), 2);
-
-  // Iconic Foldable Yellow HONDA MOTOCOMPO Scooter stowed inside the rear trunk!
-  const motoW = Math.max(10, Math.round(22 * rearCos));
-  const motoX = xA + Math.round(3 * rearCos);
-  const motoY = -36;
-  // Folded dark handlebar & seat top bar
-  ctx.fillStyle = '#100520';
-  ctx.fillRect(motoX + 1, motoY - 2, Math.max(6, motoW - 3), 2);
-  // Boxy yellow Motocompo shell
-  ctx.fillStyle = '#ffd319';
-  ctx.fillRect(motoX, motoY, motoW, 7);
-  // White/black Honda side stripe & vents on the Motocompo box
-  ctx.fillStyle = '#180c29';
-  ctx.fillRect(motoX + 2, motoY + 2, Math.max(6, motoW - 4), 2);
-  ctx.fillStyle = '#eef6ff';
-  ctx.fillRect(motoX + 3, motoY + 2, Math.max(3, Math.round(motoW * 0.45)), 1);
-  // Tiny red tail-light on the back of the Motocompo
-  ctx.fillStyle = '#ff2a6d';
-  ctx.fillRect(motoX + motoW - 3, motoY + 1, 2, 2);
-
-  // Rear window wiper blade (classic 80s hatchback detail)
-  ctx.fillStyle = '#100520';
-  ctx.fillRect(xA - Math.round(14 * rearCos), beltlineY - 3, Math.round(16 * rearCos), 1);
-
-  // 6. Rear Face — Lower Boxy Tailgate Sheetmetal (Station A: y = -12..-27)
-  ctx.fillStyle = '#ff2a6d';
-  ctx.fillRect(xA_left, beltlineY, halfW * 2, beltlineY ? 15 : 15);
 
   // Upper tailgate crease highlight right under the rear window
   ctx.fillStyle = '#ff70a6';
-  ctx.fillRect(xA_left + 1, beltlineY, halfW * 2 - 2, 2);
+  ctx.fillRect(-halfW + tailgateShift + 1, -27, halfW * 2 - 2, 2);
 
   // White/silver lower two-tone stripe across the bottom of the tailgate
   ctx.fillStyle = '#eef6ff';
-  ctx.fillRect(xA_left + 1, -14, halfW * 2 - 2, 2);
+  ctx.fillRect(-halfW + bumperShift + 1, -14, halfW * 2 - 2, 2);
 
   // Matte-black 80s plastic tailgate garnish bar between the tail lamps
-  const garnishW = Math.round(68 * rearCos);
+  const garnishHalfW = 34;
   ctx.fillStyle = '#180c29';
-  ctx.fillRect(xA - Math.round(garnishW * 0.5), -25, garnishW, 10);
+  ctx.fillRect(-garnishHalfW + tailgateShift, -25, garnishHalfW * 2, 10);
 
-  // 7. Classic 80s 3-Color Boxy Tail Lamp Clusters (Red Brake / Amber Turn / White Reverse)
-  const lampW = Math.max(9, Math.round(16 * rearCos));
-  const leftLampX = xA_left + 2;
-  const rightLampX = xA_right - lampW - 2;
+  // 6. Classic 80s 3-Color Boxy Tail Lamp Clusters (Red Brake / Amber Turn / White Reverse)
+  const lampW = 16;
+  const leftLampX = -halfW + tailgateShift + 2;
+  const rightLampX = halfW + tailgateShift - lampW - 2;
 
   // Top Red Brake/Tail section
   ctx.fillStyle = car.braking ? '#ff0055' : '#d91b5c';
   ctx.fillRect(leftLampX, -24, lampW, 4);
   ctx.fillRect(rightLampX, -24, lampW, 4);
   ctx.fillStyle = car.braking ? '#fff3b0' : '#ff5c93';
-  ctx.fillRect(leftLampX + 2, -23, Math.max(4, lampW - 4), 2);
-  ctx.fillRect(rightLampX + 2, -23, Math.max(4, lampW - 4), 2);
+  ctx.fillRect(leftLampX + 2, -23, lampW - 4, 2);
+  ctx.fillRect(rightLampX + 2, -23, lampW - 4, 2);
 
   // Middle Amber 80s Turn-Signal strip
   ctx.fillStyle = '#ff9e00';
@@ -1068,38 +697,105 @@ export function drawPlayerCar(
     ctx.fillRect(rightLampX - 2, -26, lampW + 4, 11);
   }
 
-  // 8. Center JDM Compact License Plate & "CITY" pixel badge in the tailgate recess
-  const plateW = Math.max(11, Math.round(18 * rearCos));
-  const plateX = xA - Math.round(plateW * 0.5);
+  // 7. Center JDM Compact License Plate & "CITY" badge
+  const plateW = 18;
+  const plateX = -Math.round(plateW * 0.5) + plateShift;
   ctx.fillStyle = '#e0fbfc';
   ctx.fillRect(plateX, -23, plateW, 8);
   ctx.fillStyle = '#0d0221';
-  ctx.fillRect(plateX + 2, -21, Math.max(7, plateW - 4), 4);
+  ctx.fillRect(plateX + 2, -21, plateW - 4, 4);
   ctx.fillStyle = '#05d9e8';
-  ctx.fillRect(plateX + 3, -20, Math.max(2, Math.round(4 * rearCos)), 2);
-  ctx.fillRect(
-    plateX + plateW - Math.max(2, Math.round(4 * rearCos)) - 3,
-    -20,
-    Math.max(2, Math.round(4 * rearCos)),
-    2,
+  ctx.fillRect(plateX + 3, -20, 4, 2);
+  ctx.fillRect(plateX + plateW - 7, -20, 4, 2);
+
+  // 8. Upper Greenhouse & Panoramic Hatchback Window (y = -27..-46)
+  // Leaning trapezoid between tailgateShift at beltline and roofShift at roof top:
+  // produces the classic arcade sprite stretch as the car banks into curves
+  ctx.fillStyle = '#ff2a6d';
+  trapezoid(
+    ctx,
+    -halfW + tailgateShift,
+    -27,
+    halfW * 2,
+    -roofHalfW + roofShift,
+    -46,
+    roofHalfW * 2,
   );
 
-  // 9. Unpainted Matte-Black 80s Plastic Rear Bumper & Single Peashooter Exhaust Pipe
-  const bumperHalfW = halfW + 1;
-  ctx.fillStyle = '#1b102e';
-  ctx.fillRect(xA - bumperHalfW, bumperTopY, bumperHalfW * 2, 8);
-  // Bumper top step highlight & recessed impact groove
-  ctx.fillStyle = '#32204f';
-  ctx.fillRect(xA - bumperHalfW + 1, bumperTopY, bumperHalfW * 2 - 2, 1);
-  ctx.fillStyle = '#10071f';
-  ctx.fillRect(xA - bumperHalfW + 2, -8, bumperHalfW * 2 - 4, 2);
-
-  // Single small 80s peashooter exhaust pipe under right side of rear bumper
-  const exX = xA + Math.round(20 * rearCos);
+  // Flat boxy roof cap highlight & center tiny radio antenna
+  ctx.fillStyle = '#ff70a6';
+  ctx.fillRect(-roofHalfW + roofShift + 1, -46, roofHalfW * 2 - 2, 2);
   ctx.fillStyle = '#c8ddf2';
-  ctx.fillRect(exX - 2, -4, 4, 4);
-  ctx.fillStyle = '#10071f';
-  ctx.fillRect(exX - 1, -3, 2, 2);
+  ctx.fillRect(roofShift - 1, -50, 2, 4);
+
+  // Large rear hatchback glass window with black rubber weatherstrip
+  const glassBotHalfW = halfW - 4;
+  const glassTopHalfW = roofHalfW - 4;
+  ctx.fillStyle = '#140824';
+  trapezoid(
+    ctx,
+    -glassBotHalfW - 1 + tailgateShift,
+    -28,
+    (glassBotHalfW + 1) * 2,
+    -glassTopHalfW - 1 + roofShift,
+    -44,
+    (glassTopHalfW + 1) * 2,
+  );
+  ctx.fillStyle = '#180c30';
+  trapezoid(
+    ctx,
+    -glassBotHalfW + tailgateShift,
+    -29,
+    glassBotHalfW * 2,
+    -glassTopHalfW + roofShift,
+    -43,
+    glassTopHalfW * 2,
+  );
+
+  // Diagonal cyan glass reflection on the left side of the rear window
+  ctx.fillStyle = 'rgba(5, 217, 232, 0.28)';
+  quad(
+    ctx,
+    -glassBotHalfW + 2 + tailgateShift,
+    -30,
+    -Math.round(glassBotHalfW * 0.35) + tailgateShift,
+    -30,
+    -Math.round(glassTopHalfW * 0.15) + roofShift,
+    -42,
+    -glassTopHalfW + 2 + roofShift,
+    -42,
+  );
+
+  // Driver head & headrest silhouette inside cabin (left-hand side)
+  const drvX = cabinShift - 12;
+  const drvW = 10;
+  ctx.fillStyle = '#100520';
+  ctx.fillRect(drvX - Math.floor(drvW * 0.5), -41, drvW, 11);
+  ctx.fillStyle = '#05d9e8';
+  ctx.fillRect(drvX - Math.floor(drvW * 0.35), -39, drvW - 3, 2);
+
+  // Iconic Foldable Yellow HONDA MOTOCOMPO Scooter stowed inside the rear trunk!
+  const motoW = 22;
+  const motoX = cabinShift + 3;
+  const motoY = -36;
+  // Folded dark handlebar & seat top bar
+  ctx.fillStyle = '#100520';
+  ctx.fillRect(motoX + 1, motoY - 2, motoW - 3, 2);
+  // Boxy yellow Motocompo shell
+  ctx.fillStyle = '#ffd319';
+  ctx.fillRect(motoX, motoY, motoW, 7);
+  // White/black Honda side stripe & vents on the Motocompo box
+  ctx.fillStyle = '#180c29';
+  ctx.fillRect(motoX + 2, motoY + 2, motoW - 4, 2);
+  ctx.fillStyle = '#eef6ff';
+  ctx.fillRect(motoX + 3, motoY + 2, Math.round(motoW * 0.45), 1);
+  // Tiny red tail-light on the back of the Motocompo
+  ctx.fillStyle = '#ff2a6d';
+  ctx.fillRect(motoX + motoW - 3, motoY + 1, 2, 2);
+
+  // Rear window wiper blade (classic 80s hatchback detail)
+  ctx.fillStyle = '#100520';
+  ctx.fillRect(-14 + tailgateShift, -30, 16, 1);
 
   ctx.restore();
 }

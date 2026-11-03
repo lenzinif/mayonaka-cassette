@@ -93,7 +93,7 @@ export function App() {
           onOpenTrackLoader={() => setTrackLoaderOpen(true)}
         />
         <CRTOverlay />
-        <DebugPanel open={debugOpen} onClose={() => setDebugOpen(false)} />
+        <DebugPanel open={debugOpen} onClose={() => setDebugOpen(false)} bridge={bridge} />
         <TrackLoader
           open={trackLoaderOpen}
           library={library}

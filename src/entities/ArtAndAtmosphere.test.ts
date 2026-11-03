@@ -168,34 +168,35 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     expect(mock.fillRectCalls).toBeGreaterThan(80);
   });
 
-  it('switches OutRun 3-state 3/4 sprite frames (-2..+2) for PlayerCar and KeiTruck when steering and drifting', () => {
+  it('renders PlayerCar purely from behind with steering banking lean, and KeiTruck 3-state sprite frames', () => {
     const car = new PlayerCar();
     expect(car.spriteFrame).toBe(0);
     expect(getPlayerCarSpriteFrame(car)).toBe(0);
 
-    // Small steering adjustments stay on frame 0 (straight)
+    // Car maintains pure rear-facing frame during steering and drifting
     car.steer = 0.25;
     car.yaw = 0.1;
     expect(car.spriteFrame).toBe(0);
 
     const straightMock = createMockCanvasContext();
     drawPlayerCar(straightMock.ctx, car, 640, 360);
+    expect(straightMock.fillRectCalls).toBeGreaterThan(10);
+    expect(straightMock.polygonFillCalls).toBeGreaterThan(0);
 
-    // Light / normal cornering turn -> frame +1
+    // Hard turn and drift remain pure rear-view with progressive banking stretch
     car.steer = 0.9;
     car.yaw = 0.38;
-    expect(car.spriteFrame).toBe(1);
+    expect(car.spriteFrame).toBe(0);
 
-    // Drift left -> frame -2 (heavy turn / drift)
     car.driftDir = -1;
     car.driftTime = 0.2;
     car.steer = 0;
-    expect(car.spriteFrame).toBe(-2);
+    expect(car.spriteFrame).toBe(0);
 
-    // Rendering in drift frame draws additional 3/4 side flank quads and wheels
     const driftMock = createMockCanvasContext();
     drawPlayerCar(driftMock.ctx, car, 640, 360);
-    expect(driftMock.polygonFillCalls).toBeGreaterThan(straightMock.polygonFillCalls);
+    expect(driftMock.fillRectCalls).toBeGreaterThan(10);
+    expect(driftMock.polygonFillCalls).toBeGreaterThan(0);
 
     // KeiTruck discrete 3-state OutRun curve/turn sprite frames (-2..+2)
     expect(getKeiTruckSpriteFrame(0)).toBe(0);

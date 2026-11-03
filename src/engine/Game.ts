@@ -134,6 +134,26 @@ export interface TelemetrySnapshot {
   // M8 Polish & Lifecycle telemetry
   isPaused: boolean;
   gamepadConnected: boolean;
+  // M8 Performance Profiler telemetry
+  simTimeMs: number;
+  renderTimeMs: number;
+  frameTimeMs: number;
+  fixedStepsLastFrame: number;
+  drawnSegments: number;
+  drawnProps: number;
+  drawnTrucks: number;
+  memoryMb: number | null;
+}
+
+function queryMemoryUsageMb(): number | null {
+  const perfMem = (performance as unknown as { memory?: { usedJSHeapSize?: number } }).memory;
+  if (perfMem?.usedJSHeapSize) {
+    return Math.round((perfMem.usedJSHeapSize / (1024 * 1024)) * 10) / 10;
+  }
+  if (typeof process !== 'undefined' && typeof process.memoryUsage === 'function') {
+    return Math.round((process.memoryUsage().heapUsed / (1024 * 1024)) * 10) / 10;
+  }
+  return null;
 }
 
 export type GameEvent =
@@ -242,6 +262,17 @@ export class Game {
   private readonly input: InputSource;
   private readonly roadRenderer = new RoadRenderer();
   private readonly background = new Background();
+
+  // M8 Performance Profiler metrics
+  private simTimeMs = 0;
+  private simTimeAccumMs = 0;
+  private simStepsSinceLastFrame = 0;
+  private fixedStepsLastFrame = 0;
+  private renderTimeMs = 0;
+  private frameTimeMs = 16.67;
+  private lastRenderTimestamp = 0;
+  private memoryMb: number | null = null;
+  private memoryCheckFrames = 0;
 
   private readonly controls: DriveControls = {
     left: false,
@@ -371,6 +402,8 @@ export class Game {
   }
 
   update = (dt: number): void => {
+    const t0 = performance.now();
+
     // 0. Poll hardware controllers (Gamepad API & input state)
     this.input.poll?.();
 
@@ -445,6 +478,9 @@ export class Game {
     // When paused, do not advance simulation clock, vehicle physics, road, or particles
     if (this.isPaused) {
       this.bridge.offer(this.simTime, this.buildSnapshot);
+      const elapsed = performance.now() - t0;
+      this.simStepsSinceLastFrame++;
+      this.simTimeAccumMs += elapsed;
       return;
     }
 
@@ -606,10 +642,34 @@ export class Game {
 
     this.background.update(dt, playerSeg.curve, this.car.speedRatio);
     this.bridge.offer(this.simTime, this.buildSnapshot);
+
+    const elapsed = performance.now() - t0;
+    this.simStepsSinceLastFrame++;
+    this.simTimeAccumMs += elapsed;
   };
 
   render = (ctx: CanvasRenderingContext2D, alpha = 1, fps = 0): void => {
+    const t0 = performance.now();
     this.lastFps = fps;
+    if (this.lastRenderTimestamp > 0) {
+      const dt = t0 - this.lastRenderTimestamp;
+      this.frameTimeMs = this.frameTimeMs * 0.85 + dt * 0.15;
+    } else if (fps > 0) {
+      this.frameTimeMs = 1000 / fps;
+    }
+    this.lastRenderTimestamp = t0;
+
+    this.fixedStepsLastFrame = this.simStepsSinceLastFrame;
+    this.simTimeMs = this.simTimeMs * 0.85 + this.simTimeAccumMs * 0.15;
+    this.simStepsSinceLastFrame = 0;
+    this.simTimeAccumMs = 0;
+
+    this.memoryCheckFrames++;
+    if (this.memoryCheckFrames >= 45) {
+      this.memoryCheckFrames = 0;
+      this.memoryMb = queryMemoryUsageMb();
+    }
+
     const width = ctx.canvas.width || RENDER_WIDTH;
     const height = ctx.canvas.height || RENDER_HEIGHT;
 
@@ -652,6 +712,9 @@ export class Game {
     if (this.isPaused) {
       drawPauseOverlay(ctx, width, height);
     }
+
+    const renderElapsed = performance.now() - t0;
+    this.renderTimeMs = this.renderTimeMs * 0.85 + renderElapsed * 0.15;
   };
 
   private getForkZoneStartZ(): number | undefined {
@@ -1240,6 +1303,15 @@ export class Game {
       forkRightOption: this.buildForkRightOption(),
       isPaused: this.isPaused,
       gamepadConnected: this.input.isGamepadConnected?.() ?? false,
+      // M8 Performance Profiler telemetry
+      simTimeMs: Math.round(this.simTimeMs * 100) / 100,
+      renderTimeMs: Math.round(this.renderTimeMs * 100) / 100,
+      frameTimeMs: Math.round(this.frameTimeMs * 10) / 10,
+      fixedStepsLastFrame: this.fixedStepsLastFrame,
+      drawnSegments: this.roadRenderer.stats.drawnSegments,
+      drawnProps: this.roadRenderer.stats.drawnProps,
+      drawnTrucks: this.roadRenderer.stats.drawnTrucks,
+      memoryMb: this.memoryMb,
     };
   };
 }

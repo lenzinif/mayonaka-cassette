@@ -31,6 +31,15 @@ export interface RoadView {
 }
 
 /**
+ * Diagnostics & performance statistics gathered during road rendering (M8 Performance Profiler).
+ */
+export interface RoadRenderStats {
+  drawnSegments: number;
+  drawnProps: number;
+  drawnTrucks: number;
+}
+
+/**
  * Pseudo-3D road renderer.
  *
  * Pass 1 (near → far) projects segments, accumulating curvature into a horizontal offset.
@@ -40,6 +49,14 @@ export interface RoadView {
  */
 export class RoadRenderer {
   private readonly visible: RoadSegment[] = new Array<RoadSegment>(MAX_DRAW_DISTANCE);
+  private readonly clipY = new Float32Array(MAX_DRAW_DISTANCE);
+
+  /** Pre-allocated rendering statistics updated every frame without GC allocations (AGENTS.md §4.3). */
+  readonly stats: RoadRenderStats = {
+    drawnSegments: 0,
+    drawnProps: 0,
+    drawnTrucks: 0,
+  };
 
   render(
     ctx: CanvasRenderingContext2D,
@@ -48,6 +65,10 @@ export class RoadRenderer {
     palette: StagePalette,
     traffic?: TrafficManager,
   ): void {
+    this.stats.drawnSegments = 0;
+    this.stats.drawnProps = 0;
+    this.stats.drawnTrucks = 0;
+
     const { segments, segmentLength, length: trackLength } = track;
     const { position, playerX, cameraDepth, roadWidth, width, height } = view;
     const drawDistance = Math.min(
@@ -65,9 +86,10 @@ export class RoadRenderer {
       interpolate(playerSeg.p1.worldY, playerSeg.p2.worldY, playerPercent) + view.cameraHeight;
     const cameraXBase = playerX * roadWidth;
 
-    // Pass 1: projection.
+    // Pass 1: front-to-back projection & hill-crest occlusion horizon (maxy).
     let x = 0;
     let dx = -(base.curve * basePercent);
+    let maxy = height;
     for (let n = 0; n < drawDistance; n++) {
       const seg = segments[(base.index + n) % segments.length]!;
       const cameraZ = position - (seg.index < base.index ? trackLength : 0);
@@ -86,6 +108,15 @@ export class RoadRenderer {
       x += dx;
       dx += seg.curve;
       this.visible[n] = seg;
+      this.clipY[n] = maxy;
+
+      if (
+        seg.p1.cameraZ > cameraDepth &&
+        seg.p2.screenY < seg.p1.screenY &&
+        seg.p2.screenY < maxy
+      ) {
+        maxy = seg.p2.screenY;
+      }
     }
 
     // Pass 2: painter's algorithm (back-to-front).
@@ -94,7 +125,14 @@ export class RoadRenderer {
       const { p1, p2 } = seg;
       if (p1.cameraZ <= cameraDepth) continue; // behind the projection plane
 
-      if (p2.screenY < p1.screenY) {
+      const segClipY = this.clipY[n]!;
+      // Skip segments occluded behind a hill crest or collapsed onto the same sub-pixel horizon line
+      if (
+        p2.screenY < p1.screenY &&
+        p2.screenY < segClipY &&
+        (n < 90 || Math.floor(p2.screenY) < Math.floor(segClipY))
+      ) {
+        this.stats.drawnSegments++;
         this.renderSegment(
           ctx,
           width,
@@ -104,18 +142,26 @@ export class RoadRenderer {
           view.forkZoneStartZ,
           trackLength,
           view.forkChoice,
+          segClipY,
         );
       }
 
+      if (seg.fog < 0.035) continue;
       const ppu = (p1.scale * width) / 2;
-      if (ppu < 0.0015) continue;
+      const scaledPpu = (ppu * roadWidth) / 2000;
+      if (scaledPpu < 0.0055) continue;
 
       const sprites = seg.sprites;
       const firstTruckIdx = traffic ? traffic.getFirstTruckOnSegment(seg.index) : -1;
       if (sprites.length === 0 && firstTruckIdx === -1) continue;
 
-      ctx.globalAlpha = Math.min(1, seg.fog * 1.5);
-      const scaledPpu = (ppu * roadWidth) / 2000;
+      // Skip segment sprites/traffic if even the tallest palm tree crown is occluded behind a hill crest
+      if (p1.screenY - 3500 * scaledPpu >= segClipY) continue;
+
+      const targetAlpha = Math.min(1, seg.fog * 1.5);
+      if (targetAlpha < 0.98) {
+        ctx.globalAlpha = targetAlpha;
+      }
 
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       for (let i = 0; i < sprites.length; i++) {
@@ -127,7 +173,7 @@ export class RoadRenderer {
           view.forkZoneStartZ,
         );
         const sx = p1.screenX + p1.screenW * effectiveOffset;
-        if (sx < -width * 0.5 || sx > width * 1.5) continue;
+        if (sx < -width * 0.35 || sx > width * 1.35) continue;
         drawProp(
           ctx,
           s.kind,
@@ -137,6 +183,7 @@ export class RoadRenderer {
           effectiveOffset < 0 ? -1 : 1,
           s.variant,
         );
+        this.stats.drawnProps++;
       }
 
       // AI Kei Trucks on this segment (diverging onto the left/right Y-fork branch)
@@ -145,38 +192,43 @@ export class RoadRenderer {
         while (tIdx !== -1) {
           const truck = traffic.trucks[tIdx]!;
           const pct = percentRemaining(truck.z, segmentLength);
-          const effectiveLaneOffset = getEffectiveTruckLaneOffset(
-            truck.laneOffset,
-            truck.id,
-            truck.z,
-            trackLength,
-            view.forkZoneStartZ,
-          );
-          const truckScreenX =
-            interpolate(p1.screenX, p2.screenX, pct) +
-            interpolate(p1.screenW, p2.screenW, pct) * effectiveLaneOffset;
           const truckScreenY = interpolate(p1.screenY, p2.screenY, pct);
           const truckScale = interpolate(p1.scale, p2.scale, pct);
           const truckPpu = ((truckScale * width) / 2) * (roadWidth / 2000);
-          if (truckScreenX >= -width * 0.3 && truckScreenX <= width * 1.3) {
-            const viewParallax = ((width * 0.5 - truckScreenX) / Math.max(1, width * 0.5)) * 1.4;
-            const truckRoadCurve = seg.curve + viewParallax + truck.lateralVel * 1.5;
-            drawKeiTruck(
-              ctx,
-              truckScreenX,
-              truckScreenY,
-              truckPpu,
-              truck.variant,
-              truck.tiltAngle,
-              truck.knockedTimer > 0,
-              truckRoadCurve,
+          if (truckScreenY - 1250 * truckPpu < segClipY) {
+            const effectiveLaneOffset = getEffectiveTruckLaneOffset(
+              truck.laneOffset,
+              truck.id,
+              truck.z,
+              trackLength,
+              view.forkZoneStartZ,
             );
+            const truckScreenX =
+              interpolate(p1.screenX, p2.screenX, pct) +
+              interpolate(p1.screenW, p2.screenW, pct) * effectiveLaneOffset;
+            if (truckScreenX >= -width * 0.25 && truckScreenX <= width * 1.25) {
+              const viewParallax = ((width * 0.5 - truckScreenX) / Math.max(1, width * 0.5)) * 1.4;
+              const truckRoadCurve = seg.curve + viewParallax + truck.lateralVel * 1.5;
+              drawKeiTruck(
+                ctx,
+                truckScreenX,
+                truckScreenY,
+                truckPpu,
+                truck.variant,
+                truck.tiltAngle,
+                truck.knockedTimer > 0,
+                truckRoadCurve,
+              );
+              this.stats.drawnTrucks++;
+            }
           }
           tIdx = truck.nextInSegment;
         }
       }
 
-      ctx.globalAlpha = 1;
+      if (targetAlpha < 0.98) {
+        ctx.globalAlpha = 1;
+      }
     }
   }
 
@@ -189,10 +241,11 @@ export class RoadRenderer {
     forkZoneStartZ?: number,
     trackLength = 1,
     forkChoice?: 'left' | 'right',
+    segClipY = Number.POSITIVE_INFINITY,
   ): void {
     const { p1, p2, stripe } = seg;
     const x1 = p1.screenX;
-    const y1 = p1.screenY;
+    const y1 = Math.min(p1.screenY, segClipY);
     const w1 = p1.screenW;
     const x2 = p2.screenX;
     const y2 = p2.screenY - 1; // 1px overlap hides anti-aliasing seams between slices
@@ -277,7 +330,7 @@ export class RoadRenderer {
         polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
       }
 
-      if (seg.fog < 1) {
+      if (seg.fog < 0.975) {
         ctx.globalAlpha = 1 - seg.fog;
         ctx.fillStyle = palette.fog;
         ctx.fillRect(0, y2, width, y1 - y2);
@@ -293,7 +346,7 @@ export class RoadRenderer {
     ctx.fillStyle = palette.road[stripe];
     polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
 
-    if (stripe === 0) {
+    if (stripe === 0 && w1 >= 6) {
       const l1 = w1 / Math.max(32, 8 * LANES);
       const l2 = w2 / Math.max(32, 8 * LANES);
       const laneW1 = (w1 * 2) / LANES;
@@ -308,7 +361,7 @@ export class RoadRenderer {
       }
     }
 
-    if (seg.fog < 1) {
+    if (seg.fog < 0.975) {
       ctx.globalAlpha = 1 - seg.fog;
       ctx.fillStyle = palette.fog;
       ctx.fillRect(0, y2, width, y1 - y2);

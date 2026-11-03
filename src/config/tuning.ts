@@ -16,8 +16,8 @@ export const DEFAULT_TUNING = {
   // Speed (rates are fractions of maxSpeed per second)
   maxSpeed: 12000,
   maxSpeedKmh: 290,
-  accelRate: 0.26,
-  accelTaper: 0.65,
+  accelRate: 0.18,
+  accelTaper: 0.7,
   brakeRate: 1.0,
   coastRate: 0.18,
   offRoadDecelRate: 0.85,
@@ -33,8 +33,8 @@ export const DEFAULT_TUNING = {
   driftMinSpeedRatio: 0.45,
   driftInwardSteer: 0.55,
   driftCounterSteer: 0.6,
-  driftCentrifugalReduce: 0.55,
-  driftDecelRate: 0.08,
+  driftCentrifugalReduce: 0.42,
+  driftDecelRate: 0.095,
 
   // Audio & Beat Pulse (M3)
   audioFilterMinHz: 420,
@@ -76,13 +76,13 @@ export const DEFAULT_TUNING = {
   tofuGrooveMultiplier: 2.0,
   sodaStiffness: 22.0,
   sodaDamping: 2.4,
-  sodaSensitivity: 0.85,
-  sodaSpillThreshold: 0.55,
+  sodaSensitivity: 0.7,
+  sodaSpillThreshold: 0.75,
   tofuSpillGroovePenaltyPct: 0.1,
 
   // Traffic & Collisions (M5)
   trafficDensity: 1.0,
-  collisionSpeedRetention: 0.85,
+  collisionSpeedRetention: 0.68,
   propBounceImpulse: 1.3,
 } satisfies Record<string, number>;
 

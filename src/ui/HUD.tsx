@@ -50,7 +50,7 @@ const TIER_STYLES: Readonly<Record<GrooveTier, { badge: string; bar: string; lab
   SSS: {
     badge: 'border-amber-300 bg-amber-950/90 text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.65)]',
     bar: 'from-amber-300 via-pink-500 to-cyan-300',
-    label: 'SSS // EUPHORIC OVERDRIVE',
+    label: 'FUNKY OVERDRIVE',
   },
 };
 
@@ -68,6 +68,7 @@ export function HUD({
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [cleanHud, setCleanHud] = useState(false);
+  const [showPerfHud, setShowPerfHud] = useState(false);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -77,6 +78,9 @@ export function HUD({
       if (e.code === 'KeyH') {
         e.preventDefault();
         setCleanHud((prev) => !prev);
+      } else if (e.code === 'F3') {
+        e.preventDefault();
+        setShowPerfHud((prev) => !prev);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -123,7 +127,8 @@ export function HUD({
       } else if (event.type === 'pauseChanged') {
         showToast(event.paused ? 'GAME PAUSED' : 'GAME RESUMED', 1200, 'pink');
       } else if (event.type === 'grooveTierChanged') {
-        showToast(`GROOVE TIER // ${event.tier}`, 1700, event.tier === 'SSS' ? 'emerald' : 'pink');
+        const tierName = event.tier === 'SSS' ? 'FUNKY OVERDRIVE' : event.tier;
+        showToast(`GROOVE TIER // ${tierName}`, 1700, event.tier === 'SSS' ? 'emerald' : 'pink');
       } else if (event.type === 'tofuModeToggled') {
         showToast(
           event.active
@@ -319,6 +324,21 @@ export function HUD({
               <div className="rounded border border-cyan-400/30 bg-[#0d0221]/80 px-2.5 py-1 text-xs tabular-nums text-cyan-300">
                 {fps} FPS
               </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  setShowPerfHud((prev) => !prev);
+                  e.currentTarget.blur();
+                }}
+                className={`pointer-events-auto cursor-pointer rounded border px-2.5 py-1 text-xs font-semibold tracking-wider transition ${
+                  showPerfHud
+                    ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                    : 'border-cyan-400/40 bg-[#0d0221]/80 text-cyan-200 hover:border-cyan-300'
+                }`}
+                title="Attiva o disattiva il mini profiler arcade a schermo [F3]"
+              >
+                PERF [F3]
+              </button>
               {gamepadConnected && (
                 <div
                   className="rounded border border-emerald-400/60 bg-emerald-950/80 px-2 py-1 text-xs font-bold text-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0.35)]"
@@ -412,6 +432,42 @@ export function HUD({
           )}
         </div>
       </div>
+
+      {/* M8 Mini Performance Profiler Arcade Ribbon */}
+      {showPerfHud && (
+        <div className="pointer-events-auto mx-auto mt-2 flex flex-wrap items-center justify-center gap-3 rounded border border-cyan-400/50 bg-[#090117]/92 px-3 py-1 font-mono text-[10px] text-cyan-200 shadow-[0_0_15px_rgba(5,217,232,0.3)] backdrop-blur-md">
+          <span className="font-bold tracking-widest text-pink-400 uppercase">PERF MON</span>
+          <span className="font-bold text-emerald-300">{fps} FPS</span>
+          <span className="text-fuchsia-200">
+            FRAME: <strong className="text-white">{snap?.frameTimeMs ?? 16.7}ms</strong>
+          </span>
+          <span className="text-pink-300">
+            RENDER: <strong className="text-pink-200">{snap?.renderTimeMs ?? 1.2}ms</strong>
+          </span>
+          <span className="text-emerald-300">
+            PHYS:{' '}
+            <strong className="text-emerald-200">{snap?.simTimeMs ?? 0.3}ms</strong>{' '}
+            (x{snap?.fixedStepsLastFrame ?? 1})
+          </span>
+          <span className="text-cyan-300">
+            SEGS: <strong className="text-white">{snap?.drawnSegments ?? 0}</strong>
+          </span>
+          <span className="text-amber-300">
+            PROPS: <strong className="text-amber-200">{snap?.drawnProps ?? 0}</strong>
+          </span>
+          <span className="text-cyan-300">
+            TRUCKS: <strong className="text-cyan-200">{snap?.drawnTrucks ?? 0}</strong>
+          </span>
+          <span className="text-pink-300">
+            PARTS: <strong className="text-pink-200">{snap?.activeParticles ?? 0}</strong>
+          </span>
+          {snap?.memoryMb !== null && snap?.memoryMb !== undefined && (
+            <span className="text-emerald-400">
+              HEAP: <strong className="text-emerald-200">{snap.memoryMb}MB</strong>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Center Toast / Audio Unlock Prompt */}
       <div className="flex flex-col items-center justify-center gap-2">

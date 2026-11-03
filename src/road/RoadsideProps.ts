@@ -38,15 +38,15 @@ function drawPalm(
     ctx.fillRect(Math.round(x - trunkW * 1.4), Math.round(y - 1), Math.round(trunkW * 2.8), Math.max(2, Math.round(trunkW * 0.45)));
   }
 
-  // Segmented pixel-art curved trunk (stepped bark rings when close; fast stroke when far)
+  // Segmented pixel-art curved trunk (stepped bark rings when close; fast 2-step pixel column when far)
   if (trunkW >= 2.5) {
-    const rings = 8;
+    const rings = trunkW >= 5 ? 6 : 4;
     for (let r = 0; r < rings; r++) {
       const t0 = r / rings;
       const t1 = (r + 1) / rings;
       const rx = Math.round(x + lean * (t0 * t0));
       const ry = Math.round(y - h * t1);
-      const segH = Math.max(2, Math.ceil((h / rings) + 1));
+      const segH = Math.max(2, Math.ceil(h / rings + 1));
       const segW = Math.max(2, Math.round(trunkW * (1.15 - t0 * 0.42)));
       ctx.fillStyle = r % 2 === 0 ? PALM_TRUNK : '#2c1447';
       ctx.fillRect(Math.round(rx - segW * 0.5), ry, segW, segH);
@@ -58,12 +58,11 @@ function drawPalm(
       }
     }
   } else {
-    ctx.strokeStyle = PALM_TRUNK;
-    ctx.lineWidth = trunkW;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.quadraticCurveTo(x, y - h * 0.6, topX, topY);
-    ctx.stroke();
+    const tw = Math.max(1, Math.round(trunkW));
+    const halfH = Math.max(1, Math.round(h * 0.5));
+    ctx.fillStyle = PALM_TRUNK;
+    ctx.fillRect(Math.round(x - tw * 0.5), Math.round(y - halfH), tw, halfH);
+    ctx.fillRect(Math.round(topX - tw * 0.5), Math.round(topY), tw, Math.max(1, Math.round(h - halfH + 1)));
   }
 
   // Pixel-art palm crown & fronds
@@ -71,42 +70,49 @@ function drawPalm(
   const leafColor = PALM_LEAVES[variant % PALM_LEAVES.length]!;
   const shadeColor = PALM_LEAF_SHADE[variant % PALM_LEAF_SHADE.length]!;
 
+  // Distant low-LOD crown: single compact pixel canopy cluster instead of 6 Bezier paths
+  if (leaf < 6) {
+    const cw = Math.max(3, Math.round(leaf * 1.6));
+    const ch = Math.max(2, Math.round(leaf * 0.85));
+    const cx = Math.round(topX - cw * 0.5);
+    const cy = Math.round(topY - ch * 0.4);
+    ctx.fillStyle = shadeColor;
+    ctx.fillRect(cx, cy + 1, cw, ch);
+    ctx.fillStyle = leafColor;
+    ctx.fillRect(cx, cy, cw, Math.max(1, ch - 1));
+    return;
+  }
+
   // Coconut cluster at crown base
-  if (trunkW >= 2.5) {
+  if (trunkW >= 3) {
     const cocoR = Math.max(2, Math.round(trunkW * 0.55));
     ctx.fillStyle = '#240b36';
     ctx.fillRect(Math.round(topX - cocoR), Math.round(topY - cocoR * 0.4), cocoR * 2, cocoR);
   }
 
+  const steps = leaf >= 18 ? 4 : 2;
   for (let i = 0; i < 6; i++) {
     const a = -Math.PI + (i / 5) * Math.PI;
-    const tipX = topX + Math.cos(a) * leaf;
-    const tipY = topY + Math.sin(a) * leaf * 0.45 + leaf * 0.35;
-    const midX = topX + Math.cos(a) * leaf * 0.5;
-    const midY = topY + Math.sin(a) * leaf * 0.5 - leaf * 0.12;
+    const cosA = Math.cos(a);
+    const sinA = Math.sin(a);
+    const tipX = topX + cosA * leaf;
+    const tipY = topY + sinA * leaf * 0.45 + leaf * 0.35;
+    const midX = topX + cosA * leaf * 0.5;
+    const midY = topY + sinA * leaf * 0.5 - leaf * 0.2;
 
-    if (leaf >= 10) {
-      // Stepped pixel-art frond segments with dual-tone neon shading
-      const steps = 5;
-      for (let s = 0; s < steps; s++) {
-        const u = s / (steps - 1);
-        const inv = 1 - u;
-        const px = Math.round(inv * inv * topX + 2 * inv * u * midX + u * u * tipX);
-        const py = Math.round(inv * inv * topY + 2 * inv * u * (midY - leaf * 0.08) + u * u * tipY);
-        const blockW = Math.max(2, Math.round(leaf * (0.22 - u * 0.12)));
-        const blockH = Math.max(2, Math.round(leaf * (0.12 + u * 0.06)));
-        ctx.fillStyle = shadeColor;
-        ctx.fillRect(px - Math.floor(blockW * 0.5), py + 1, blockW, blockH);
-        ctx.fillStyle = leafColor;
-        ctx.fillRect(px - Math.floor(blockW * 0.5), py - 1, blockW, Math.max(1, blockH - 1));
-      }
-    } else {
+    // Stepped pixel-art frond segments with dual-tone neon shading (zero Bezier path overhead)
+    for (let s = 0; s < steps; s++) {
+      const u = s / Math.max(1, steps - 1);
+      const inv = 1 - u;
+      const px = Math.round(inv * inv * topX + 2 * inv * u * midX + u * u * tipX);
+      const py = Math.round(inv * inv * topY + 2 * inv * u * midY + u * u * tipY);
+      const blockW = Math.max(2, Math.round(leaf * (0.24 - u * 0.11)));
+      const blockH = Math.max(2, Math.round(leaf * (0.13 + u * 0.06)));
+      const bx = px - (blockW >> 1);
+      ctx.fillStyle = shadeColor;
+      ctx.fillRect(bx, py + 1, blockW, blockH);
       ctx.fillStyle = leafColor;
-      ctx.beginPath();
-      ctx.moveTo(topX, topY);
-      ctx.quadraticCurveTo(midX, midY - leaf * 0.12, tipX, tipY);
-      ctx.quadraticCurveTo(midX, midY + leaf * 0.1, topX, topY);
-      ctx.fill();
+      ctx.fillRect(bx, py - 1, blockW, Math.max(1, blockH - 1));
     }
   }
 }
