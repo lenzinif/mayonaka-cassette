@@ -1,5 +1,6 @@
 import type { BeatJudgement } from '@src/audio/BeatClock';
 import { tuning } from '@src/config/tuning';
+import type { ForkCrossSection } from '@src/road/RoadSegment';
 import { Gearbox, type GearNumber, type ShiftResult } from './Gearbox';
 
 export interface DriveControls {
@@ -118,9 +119,32 @@ export class PlayerCar {
   private prevLateralVel = 0;
   private prevBrake = false;
   private brakeDriftActive = false;
+  /** Current outer asphalt edge (1.0 on normal road, up to 1.68 in Y-fork). */
+  private roadOuterLimit = 1;
+  /** Current inner median island half-width (0 on normal road, up to 0.52 in Y-fork). */
+  private roadInnerGap = 0;
 
   get isOffRoad(): boolean {
-    return Math.abs(this.x) > 1;
+    const absX = Math.abs(this.x);
+    return absX > this.roadOuterLimit || (this.roadInnerGap > 0.02 && absX < this.roadInnerGap);
+  }
+
+  /**
+   * Continuous off-road penetration depth in `[0, 1]` accounting for both the outer shoulder
+   * and the central V-chevron median island in the stage fork.
+   */
+  get offRoadDepth(): number {
+    const absX = Math.abs(this.x);
+    if (absX > this.roadOuterLimit) {
+      return Math.max(0, Math.min(1, (absX - this.roadOuterLimit) / 0.65));
+    }
+    if (this.roadInnerGap > 0.02 && absX < this.roadInnerGap) {
+      return Math.max(
+        0,
+        Math.min(1, (this.roadInnerGap - absX) / Math.max(0.12, this.roadInnerGap)),
+      );
+    }
+    return 0;
   }
 
   get isDrifting(): boolean {
@@ -239,6 +263,7 @@ export class PlayerCar {
    * @param segmentSlope Vertical slope `(p2.worldY - p1.worldY) / segmentLength` under the car.
    * @param onEvent Optional callback for discrete car/groove events.
    * @param tofuActive True when Tofu Mode is active (`×2` Groove gain).
+   * @param forkBounds Optional Y-fork cross-section geometry at the car's world Z.
    */
   update(
     dt: number,
@@ -247,9 +272,12 @@ export class PlayerCar {
     segmentSlope = 0,
     onEvent?: (event: CarEvent) => void,
     tofuActive = false,
+    forkBounds?: ForkCrossSection,
   ): void {
     this.prevX = this.x;
     this.braking = controls.brake;
+    this.roadOuterLimit = forkBounds ? forkBounds.outerLimit : 1;
+    this.roadInnerGap = forkBounds ? forkBounds.innerGap : 0;
 
     const maxSpeed = tuning.maxSpeed;
     const prevSpeed = this.speed;
@@ -335,7 +363,8 @@ export class PlayerCar {
 
     const netLateralVel = lateralVel - centrifugalPush + this.bumpVx;
     this.x += netLateralVel * dt;
-    this.x = Math.max(-tuning.playerXLimit, Math.min(tuning.playerXLimit, this.x));
+    const xLimit = tuning.playerXLimit + (this.roadOuterLimit - 1);
+    this.x = Math.max(-xLimit, Math.min(xLimit, this.x));
 
     // Decay collision knockback velocity with tire friction
     if (Math.abs(this.bumpVx) > 0.001) {

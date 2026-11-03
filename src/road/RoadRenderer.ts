@@ -3,7 +3,13 @@ import { tuning } from '@src/config/tuning';
 import { drawKeiTruck, type TrafficManager } from '@src/entities/TrafficAndProps';
 import type { StagePalette } from './palette';
 import { exponentialFog, interpolate, percentRemaining, project } from './RoadProjection';
-import { findSegment, type RoadSegment, type Track } from './RoadSegment';
+import {
+  findSegment,
+  getEffectivePropOffset,
+  getEffectiveTruckLaneOffset,
+  type RoadSegment,
+  type Track,
+} from './RoadSegment';
 import { drawProp } from './RoadsideProps';
 
 /** Per-frame camera/view parameters. The caller owns and reuses this object. */
@@ -111,10 +117,16 @@ export class RoadRenderer {
       ctx.globalAlpha = Math.min(1, seg.fog * 1.5);
       const scaledPpu = (ppu * roadWidth) / 2000;
 
-      // Roadside props
+      // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       for (let i = 0; i < sprites.length; i++) {
         const s = sprites[i]!;
-        const sx = p1.screenX + p1.screenW * s.offset;
+        const effectiveOffset = getEffectivePropOffset(
+          s.offset,
+          p1.worldZ,
+          trackLength,
+          view.forkZoneStartZ,
+        );
+        const sx = p1.screenX + p1.screenW * effectiveOffset;
         if (sx < -width * 0.5 || sx > width * 1.5) continue;
         drawProp(
           ctx,
@@ -122,20 +134,27 @@ export class RoadRenderer {
           sx,
           p1.screenY,
           scaledPpu,
-          s.offset < 0 ? -1 : 1,
+          effectiveOffset < 0 ? -1 : 1,
           s.variant,
         );
       }
 
-      // AI Kei Trucks on this segment
+      // AI Kei Trucks on this segment (diverging onto the left/right Y-fork branch)
       if (traffic && firstTruckIdx !== -1) {
         let tIdx = firstTruckIdx;
         while (tIdx !== -1) {
           const truck = traffic.trucks[tIdx]!;
           const pct = percentRemaining(truck.z, segmentLength);
+          const effectiveLaneOffset = getEffectiveTruckLaneOffset(
+            truck.laneOffset,
+            truck.id,
+            truck.z,
+            trackLength,
+            view.forkZoneStartZ,
+          );
           const truckScreenX =
             interpolate(p1.screenX, p2.screenX, pct) +
-            interpolate(p1.screenW, p2.screenW, pct) * truck.laneOffset;
+            interpolate(p1.screenW, p2.screenW, pct) * effectiveLaneOffset;
           const truckScreenY = interpolate(p1.screenY, p2.screenY, pct);
           const truckScale = interpolate(p1.scale, p2.scale, pct);
           const truckPpu = ((truckScale * width) / 2) * (roadWidth / 2000);

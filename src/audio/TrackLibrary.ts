@@ -1,5 +1,5 @@
 import { isBeatMap, parseTitleArtistFromFilename, type BeatMap } from './BeatMap';
-import { DEFAULT_SYNTH_BEATMAP } from './FunkAudioEngine';
+import { BUNDLED_BEATMAPS } from './FunkAudioEngine';
 import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
 
 const IDB_NAME = 'outrun-futurefunk-audio';
@@ -120,15 +120,13 @@ export class TrackLibrary {
   private readonly analyzer = new TrackAnalyzer();
   private readonly listeners = new Set<() => void>();
 
-  private playlist: PlaylistItem[] = [
-    {
-      id: DEFAULT_SYNTH_BEATMAP.contentHash,
-      contentHash: DEFAULT_SYNTH_BEATMAP.contentHash,
-      beatMap: DEFAULT_SYNTH_BEATMAP,
-      audioBuffer: null,
-      isBundled: true,
-    },
-  ];
+  private playlist: PlaylistItem[] = BUNDLED_BEATMAPS.map((beatMap) => ({
+    id: beatMap.contentHash,
+    contentHash: beatMap.contentHash,
+    beatMap,
+    audioBuffer: null,
+    isBundled: true,
+  }));
   private activeIndex = 0;
 
   constructor() {

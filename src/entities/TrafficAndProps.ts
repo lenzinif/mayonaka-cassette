@@ -1,7 +1,14 @@
 import { tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
 import type { PlayerCar } from '@src/entities/PlayerCar';
-import type { PropKind, Track } from '@src/road/RoadSegment';
+import {
+  getEffectivePropOffset,
+  getEffectiveTruckLaneOffset,
+  getForkCrossSection,
+  type ForkCrossSection,
+  type PropKind,
+  type Track,
+} from '@src/road/RoadSegment';
 import type { SongTrack } from '@src/road/SongRoadGenerator';
 
 export interface KeiTruck {
@@ -78,6 +85,12 @@ export class TrafficManager {
    */
   private segmentHeads: Int32Array = new Int32Array(0);
   private collisionCooldown = 0;
+  private readonly forkBoundsScratch: ForkCrossSection = {
+    t: 0,
+    outerLimit: 1,
+    innerGap: 0,
+    branchCenter: 0.5,
+  };
 
   constructor(track?: Track, seed = 'default-traffic') {
     if (track) {
@@ -187,6 +200,7 @@ export class TrafficManager {
     prevPlayerWorldZ: number,
     currPlayerWorldZ: number,
     onCollision?: (event: CollisionEvent) => void,
+    forkZoneStartZ?: number,
   ): void {
     const trackLen = track.length;
     const segLen = track.segmentLength;
@@ -266,8 +280,15 @@ export class TrafficManager {
         if (prevDeltaZ > trackLen * 0.5) prevDeltaZ -= trackLen;
         if (prevDeltaZ < -trackLen * 0.5) prevDeltaZ += trackLen;
 
-        const signedLatDiff = car.x - truck.laneOffset;
-        const prevSignedLatDiff = car.prevX - truck.laneOffset;
+        const truckEffectiveX = getEffectiveTruckLaneOffset(
+          truck.laneOffset,
+          truck.id,
+          truck.z,
+          trackLen,
+          forkZoneStartZ,
+        );
+        const signedLatDiff = car.x - truckEffectiveX;
+        const prevSignedLatDiff = car.prevX - truckEffectiveX;
         const lateralDist = Math.abs(signedLatDiff);
         const prevLateralDist = Math.abs(prevSignedLatDiff);
 
@@ -301,7 +322,7 @@ export class TrafficManager {
                   : 1
                 : car.driftDir !== 0
                   ? car.driftDir
-                  : truck.laneOffset >= 0
+                  : truckEffectiveX >= 0
                     ? 1
                     : -1;
 
@@ -355,21 +376,38 @@ export class TrafficManager {
       }
     }
 
-    // 3. Check roadside prop collisions when the car is off-road
-    if (Math.abs(car.x) <= 1.02) return;
+    // 3. Check roadside prop collisions when the car is outside the active outer asphalt edge.
+    //    Use `Math.min(prevPlayerWorldZ, currPlayerWorldZ)` without wrapping across trackLen when
+    //    checking the fork zone so crossing the finish line never wraps back into segment 0!
+    const forkBounds = getForkCrossSection(
+      wrappedCurrZ,
+      trackLen,
+      forkZoneStartZ,
+      this.forkBoundsScratch,
+    );
+    if (Math.abs(car.x) <= forkBounds.outerLimit + 0.02) return;
 
-    const prevSegIdx = Math.floor(((prevPlayerWorldZ % trackLen) + trackLen) % trackLen / segLen);
-    const steps = Math.min(4, Math.max(1, (playerSegIdx - prevSegIdx + segCount) % segCount + 1));
+    const prevSegIdx = Math.floor(wrappedPrevZ / segLen);
+    // Avoid sweeping across the finish-line seam if the stage just wrapped around
+    const rawSegDiff = playerSegIdx - prevSegIdx;
+    const steps =
+      rawSegDiff >= 0 && rawSegDiff < 8 ? Math.min(4, rawSegDiff + 1) : 1;
 
     for (let s = 0; s < steps; s++) {
       const seg = track.segments[(prevSegIdx + s) % segCount]!;
       for (let i = 0; i < seg.sprites.length; i++) {
         const sp = seg.sprites[i]!;
+        const effectiveOffset = getEffectivePropOffset(
+          sp.offset,
+          seg.p1.worldZ,
+          trackLen,
+          forkZoneStartZ,
+        );
         const hitW = propHitHalfWidth(sp.kind);
-        if (Math.abs(car.x - sp.offset) < hitW) {
+        if (Math.abs(car.x - effectiveOffset) < hitW) {
           const floorSpeed = maxSpeed * 0.25;
-          const inwardSide: -1 | 1 = sp.offset > 0 ? -1 : 1;
-          car.x = sp.offset + inwardSide * (hitW + 0.06);
+          const inwardSide: -1 | 1 = effectiveOffset > 0 ? -1 : 1;
+          car.x = effectiveOffset + inwardSide * (hitW + 0.06);
           car.applyImpact(inwardSide * 3.4, floorSpeed);
           this.collisionCooldown = 0.55;
           onCollision?.({

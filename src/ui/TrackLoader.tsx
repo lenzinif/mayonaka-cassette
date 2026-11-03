@@ -255,6 +255,7 @@ export function TrackLoader({
             <div className="divide-y divide-fuchsia-500/20 rounded border border-fuchsia-500/30 bg-[#090117]">
               {items.map((item, idx) => {
                 const isSelected = item.contentHash === active.contentHash;
+                const best = library.getBestScore(item.contentHash);
                 return (
                   <button
                     key={item.id}
@@ -278,10 +279,18 @@ export function TrackLoader({
                         <div className="text-[10px] text-fuchsia-300/70">
                           {item.beatMap.sections.length} sections //{' '}
                           {Math.round(item.beatMap.durationSec)}s // {item.beatMap.source}
+                          {best
+                            ? ` // BEST: ${best.bestGrade} (${best.bestScore.toLocaleString()} PTS)`
+                            : ''}
                         </div>
                       </div>
                     </div>
-                    <div className="text-right tabular-nums">
+                    <div className="flex items-center gap-2 text-right tabular-nums">
+                      {best && (
+                        <span className="rounded border border-emerald-400/50 bg-emerald-950/75 px-1.5 py-0.5 text-[10px] font-black text-emerald-300">
+                          {best.bestGrade}
+                        </span>
+                      )}
                       <span className="rounded border border-cyan-400/40 bg-cyan-950/60 px-2 py-0.5 text-[11px] font-bold text-cyan-300">
                         {item.beatMap.bpm.toFixed(1)} BPM
                       </span>

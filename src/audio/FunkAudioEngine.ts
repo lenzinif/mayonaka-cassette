@@ -13,21 +13,80 @@ import { barDurationSec, beatDurationSec, type BeatMap, type BeatSection } from 
  */
 export const DEFAULT_SYNTH_BEATMAP: BeatMap = createDefaultSynthBeatMap();
 
-function createDefaultSynthBeatMap(): BeatMap {
-  const bpm = 122;
-  const beatsPerBar = 4;
-  const totalBars = 64;
-  const durationSec = Math.round(totalBars * ((60 / bpm) * beatsPerBar) * 1000) / 1000;
-
-  const sections: BeatSection[] = [
+/**
+ * Bundled Stage 2 Track BeatMap (126 BPM, 64 bars = ~121.9 s) so the default playlist
+ * has a multi-stage run out of the box (AGENTS.md §1 Pillar 4 & §5 M6).
+ */
+export const BUNDLED_WANGAN_BEATMAP: BeatMap = createBundledTrackBeatMap({
+  contentHash: 'sha256:bundled-midnight-wangan-126bpm',
+  title: 'Midnight Wangan 88 (Synth VIP)',
+  artist: 'Plastic Love FM',
+  bpm: 126,
+  sections: [
     { startBar: 0, bars: 8, role: 'intro' },
     { startBar: 8, bars: 8, role: 'build' },
     { startBar: 16, bars: 16, role: 'drop' },
     { startBar: 32, bars: 8, role: 'breakdown' },
-    { startBar: 40, bars: 4, role: 'build' },
+    { startBar: 40, bars: 8, role: 'build' },
+    { startBar: 48, bars: 12, role: 'drop' },
+    { startBar: 60, bars: 4, role: 'outro' },
+  ],
+});
+
+/**
+ * Bundled Stage 3 Track BeatMap (118 BPM, 64 bars = ~130.2 s) for Coastal Breeze stage.
+ */
+export const BUNDLED_COASTAL_BEATMAP: BeatMap = createBundledTrackBeatMap({
+  contentHash: 'sha256:bundled-coastal-breeze-118bpm',
+  title: 'Melon Soda Sunset (Synth Mix)',
+  artist: 'Kissaten 1986',
+  bpm: 118,
+  sections: [
+    { startBar: 0, bars: 8, role: 'intro' },
+    { startBar: 8, bars: 4, role: 'build' },
+    { startBar: 12, bars: 16, role: 'drop' },
+    { startBar: 28, bars: 8, role: 'breakdown' },
+    { startBar: 36, bars: 8, role: 'build' },
     { startBar: 44, bars: 16, role: 'drop' },
     { startBar: 60, bars: 4, role: 'outro' },
-  ];
+  ],
+});
+
+export const BUNDLED_BEATMAPS: readonly BeatMap[] = [
+  DEFAULT_SYNTH_BEATMAP,
+  BUNDLED_WANGAN_BEATMAP,
+  BUNDLED_COASTAL_BEATMAP,
+];
+
+function createDefaultSynthBeatMap(): BeatMap {
+  return createBundledTrackBeatMap({
+    contentHash: 'sha256:bundled-neon-horizon-122bpm',
+    title: 'Neon Horizon (Synth Fallback)',
+    artist: 'OutRun FM 88.4',
+    bpm: 122,
+    sections: [
+      { startBar: 0, bars: 8, role: 'intro' },
+      { startBar: 8, bars: 8, role: 'build' },
+      { startBar: 16, bars: 16, role: 'drop' },
+      { startBar: 32, bars: 8, role: 'breakdown' },
+      { startBar: 40, bars: 4, role: 'build' },
+      { startBar: 44, bars: 16, role: 'drop' },
+      { startBar: 60, bars: 4, role: 'outro' },
+    ],
+  });
+}
+
+function createBundledTrackBeatMap(params: {
+  contentHash: string;
+  title: string;
+  artist: string;
+  bpm: number;
+  sections: BeatSection[];
+}): BeatMap {
+  const { contentHash, title, artist, bpm, sections } = params;
+  const beatsPerBar = 4;
+  const totalBars = sections.reduce((sum, s) => sum + s.bars, 0);
+  const durationSec = Math.round(totalBars * ((60 / bpm) * beatsPerBar) * 1000) / 1000;
 
   const roleEnergy: Record<BeatSection['role'], number> = {
     intro: 0.34,
@@ -50,9 +109,9 @@ function createDefaultSynthBeatMap(): BeatMap {
 
   return {
     version: 1,
-    contentHash: 'sha256:bundled-neon-horizon-122bpm',
-    title: 'Neon Horizon (Synth Fallback)',
-    artist: 'OutRun FM 88.4',
+    contentHash,
+    title,
+    artist,
     durationSec,
     bpm,
     firstBeatOffsetSec: 0,

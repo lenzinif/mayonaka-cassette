@@ -29,7 +29,12 @@ import {
 } from '@src/road/palette';
 import { cameraDepthFromFov, interpolate } from '@src/road/RoadProjection';
 import { RoadRenderer, type RoadView } from '@src/road/RoadRenderer';
-import { findSegment, type Track } from '@src/road/RoadSegment';
+import {
+  findSegment,
+  getForkCrossSection,
+  type ForkCrossSection,
+  type Track,
+} from '@src/road/RoadSegment';
 import {
   generateSongRoad,
   worldZToBar,
@@ -244,6 +249,12 @@ export class Game {
   };
 
   private collisionShake = 0;
+  private readonly forkBoundsScratch: ForkCrossSection = {
+    t: 0,
+    outerLimit: 1,
+    innerGap: 0,
+    branchCenter: 0.5,
+  };
 
   private readonly view: RoadView = {
     position: 0,
@@ -393,6 +404,16 @@ export class Game {
     const playerSeg = findSegment(this.track, prevPlayerWorldZ);
     const slope = (playerSeg.p2.worldY - playerSeg.p1.worldY) / this.track.segmentLength;
 
+    const forkZoneStartZ = this.getForkZoneStartZ();
+    // Use `this.position` (matching `updateForkState` and `RoadRenderer` bottom-of-screen slice)
+    // so `prevPlayerWorldZ` never wraps around `track.length` while the camera is still inside the fork!
+    const forkBounds = getForkCrossSection(
+      this.position,
+      this.track.length,
+      forkZoneStartZ,
+      this.forkBoundsScratch,
+    );
+
     this.car.update(
       dt,
       this.controls,
@@ -400,6 +421,7 @@ export class Game {
       slope,
       this.handleCarEvent,
       this.melonSoda.active,
+      forkBounds,
     );
 
     // Accumulate continuous driving score & groove stats
@@ -419,22 +441,33 @@ export class Game {
     }
 
     const nextPos = this.position + this.car.speed * dt;
-    if (nextPos >= this.track.length) {
+    const wrappedAcrossStageEnd = nextPos >= this.track.length;
+    if (wrappedAcrossStageEnd) {
       this.handleStageOrLapEnd(nextPos);
     } else {
       this.position = nextPos;
     }
 
-    const currPlayerWorldZ = this.position + playerZOffset;
-
-    // 3. Advance AI Kei Trucks & resolve flow-preserving obstacle/traffic collisions
+    // 3. Advance AI Kei Trucks & resolve flow-preserving obstacle/traffic collisions.
+    //    Clamp Z within `[0, track.length - 1]` while `this.position` is still before the finish line
+    //    so `playerZOffset` (~866 world units ahead of the camera) never wraps into segment 0 props
+    //    during the final 4 segments of the stage fork!
+    const maxStageZ = Math.max(0, this.track.length - 1);
+    const currPlayerWorldZ = wrappedAcrossStageEnd
+      ? this.position + playerZOffset
+      : Math.min(maxStageZ, this.position + playerZOffset);
+    const safePrevPlayerWorldZ = wrappedAcrossStageEnd
+      ? currPlayerWorldZ
+      : Math.min(maxStageZ, prevPlayerWorldZ);
+    const activeForkZoneStartZ = this.getForkZoneStartZ();
     this.traffic.update(
       dt,
       this.track,
       this.car,
-      prevPlayerWorldZ,
+      safePrevPlayerWorldZ,
       currPlayerWorldZ,
       this.handleCollision,
+      activeForkZoneStartZ,
     );
 
     // 4. Advance Melon Soda liquid physics (only active when Tofu Mode is ON)
@@ -463,9 +496,7 @@ export class Game {
     this.drivingAudioParams.speedRatio = this.car.speedRatio;
     this.drivingAudioParams.isDrifting = this.car.isDrifting;
     this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
-    this.drivingAudioParams.offRoadDepth = this.car.isOffRoad
-      ? Math.max(0, Math.min(1, (Math.abs(this.car.x) - 1.0) / 0.65))
-      : 0;
+    this.drivingAudioParams.offRoadDepth = this.car.offRoadDepth;
     // If multi-track playlist is active and the player hasn't reached the final 2 bars yet,
     // instruct the DJ to loop the last 8 outro bars if the song finishes early (docs/DESIGN.md §3).
     this.drivingAudioParams.holdOutroLoop =
@@ -528,17 +559,9 @@ export class Game {
     this.view.height = height;
     this.view.beatPulse = this.beatPulse;
 
-    if (this.library.hasMultipleTracks && !this.hasCustomTrack && isSongTrack(this.track)) {
-      const forkBars = Math.min(FORK_APPROACH_BARS, Math.floor(this.track.totalBars * 0.25));
-      this.view.forkZoneStartZ = Math.max(
-        0,
-        this.track.length - forkBars * this.track.barLengthWorld,
-      );
-      this.view.forkChoice = this.forkChoice;
-    } else {
-      this.view.forkZoneStartZ = undefined;
-      this.view.forkChoice = undefined;
-    }
+    const forkZoneStartZ = this.getForkZoneStartZ();
+    this.view.forkZoneStartZ = forkZoneStartZ;
+    this.view.forkChoice = forkZoneStartZ !== undefined ? this.forkChoice : undefined;
 
     this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
     this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic);
@@ -546,30 +569,44 @@ export class Game {
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
   };
 
+  private getForkZoneStartZ(): number | undefined {
+    if (!this.library.hasMultipleTracks || this.hasCustomTrack || !isSongTrack(this.track)) {
+      return undefined;
+    }
+    const forkBars = Math.min(FORK_APPROACH_BARS, Math.floor(this.track.totalBars * 0.25));
+    return Math.max(0, this.track.length - forkBars * this.track.barLengthWorld);
+  }
+
   private setForkManualChoice(choice: 'left' | 'right'): void {
     this.forkManualLock = choice;
     this.forkChoice = choice;
-    // Gently position the car on the chosen branch side so physical lane and UI match
-    if (choice === 'left' && this.car.x >= -0.15) {
-      this.car.x = -0.45;
-      this.car.prevX = -0.45;
-    } else if (choice === 'right' && this.car.x <= 0.15) {
-      this.car.x = 0.45;
-      this.car.prevX = 0.45;
+    const forkZoneStartZ = this.getForkZoneStartZ();
+    const bounds = getForkCrossSection(
+      this.position,
+      this.track.length,
+      forkZoneStartZ,
+      this.forkBoundsScratch,
+    );
+    const targetX = choice === 'left' ? -bounds.branchCenter : bounds.branchCenter;
+    // Gently position the car on the chosen branch center so physical lane, median island, and UI match
+    if (choice === 'left' && this.car.x > -bounds.innerGap - 0.1) {
+      this.car.x = targetX;
+      this.car.prevX = targetX;
+    } else if (choice === 'right' && this.car.x < bounds.innerGap + 0.1) {
+      this.car.x = targetX;
+      this.car.prevX = targetX;
     }
     this.bridge.emit({ type: 'forkChoiceChanged', choice, source: 'input' });
   }
 
   private updateForkState(): void {
-    if (!this.library.hasMultipleTracks || this.hasCustomTrack || !isSongTrack(this.track)) {
+    const forkStartZ = this.getForkZoneStartZ();
+    if (forkStartZ === undefined) {
       this.forkActive = false;
       this.forkProgress = 0;
       this.forkManualLock = null;
       return;
     }
-
-    const forkBars = Math.min(FORK_APPROACH_BARS, Math.floor(this.track.totalBars * 0.25));
-    const forkStartZ = Math.max(0, this.track.length - forkBars * this.track.barLengthWorld);
 
     if (this.position >= forkStartZ) {
       this.forkActive = true;
@@ -657,6 +694,11 @@ export class Game {
     summary.isNewRecord = isNewRecord;
     this.bridge.emit({ type: 'stageCompleted', summary, isNewRecord });
 
+    // Re-center the car from the widened Y-fork branch (`[-1.68..-0.52]` or `[+0.52..+1.68]`)
+    // back onto the normal `[-0.85, +0.85]` road width so the player does not start the next
+    // stage/lap in the off-road grass hitting segment-0 palm trees!
+    this.recenterCarAfterFork();
+
     // Single-track playlist OR player chose Left branch (LOOP CURRENT TRACK):
     if (!this.library.hasMultipleTracks || this.hasCustomTrack || this.forkChoice === 'left') {
       if (
@@ -710,6 +752,30 @@ export class Game {
       this.lapTime = 0;
       this.resetStageMetrics();
     }
+  }
+
+  /**
+   * Maps the player's lateral offset `car.x` from the chosen Y-fork branch (`[-1.68, -0.52]` or
+   * `[+0.52, +1.68]`) back into the normal road bounds (`[-0.85, +0.85]`) when crossing the finish line.
+   */
+  private recenterCarAfterFork(): void {
+    if (!this.forkActive) {
+      if (Math.abs(this.car.x) > 0.9) {
+        this.car.x = Math.sign(this.car.x) * 0.85;
+        this.car.prevX = this.car.x;
+      }
+      return;
+    }
+
+    // At the end of the fork (t = 1), each branch spans from innerGap (0.52) to outerLimit (1.68)
+    // with center at ±1.10 and half-width 0.58. Map relative offset within the chosen branch to [-0.75, +0.75].
+    const branchCenter = this.forkChoice === 'left' ? -1.1 : 1.1;
+    const branchHalfWidth = 0.58;
+    const relX = (this.car.x - branchCenter) / branchHalfWidth;
+    const mappedX = Math.max(-0.82, Math.min(0.82, relX * 0.65));
+    this.car.x = mappedX;
+    this.car.prevX = mappedX;
+    this.car.bumpVx = 0;
   }
 
   private buildRunSummary(): RunSummary {
