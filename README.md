@@ -92,6 +92,12 @@ npm run check
 
 ---
 
+## 🗺️ Roadmap & Development Plan
+
+Looking to see what's planned next? Check out the full [Project Roadmap & TODO List](docs/ROADMAP.md) detailing planned HUD overhauls, new roadside assets, environments, feedback pipelines, performance tuning, and audiovisual "funkier" enhancements.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE) © 2026 Francesco Lenzini (lenzinif).
