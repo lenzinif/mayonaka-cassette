@@ -2,7 +2,7 @@
 
 ## 1. Obiettivo e Contesto Architetturale
 
-Attualmente la generazione della pista ([`SongRoadGenerator.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/road/SongRoadGenerator.ts)) converte le battute musicali (`totalBars`) in una distanza fissa basata su una velocità costante (`referenceSpeedRatio = 0.85`), mentre l'orologio musicale ([`FunkAudioEngine.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/audio/FunkAudioEngine.ts)) avanza in tempo reale. Qualsiasi rallentamento (partenza da fermo `0 → 4ª marcia`, guida rilassata in 3ª marcia, curve da `breakdown`, escursioni fuoristrada o collisioni) accumula un ritardo spaziale $\Delta Z$ irreversibile che:
+Attualmente la generazione della pista ([`SongRoadGenerator.ts`](../src/road/SongRoadGenerator.ts)) converte le battute musicali (`totalBars`) in una distanza fissa basata su una velocità costante (`referenceSpeedRatio = 0.85`), mentre l'orologio musicale ([`FunkAudioEngine.ts`](../src/audio/FunkAudioEngine.ts)) avanza in tempo reale. Qualsiasi rallentamento (partenza da fermo `0 → 4ª marcia`, guida rilassata in 3ª marcia, curve da `breakdown`, escursioni fuoristrada o collisioni) accumula un ritardo spaziale $\Delta Z$ irreversibile che:
 1. Fa arrivare il giocatore in ritardo sulle creste dei `drop` (`dropMarkers`).
 2. Fa terminare la canzone prima che l'auto raggiunga il bivio finale (`fork`), attivando sistematicamente il loop forzato dell'outro (`holdOutroLoop`).
 
@@ -21,17 +21,17 @@ flowchart TD
 
 ## 2. File Coinvolti
 
-1. [`src/config/tuning.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/config/tuning.ts) — Nuovi parametri di tuning per il passo elastico (A1), la soglia di riallineamento all'orizzonte (A2) e calibrazione di `referenceSpeedRatio`.
-2. [`src/road/SongRoadGenerator.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/road/SongRoadGenerator.ts) — Snapshot canonico immutabile dei segmenti in `SongTrack`, funzione di profilo velocità per ruolo (`getSectionPaceFactor`) e funzioni zero-GC `stitchHorizonToBar()` / `restoreCanonicalTrack()`.
-3. [`src/entities/TrafficAndProps.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/entities/TrafficAndProps.ts) — Metodo `shiftVisibleWindowTrucks()` per traslare senza pop-in i Kei Truck attualmente visibili durante uno stitch A2.
-4. [`src/engine/Game.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/engine/Game.ts) — Integrazione del calcolo `computeElasticStepScale()` (A1) e del trigger `maybeStitchHorizon()` (A2) dentro `update(dt)`.
-5. [`src/road/SongRoadGenerator.test.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/road/SongRoadGenerator.test.ts) & [`src/engine/Game.test.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/engine/Game.test.ts) — Unit test per A1, A2 e continuità visiva.
+1. [`src/config/tuning.ts`](../src/config/tuning.ts) — Nuovi parametri di tuning per il passo elastico (A1), la soglia di riallineamento all'orizzonte (A2) e calibrazione di `referenceSpeedRatio`.
+2. [`src/road/SongRoadGenerator.ts`](../src/road/SongRoadGenerator.ts) — Snapshot canonico immutabile dei segmenti in `SongTrack`, funzione di profilo velocità per ruolo (`getSectionPaceFactor`) e funzioni zero-GC `stitchHorizonToBar()` / `restoreCanonicalTrack()`.
+3. [`src/entities/TrafficAndProps.ts`](../src/entities/TrafficAndProps.ts) — Metodo `shiftVisibleWindowTrucks()` per traslare senza pop-in i Kei Truck attualmente visibili durante uno stitch A2.
+4. [`src/engine/Game.ts`](../src/engine/Game.ts) — Integrazione del calcolo `computeElasticStepScale()` (A1) e del trigger `maybeStitchHorizon()` (A2) dentro `update(dt)`.
+5. [`src/road/SongRoadGenerator.test.ts`](../src/road/SongRoadGenerator.test.ts) & [`src/engine/Game.test.ts`](../src/engine/Game.test.ts) — Unit test per A1, A2 e continuità visiva.
 
 ---
 
 ## 3. Specifiche Tecniche Passo-Passo
 
-### Passo 1: Parametri in [`src/config/tuning.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/config/tuning.ts)
+### Passo 1: Parametri in [`src/config/tuning.ts`](../src/config/tuning.ts)
 
 1. In `DEFAULT_TUNING` (gruppo `Song Road`):
    - Abbassare `referenceSpeedRatio` da `0.85` a **`0.76`** (così la 3ª marcia a `0.82` e la 4ª marcia a `0.85–1.00` tengono naturalmente il passo base senza richiedere guida al limite).
@@ -44,7 +44,7 @@ flowchart TD
 
 ---
 
-### Passo 2: Blueprint Canonico e Ricucitura Orizzonte (A2) in [`src/road/SongRoadGenerator.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/road/SongRoadGenerator.ts)
+### Passo 2: Blueprint Canonico e Ricucitura Orizzonte (A2) in [`src/road/SongRoadGenerator.ts`](../src/road/SongRoadGenerator.ts)
 
 #### 2.1 Estensione dell'interfaccia `SongTrack`
 Salvare i valori geometrici originali generati dal seed in array tipizzati pre-allocati (zero GC a runtime), così da poter ripristinare o ricucire i segmenti in qualsiasi momento:
@@ -67,7 +67,7 @@ export interface SongTrack extends Track {
 }
 ```
 
-Popolare `canonical` alla fine di [`generateSongRoad`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/road/SongRoadGenerator.ts#L253-L266).
+Popolare `canonical` alla fine di [`generateSongRoad`](../src/road/SongRoadGenerator.ts#L253-L266).
 
 #### 2.2 Fattore di passo per ruolo sezione (`getSectionPaceFactor`)
 Aggiungere una funzione pura che restituisce il ritmo naturale di percorrenza della sezione corrente:
@@ -129,11 +129,11 @@ export function stitchHorizonToTargetZ(
 5. Restituire `{ deltaZ: deltaSegs * track.segmentLength, fromSegIndex, toSegIndex, copiedWindowSegs: copyCount }`.
 
 #### 2.4 Funzione `restoreCanonicalTrack(track: SongTrack)`
-Ripristina in un ciclo lineare (zero allocazioni) `curve`, `p1.worldY`, `p2.worldY` e `sprites` di tutti i segmenti leggendo `track.canonical`. Va chiamata in [`Game.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/engine/Game.ts) quando la traccia finisce un giro (`handleStageOrLapEnd`) o viene resettata.
+Ripristina in un ciclo lineare (zero allocazioni) `curve`, `p1.worldY`, `p2.worldY` e `sprites` di tutti i segmenti leggendo `track.canonical`. Va chiamata in [`Game.ts`](../src/engine/Game.ts) quando la traccia finisce un giro (`handleStageOrLapEnd`) o viene resettata.
 
 ---
 
-### Passo 3: Traslazione Coerente del Traffico in [`src/entities/TrafficAndProps.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/entities/TrafficAndProps.ts)
+### Passo 3: Traslazione Coerente del Traffico in [`src/entities/TrafficAndProps.ts`](../src/entities/TrafficAndProps.ts)
 
 Aggiungere a `TrafficManager` il metodo:
 
@@ -151,10 +151,10 @@ shiftVisibleWindowTrucks(
 
 ---
 
-### Passo 4: Orchestrazione A1 + A2 in [`src/engine/Game.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/engine/Game.ts)
+### Passo 4: Orchestrazione A1 + A2 in [`src/engine/Game.ts`](../src/engine/Game.ts)
 
 #### 4.1 Livello Micro A1 (`computeElasticWorldSpeed`)
-In `Game.update(dt)`, sostituire l'avanzamento rigido `const nextPos = this.position + this.car.speed * dt` ([`Game.ts:421`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/engine/Game.ts#L421)) con il calcolo del passo elastico:
+In `Game.update(dt)`, sostituire l'avanzamento rigido `const nextPos = this.position + this.car.speed * dt` ([`Game.ts:421`](../src/engine/Game.ts#L421)) con il calcolo del passo elastico:
 
 1. Se `!isSongTrack(this.track)` oppure `this.hasCustomTrack` oppure `this.car.speedRatio < 0.05`:
    - Usare `effectiveSpeed = this.car.speed` (nessuna alterazione a macchina ferma o su piste test non musicali).
@@ -200,7 +200,7 @@ Chiamato in `Game.update(dt)` subito dopo l'aggiornamento del `BeatClock`:
 
 ## 4. Piano di Verifica e Test (`vitest`)
 
-1. **Test Unitari in [`src/road/SongRoadGenerator.test.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/road/SongRoadGenerator.test.ts):**
+1. **Test Unitari in [`src/road/SongRoadGenerator.test.ts`](../src/road/SongRoadGenerator.test.ts):**
    - Verificare che tutti i test esistenti passino senza modifiche.
    - Aggiungere test per `stitchHorizonToTargetZ`:
      - Verificare che `deltaZ` sia sempre multiplo esatto di `2 * RUMBLE_LENGTH * segmentLength`.
@@ -208,7 +208,7 @@ Chiamato in `Game.update(dt)` subito dopo l'aggiornamento del `BeatClock`:
      - Verificare che la zona di raccordo all'orizzonte non abbia discontinuità verticali (`seg[i].p1.worldY === seg[i - 1].p2.worldY` su tutta la pista).
      - Verificare che `restoreCanonicalTrack` riporti ogni segmento esattamente ai valori iniziali.
 
-2. **Test d'Integrazione in [`src/engine/Game.test.ts`](file:///c:/Users/USER/Documents/Codice/Game%20Dev/outrun-futurefunk/src/engine/Game.test.ts):**
+2. **Test d'Integrazione in [`src/engine/Game.test.ts`](../src/engine/Game.test.ts):**
    - **Test Guida Rilassata / Collisioni (A1 + A2):** Simulare una run in cui il giocatore parte da fermo e guida a velocità ridotta (`60%–70%` di `maxSpeed`, ben sotto il vecchio `85%`) subendo rallentamenti:
      - Verificare che grazie allo stitch all'orizzonte (A2) e al micro-step elastico (A1) l'auto attraversi i `dropMarkers` in sincrono con il `BeatClock` (`|deltaBeats| <= 1.25`, emettendo l'evento `dropSync`).
      - Verificare che l'auto raggiunga il bivio finale e completi lo stage senza mai restare intrappolata in `isOutroLooping`.

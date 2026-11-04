@@ -2,11 +2,12 @@ import { isBeatMap, parseTitleArtistFromFilename, type BeatMap } from './BeatMap
 import { BUNDLED_BEATMAPS } from './FunkAudioEngine';
 import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
 
-const IDB_NAME = 'outrun-futurefunk-audio';
+const IDB_NAME = 'mayonaka-cassette-audio';
 const IDB_VERSION = 2;
 const BEATMAP_STORE = 'beatmaps';
 const SCORE_STORE = 'scores';
-const LS_SCORES_KEY = 'outrun-futurefunk-best-scores-v1';
+const LS_SCORES_KEY = 'mayonaka-cassette-best-scores-v1';
+const LEGACY_LS_SCORES_KEY = 'outrun-futurefunk-best-scores-v1';
 
 export type RunGrade = 'SSS' | 'S' | 'A' | 'B' | 'C';
 
@@ -463,7 +464,9 @@ export class TrackLibrary {
   private loadBestScoresFromLocalStorage(): void {
     if (typeof window === 'undefined' || !window.localStorage) return;
     try {
-      const raw = window.localStorage.getItem(LS_SCORES_KEY);
+      const raw =
+        window.localStorage.getItem(LS_SCORES_KEY) ??
+        window.localStorage.getItem(LEGACY_LS_SCORES_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw) as unknown;
       if (Array.isArray(parsed)) {

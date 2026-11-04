@@ -1,18 +1,30 @@
 # 真夜中Cassette (Mayonaka Cassette)
 
-> **A retro-futuristic OutRun driving fantasy powered by Japanese Future Funk rhythms.**
+> **A retro-futuristic driving flow experience powered by Japanese Future Funk rhythms.**
 
-[![Live Demo](https://img.shields.io/badge/demo-play%20online-ff007f?style=for-the-badge&logo=googlechrome&logoColor=white)](https://lenzinif.github.io/outrun-futurefunk/)
+[![Playable Alpha](https://img.shields.io/badge/status-playable%20alpha-f59e0b?style=for-the-badge&logo=retroarch&logoColor=white)](https://github.com/lenzinif/mayonaka-cassette)
+[![Version](https://img.shields.io/badge/version-v0.1.0--alpha-ff007f?style=for-the-badge)](https://github.com/lenzinif/mayonaka-cassette)
+[![Live Demo](https://img.shields.io/badge/demo-play%20online-00f0ff?style=for-the-badge&logo=googlechrome&logoColor=black)](https://lenzinif.github.io/mayonaka-cassette/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-8-646CFF?style=for-the-badge&logo=vite&logoColor=white)](https://vitejs.dev/)
 
 ---
 
+## 🚦 Project Status: Playable Alpha (v0.1.0-alpha)
+
+*Mayonaka Cassette* is currently in **Playable Alpha**:
+- **Fully playable core loop:** Deterministic pseudo-3D custom canvas rasterizer, 120 Hz fixed-step physics, 4-speed beat-shift gearbox, arcade centrifugal pull and drift mechanics.
+- **Audio-reactive level generation:** Client-side Web Worker DSP analyzes uploaded songs (BPM, energy, sections) and generates a deterministic road synchronized with drops and buildups.
+- **Atmosphere & mechanics:** Dashboard Melon Soda spring-damper fluid simulation with Tofu Mode, evasive Kei truck traffic, dynamic Web Audio filter sweeps, and stage fork transitions.
+- **Next steps towards Beta:** Further pixel-art sprite expansions, enhanced CRT scanline shaders, and additional polish.
+
+---
+
 ## 🎮 Play Online
 
 Experience the game directly in your browser:  
-👉 **[https://lenzinif.github.io/outrun-futurefunk/](https://lenzinif.github.io/outrun-futurefunk/)**
+👉 **[https://lenzinif.github.io/mayonaka-cassette/](https://lenzinif.github.io/mayonaka-cassette/)**
 
 ---
 
@@ -20,7 +32,7 @@ Experience the game directly in your browser:
 
 *Mayonaka Cassette* is a **driving flow state experience**, inspired by Yu Suzuki's classic arcade ethos and the vibrant aesthetic of Japanese Future Funk:
 
-1. **Feel Over Simulation:** No rigid-body physics engines. Centrifugal pull, tire slide, suspension hill cresting, and 6-speed torque curves are driven by tuned arcade formulas.
+1. **Feel Over Simulation:** No rigid-body physics engines. Centrifugal pull, tire slide, suspension hill cresting, and 4-speed torque curves are driven by tuned arcade formulas.
 2. **Music Drives State, Driving Manipulates Music:** Clean drifts and high speeds open the Web Audio low-pass filter; speed drops and collisions muffle the soundscape and trigger tape pitch dips.
 3. **Protect the Flow State:** Collisions with roadside obstacles or kei trucks never stop the car dead. They deduct Groove, temporarily drop speed, muffle audio, and keep you rolling forward.
 4. **Your Music Is the Level:** Load local audio tracks to generate a deterministic, unique road track tailored to the song's energy and structure.
@@ -62,8 +74,8 @@ Experience the game directly in your browser:
 ### Installation & Run
 ```bash
 # Clone the repository
-git clone https://github.com/lenzinif/outrun-futurefunk.git
-cd outrun-futurefunk
+git clone https://github.com/lenzinif/mayonaka-cassette.git
+cd mayonaka-cassette
 
 # Install dependencies
 npm install

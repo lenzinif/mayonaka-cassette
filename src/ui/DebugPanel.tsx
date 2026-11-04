@@ -12,11 +12,14 @@ import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 
-const STORAGE_KEY = 'outrun-futurefunk.tuning.v1';
+const STORAGE_KEY = 'mayonaka-cassette.tuning.v1';
+const LEGACY_STORAGE_KEY = 'outrun-futurefunk.tuning.v1';
 
 export function loadSavedTuning(): void {
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw =
+      window.localStorage.getItem(STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return;
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {

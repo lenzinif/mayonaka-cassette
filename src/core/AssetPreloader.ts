@@ -1,5 +1,5 @@
 /**
- * Asset preloader and registry for Future Funk OutRun (AGENTS.md §5 M8).
+ * Asset preloader and registry for Mayonaka Cassette (AGENTS.md §5 M8).
  * Pure TypeScript core: ZERO React imports (enforced via ESLint).
  *
  * Pre-fetches sprite atlas assets, companion BeatMap JSONs, and warms up the Web Audio

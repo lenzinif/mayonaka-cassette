@@ -1,4 +1,4 @@
-name: Deploy Future Funk OutRun to GitHub Pages
+name: Deploy Mayonaka Cassette to GitHub Pages
 
 on:
   push:

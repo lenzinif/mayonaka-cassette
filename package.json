@@ -1,9 +1,15 @@
 {
   "name": "mayonaka-cassette",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.0-alpha",
+  "description": "真夜中Cassette (Mayonaka Cassette) — A retro-futuristic driving flow-state game powered by Japanese Future Funk rhythms (Playable Alpha).",
   "type": "module",
   "license": "MIT",
+  "homepage": "https://lenzinif.github.io/mayonaka-cassette/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/lenzinif/mayonaka-cassette.git"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
