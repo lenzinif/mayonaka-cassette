@@ -222,6 +222,19 @@ export function PauseMenu({
           </div>
         </div>
 
+        {/* Community & Feedback Link */}
+        <div className="mt-3 border-t border-fuchsia-500/25 pt-2 text-center">
+          <a
+            href="https://github.com/lenzinif/mayonaka-cassette/discussions"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded border border-cyan-400/40 bg-[#160530]/80 px-3 py-1 text-[11px] font-bold tracking-wider text-cyan-300 transition hover:border-pink-400 hover:text-pink-200 hover:shadow-[0_0_12px_rgba(255,42,109,0.4)]"
+          >
+            <span>💬 COMMUNITY &amp; FEEDBACK</span>
+            <span className="text-[9px] text-pink-400">↗</span>
+          </a>
+        </div>
+
         {/* Footer Reminder */}
         <div className="mt-3 text-[10px] tracking-wider text-fuchsia-300/60 uppercase">
           PRESS [P] OR [ESC] TO RESUME · CLICK OUTSIDE TO CLOSE

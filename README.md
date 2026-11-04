@@ -98,6 +98,17 @@ Looking to see what's planned next? Check out the full [Project Roadmap & TODO L
 
 ---
 
+## 💬 Community & Player Feedback
+
+Player feedback drives the evolution of *Mayonaka Cassette*! Join our [GitHub Discussions](https://github.com/lenzinif/mayonaka-cassette/discussions):
+
+- 💡 **[Ideas & Feature Requests](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=ideas):** Suggest new biomes, roadside scenery, or arcade features.
+- ⚖️ **[Gameplay & Balance Tuning](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=gameplay-balance):** Share thoughts on handling feel, beat-shift timing windows, or Melon Soda physics.
+- 🎵 **[Music & Road Generation](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=music-and-tracks):** Tell us which tracks generated epic roads and share custom beatmaps.
+- 🐛 **[Bug Reports](https://github.com/lenzinif/mayonaka-cassette/issues/new?template=bug_report.yml):** Report glitches or browser compatibility issues.
+
+---
+
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE) © 2026 Francesco Lenzini (lenzinif).

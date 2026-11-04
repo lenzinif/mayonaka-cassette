@@ -1,0 +1,37 @@
+name: 🐛 Segnalazione Bug
+description: Segnala un bug, glitch visivo o problema tecnico durante il gioco.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Grazie per segnalare un bug in **Mayonaka Cassette**!
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Cosa è successo?
+      placeholder: Descrivi chiaramente cosa si è verificato e cosa ti aspettavi invece che accadesse...
+    validations:
+      required: true
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: Passaggi per riprodurre il problema
+      placeholder: |
+        1. Premi Play
+        2. Carica il brano X
+        3. Premi Shift alla battuta Y...
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser e Sistema Operativo
+      placeholder: Es. Chrome 124 su Windows 11 / Firefox su macOS / Schermo 144Hz
+    validations:
+      required: true
+  - type: textarea
+    id: console-errors
+    attributes:
+      label: Errori nella console del browser (F12) se presenti
+      render: shell

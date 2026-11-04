@@ -67,6 +67,10 @@ describe('PauseMenu (UI Layer)', () => {
     expect(text).toContain('CUP: MELON SODA [V]');
     expect(text).toContain('HUD: FULL [H]');
     expect(text).toContain('PERF HUD: OFF [F3]');
+
+    // Community feedback link
+    expect(text).toContain('COMMUNITY &amp; FEEDBACK');
+    expect(rawHtml).toContain('https://github.com/lenzinif/mayonaka-cassette/discussions');
   });
 
   it('reflects active Tofu Mode in the quick toggle badge', () => {
