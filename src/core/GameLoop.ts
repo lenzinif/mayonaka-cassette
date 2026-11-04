@@ -38,10 +38,22 @@ export class GameLoop {
     cancelAnimationFrame(this.rafId);
   }
 
+  /**
+   * Resets delta-time and fixed stepper accumulation on unpause or window refocus
+   * so modal pauses or heavy file operations don't cause delta-time catch-up spirals or poison the FPS counter.
+   */
+  reset(): void {
+    this.lastTime = -1;
+    this.stepper.reset();
+    this.fpsFrames = 0;
+    this.fpsTimer = 0;
+  }
+
   private readonly tick = (now: number): void => {
     if (!this.running) return;
-    const frameDt = this.lastTime < 0 ? 0 : (now - this.lastTime) / 1000;
+    const rawDt = this.lastTime < 0 ? 0 : (now - this.lastTime) / 1000;
     this.lastTime = now;
+    const frameDt = Math.min(rawDt, this.options.maxFrameDt);
 
     this.fpsFrames++;
     this.fpsTimer += frameDt;

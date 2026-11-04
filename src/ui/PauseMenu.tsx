@@ -80,7 +80,7 @@ export function PauseMenu({
   return (
     <div
       onClick={handleBackdropClick}
-      className="pointer-events-auto absolute inset-0 z-40 flex items-center justify-center bg-[#060112]/85 p-4 font-mono text-white backdrop-blur-md select-none transition-opacity duration-200"
+      className="pointer-events-auto absolute inset-0 z-40 flex items-center justify-center bg-[#060112]/92 p-4 font-mono text-white backdrop-blur-xs select-none transition-opacity duration-200"
       role="dialog"
       aria-modal="true"
       aria-label="Pause Menu"

@@ -275,6 +275,9 @@ export class Game {
   private horizonStitchCooldown = 0;
 
   private isPaused = false;
+  private renderDirty = true;
+  private lastRenderCtx: CanvasRenderingContext2D | null = null;
+  onTimingReset?: () => void;
   private readonly input: InputSource;
   private readonly roadRenderer = new RoadRenderer();
   private readonly background = new Background();
@@ -305,10 +308,13 @@ export class Game {
   setPaused(paused: boolean): void {
     if (this.isPaused === paused) return;
     this.isPaused = paused;
+    this.renderDirty = true;
     if (paused) {
       void this.audio.pause();
     } else {
       void this.audio.resume();
+      this.lastRenderTimestamp = performance.now();
+      this.onTimingReset?.();
     }
     this.bridge.publish?.(this.buildSnapshot);
     this.bridge.emit({ type: 'pauseChanged', paused });
@@ -379,6 +385,10 @@ export class Game {
       this.hasStartedDriving = false;
       this.position = 0;
       this.prevPosition = 0;
+      this.car.speed = 0;
+      this.car.gearbox.gear = 1;
+      this.car.x = 0;
+      this.car.prevX = 0;
       this.lap = 1;
       this.lapTime = 0;
       this.resetStageMetrics();
@@ -389,6 +399,7 @@ export class Game {
       this.horizonStitchCooldown = 0;
     }
 
+    this.renderDirty = true;
     this.updateRoadProgressTelemetry();
     this.bridge.emit({
       type: 'songRoadGenerated',
@@ -718,12 +729,19 @@ export class Game {
     const t0 = performance.now();
     this.lastFps = fps;
     if (this.lastRenderTimestamp > 0) {
-      const dt = t0 - this.lastRenderTimestamp;
+      const dt = Math.min(t0 - this.lastRenderTimestamp, 100);
       this.frameTimeMs = this.frameTimeMs * 0.85 + dt * 0.15;
     } else if (fps > 0) {
       this.frameTimeMs = 1000 / fps;
     }
     this.lastRenderTimestamp = t0;
+
+    // While paused, render once to paint the frozen scene + pause overlay, then skip redundant redraws
+    if (this.isPaused && !this.renderDirty && this.lastRenderCtx === ctx) {
+      return;
+    }
+    this.lastRenderCtx = ctx;
+    this.renderDirty = false;
 
     this.fixedStepsLastFrame = this.simStepsSinceLastFrame;
     this.simTimeMs = this.simTimeMs * 0.85 + this.simTimeAccumMs * 0.15;

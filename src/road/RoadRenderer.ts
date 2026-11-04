@@ -9,6 +9,7 @@ import {
   getChosenForkHalfWidth,
   getEffectivePropOffset,
   getEffectiveTruckLaneOffset,
+  getTruckForkBranch,
   type RoadSegment,
   type Track,
 } from './RoadSegment';
@@ -206,24 +207,54 @@ export class RoadRenderer {
               trackLength,
               view.forkZoneStartZ,
               view.forkChoice,
+              truck.forkBranch,
+              truck.baseLaneOffset,
             );
             const truckScreenX =
               interpolate(p1.screenX, p2.screenX, pct) +
               interpolate(p1.screenW, p2.screenW, pct) * effectiveLaneOffset;
             if (truckScreenX >= -width * 0.25 && truckScreenX <= width * 1.25) {
-              const viewParallax = ((width * 0.5 - truckScreenX) / Math.max(1, width * 0.5)) * 1.4;
-              const truckRoadCurve = seg.curve + viewParallax + truck.lateralVel * 1.5;
-              drawKeiTruck(
-                ctx,
-                truckScreenX,
-                truckScreenY,
-                truckPpu,
-                truck.variant,
-                truck.tiltAngle,
-                truck.knockedTimer > 0,
-                truckRoadCurve,
-              );
-              this.stats.drawnTrucks++;
+              // Fade out trucks on the unchosen branch in Phase 3 of the stage fork
+              let forkBranchAlpha = 1;
+              if (
+                view.forkZoneStartZ !== undefined &&
+                truck.z > view.forkZoneStartZ &&
+                trackLength > view.forkZoneStartZ
+              ) {
+                const forkSpan = Math.max(1, trackLength - view.forkZoneStartZ);
+                const forkT = (truck.z - view.forkZoneStartZ) / forkSpan;
+                if (forkT > 0.65) {
+                  const branch = getTruckForkBranch(truck.id, truck.baseLaneOffset, truck.forkBranch);
+                  const chosenSign = (view.forkChoice ?? 'right') === 'left' ? -1 : 1;
+                  if (branch !== chosenSign) {
+                    const u = (forkT - 0.65) / 0.35;
+                    forkBranchAlpha = Math.max(0, 1 - u * 1.4);
+                  }
+                }
+              }
+
+              if (forkBranchAlpha > 0.02) {
+                const combinedAlpha = targetAlpha * forkBranchAlpha;
+                if (combinedAlpha < 0.98) {
+                  ctx.globalAlpha = combinedAlpha;
+                }
+                const viewParallax = ((width * 0.5 - truckScreenX) / Math.max(1, width * 0.5)) * 1.4;
+                const truckRoadCurve = seg.curve + viewParallax + truck.lateralVel * 1.5;
+                drawKeiTruck(
+                  ctx,
+                  truckScreenX,
+                  truckScreenY,
+                  truckPpu,
+                  truck.variant,
+                  truck.tiltAngle,
+                  truck.knockedTimer > 0,
+                  truckRoadCurve,
+                );
+                if (combinedAlpha < 0.98) {
+                  ctx.globalAlpha = targetAlpha < 0.98 ? targetAlpha : 1;
+                }
+                this.stats.drawnTrucks++;
+              }
             }
           }
           tIdx = truck.nextInSegment;

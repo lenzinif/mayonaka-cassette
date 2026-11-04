@@ -214,7 +214,7 @@ export class PlayerCar {
   get isLugging(): boolean {
     return (
       !this.isOffRoad &&
-      this.speed > tuning.maxSpeed * 0.08 &&
+      this.speed > tuning.maxSpeed * 0.12 &&
       this.gearbox.isLugging(this.speed, tuning.maxSpeed)
     );
   }
@@ -423,12 +423,14 @@ export class PlayerCar {
 
     // Smooth off-road speed ceiling: scales smoothly from gearTopSpeed down to offRoadCap with penetration depth
     const offRoadTargetCap =
-      gearTopSpeed - (gearTopSpeed - offRoadCap) * Math.pow(offRoadDepth, 1.1);
+      gearTopSpeed <= offRoadCap
+        ? gearTopSpeed
+        : gearTopSpeed - (gearTopSpeed - offRoadCap) * Math.pow(offRoadDepth, 1.2);
     const targetCap = isOffRoad ? Math.min(gearTopSpeed, offRoadTargetCap) : gearTopSpeed;
 
     // Progressive off-road drag: gentle resistance when grazing shoulder, firmer in deep grass/sand
     const offRoadDragRate = isOffRoad
-      ? tuning.offRoadDecelRate * (0.2 + 0.8 * offRoadDepth) * offRoadDepth
+      ? tuning.offRoadDecelRate * (0.25 + 0.75 * offRoadDepth) * offRoadDepth
       : 0;
 
     if (controls.brake) {
@@ -453,7 +455,7 @@ export class PlayerCar {
         // naturally dip speed into the 3rd/4th/5th gear powerband instead of staying pinned in 6th.
         const driftDriveScale =
           this.driftDir !== 0 ? Math.max(0.14, 0.58 - gearProgress * 0.44) : 1;
-        const driveScale = isOffRoad ? Math.max(0.45, 1 - offRoadDepth * 0.45) : 1;
+        const driveScale = isOffRoad ? Math.max(0.65, 1 - offRoadDepth * 0.35) : 1;
         const netAccelRate =
           tuning.accelRate * torque * driftDriveScale * driveScale -
           slopeDragRate -

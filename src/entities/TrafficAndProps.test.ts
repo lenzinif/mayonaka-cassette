@@ -1,5 +1,10 @@
 import { resetTuning, tuning } from '@src/config/tuning';
 import { PlayerCar } from '@src/entities/PlayerCar';
+import {
+  getEffectiveTruckLaneOffset,
+  getForkCrossSection,
+  getTruckForkBranch,
+} from '@src/road/RoadSegment';
 import { buildTestTrack } from '@src/road/TrackBuilder';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TrafficManager, type CollisionEvent } from './TrafficAndProps';
@@ -209,5 +214,122 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
     const shuntEvents = events.filter((e) => e.outcome === 'playerShuntedOff');
     expect(shuntEvents).toHaveLength(0);
     expect(car.bumpVx).toBe(0);
+  });
+
+  describe('AI Kei Trucks at Stage Forks', () => {
+    const trackLen = 10000;
+    const forkStartZ = 8000;
+    const span = trackLen - forkStartZ;
+
+    it('assigns trucks to Left or Right carriageway deterministically and never drives in the center median', () => {
+      // Truck 1 (odd) in center lane -> Left branch (-1)
+      const branch1 = getTruckForkBranch(1, 0);
+      expect(branch1).toBe(-1);
+
+      // Truck 2 (even) in center lane -> Right branch (+1)
+      const branch2 = getTruckForkBranch(2, 0);
+      expect(branch2).toBe(1);
+
+      // Left lane truck -> Left branch
+      expect(getTruckForkBranch(2, -0.58)).toBe(-1);
+      // Right lane truck -> Right branch
+      expect(getTruckForkBranch(1, 0.58)).toBe(1);
+
+      // Throughout Phase 2 (t in [0.18, 0.65]), verify neither truck ever touches the central median
+      for (let t = 0.18; t <= 0.65; t += 0.05) {
+        const z = forkStartZ + span * t;
+        const xLeft = getEffectiveTruckLaneOffset(0, 1, z, trackLen, forkStartZ, 'right', -1, 0);
+        const xRight = getEffectiveTruckLaneOffset(0, 2, z, trackLen, forkStartZ, 'right', 1, 0);
+
+        const bounds = getForkCrossSection(z, trackLen, forkStartZ, 'right');
+
+        // Left truck must be strictly to the left of the median island (-innerGap)
+        expect(xLeft).toBeLessThan(-bounds.innerGap);
+        // Right truck must be strictly to the right of the median island (+innerGap)
+        expect(xRight).toBeGreaterThan(bounds.innerGap);
+
+        // Both trucks must be within asphalt limits
+        expect(xLeft).toBeGreaterThanOrEqual(-bounds.outerLimit);
+        expect(xRight).toBeLessThanOrEqual(bounds.outerLimit);
+      }
+    });
+
+    it('diverges center-lane trucks early in Phase 1 so they are safely on their chosen branch by t = 0.18', () => {
+      const zSplit = forkStartZ + span * 0.18;
+      const xLeftAtSplit = getEffectiveTruckLaneOffset(0, 1, zSplit, trackLen, forkStartZ, 'right', -1, 0);
+      const xRightAtSplit = getEffectiveTruckLaneOffset(0, 2, zSplit, trackLen, forkStartZ, 'right', 1, 0);
+
+      // At the exact moment of split, both trucks must be centered on their respective branches (±0.60)
+      expect(xLeftAtSplit).toBeCloseTo(-0.6, 2);
+      expect(xRightAtSplit).toBeCloseTo(0.6, 2);
+      // Neither is near 0 (the middle)
+      expect(Math.abs(xLeftAtSplit)).toBeGreaterThan(0.5);
+      expect(Math.abs(xRightAtSplit)).toBeGreaterThan(0.5);
+    });
+
+    it('smoothly converges chosen branch trucks to center (0.0) in Phase 3 and curves unchosen trucks outward', () => {
+      // Player chooses 'right' branch
+      const zPhase3Start = forkStartZ + span * 0.65;
+      const zPhase3End = trackLen;
+
+      // Chosen truck (Right, branch = 1): converges from 1.10 to 0.00
+      const xRightStart = getEffectiveTruckLaneOffset(0, 2, zPhase3Start, trackLen, forkStartZ, 'right', 1, 0);
+      const xRightEnd = getEffectiveTruckLaneOffset(0, 2, zPhase3End, trackLen, forkStartZ, 'right', 1, 0);
+      expect(xRightStart).toBeCloseTo(1.1, 2);
+      expect(xRightEnd).toBeCloseTo(0.0, 2);
+
+      // Unchosen truck (Left, branch = -1): curves outward away from road center
+      const xLeftStart = getEffectiveTruckLaneOffset(0, 1, zPhase3Start, trackLen, forkStartZ, 'right', -1, 0);
+      const xLeftEnd = getEffectiveTruckLaneOffset(0, 1, zPhase3End, trackLen, forkStartZ, 'right', -1, 0);
+      expect(xLeftStart).toBeCloseTo(-1.1, 2);
+      expect(xLeftEnd).toBeLessThan(-1.5);
+    });
+
+    it('keeps trucks on their chosen carriageway during evasive steering in a fork without crossing the median', () => {
+      const track = buildTestTrack();
+      const tm = new TrafficManager();
+      const truckZ = forkStartZ + span * 0.4; // Inside Phase 2
+      tm.trucks.push({
+        id: 2,
+        z: truckZ,
+        baseLaneOffset: 0.58,
+        laneOffset: 0.58,
+        lateralVel: 0,
+        tiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.45,
+        variant: 1,
+        segmentIndex: Math.floor(truckZ / track.segmentLength),
+        nextInSegment: -1,
+        forkBranch: 1, // Right carriageway
+      });
+
+      const car = new PlayerCar();
+      const initialTruckX = getEffectiveTruckLaneOffset(0.58, 2, truckZ, trackLen, forkStartZ, 'right', 1, 0.58);
+      // Place player ahead in the same carriageway
+      car.x = initialTruckX;
+      car.speed = 0;
+
+      // Update traffic
+      tm.update(1 / 60, track, car, truckZ + 200, truckZ + 200, undefined, forkStartZ, true, 'right');
+
+      const truck = tm.trucks[0]!;
+      // Truck's baseLaneOffset must NOT have flipped to negative (opposite carriageway)
+      expect(truck.baseLaneOffset).toBeGreaterThan(0);
+      expect(truck.forkBranch).toBe(1);
+      // Effective X must still be safely in the right carriageway (> innerGap)
+      const bounds = getForkCrossSection(truck.z, trackLen, forkStartZ, 'right');
+      const effX = getEffectiveTruckLaneOffset(
+        truck.laneOffset,
+        truck.id,
+        truck.z,
+        trackLen,
+        forkStartZ,
+        'right',
+        truck.forkBranch,
+        truck.baseLaneOffset,
+      );
+      expect(effX).toBeGreaterThan(bounds.innerGap);
+    });
   });
 });

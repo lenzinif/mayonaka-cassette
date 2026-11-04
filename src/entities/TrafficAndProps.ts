@@ -33,6 +33,8 @@ export interface KeiTruck {
   segmentIndex: number;
   /** Pointer to the next truck on the same segment index (`-1` if none) for zero-GC bucket lookup. */
   nextInSegment: number;
+  /** Deterministic fork carriageway assignment (-1 left carriageway, +1 right carriageway). */
+  forkBranch?: -1 | 1;
 }
 
 export type CollisionOutcome = 'truckKnockedOff' | 'playerShuntedOff' | 'propBounce';
@@ -142,9 +144,12 @@ export class TrafficManager {
           const laneOffset = LANE_OFFSETS[laneIdx]!;
           const speedRatio = rng.range(0.36, 0.52);
           const variant = rng.rangeInt(0, 2);
+          const truckId = nextId++;
+          const forkBranch: -1 | 1 =
+            laneOffset < -0.2 ? -1 : laneOffset > 0.2 ? 1 : truckId % 2 === 0 ? 1 : -1;
 
           this.trucks.push({
-            id: nextId++,
+            id: truckId,
             z,
             baseLaneOffset: laneOffset,
             laneOffset,
@@ -155,6 +160,7 @@ export class TrafficManager {
             variant,
             segmentIndex: segIdx,
             nextInSegment: -1,
+            forkBranch,
           });
         }
       }
@@ -164,8 +170,11 @@ export class TrafficManager {
       for (let segIdx = startSeg; segIdx < segCount - 10; segIdx += stepSegs) {
         const laneIdx = rng.rangeInt(0, LANE_OFFSETS.length - 1);
         const laneOffset = LANE_OFFSETS[laneIdx]!;
+        const truckId = nextId++;
+        const forkBranch: -1 | 1 =
+          laneOffset < -0.2 ? -1 : laneOffset > 0.2 ? 1 : truckId % 2 === 0 ? 1 : -1;
         this.trucks.push({
-          id: nextId++,
+          id: truckId,
           z: segIdx * track.segmentLength,
           baseLaneOffset: laneOffset,
           laneOffset,
@@ -176,6 +185,7 @@ export class TrafficManager {
           variant: rng.rangeInt(0, 2),
           segmentIndex: segIdx,
           nextInSegment: -1,
+          forkBranch,
         });
       }
     }
@@ -298,17 +308,33 @@ export class TrafficManager {
           trackLen,
           forkZoneStartZ,
           forkChoice,
+          t.forkBranch,
+          t.baseLaneOffset,
         );
         const playerAheadClose = deltaZToPlayer > 0 && deltaZToPlayer < 750;
         const inSameLane = Math.abs(truckEffectiveX - car.x) < 0.42;
 
+        const isInFork =
+          forkZoneStartZ !== undefined && t.z >= forkZoneStartZ && trackLen > forkZoneStartZ;
+
         if (playerAheadClose && inSameLane) {
-          // Player is ahead in this truck's lane: steer to an open lane
-          const evadeDir: -1 | 1 = car.x >= 0 ? -1 : 1;
-          t.baseLaneOffset = evadeDir * 0.58;
-          const evadeStep = evadeDir * Math.min(1.0, dt * 2.5);
-          t.laneOffset = Math.max(-0.85, Math.min(0.85, t.laneOffset + evadeStep));
-          t.tiltAngle = -evadeStep * 3;
+          if (isInFork) {
+            // In a fork, stay on the chosen carriageway but nudge laterally away from player
+            const evadeDir: -1 | 1 = car.x >= truckEffectiveX ? -1 : 1;
+            const evadeStep = evadeDir * Math.min(0.5, dt * 1.5);
+            t.laneOffset = Math.max(
+              t.baseLaneOffset - 0.25,
+              Math.min(t.baseLaneOffset + 0.25, t.laneOffset + evadeStep),
+            );
+            t.tiltAngle = -evadeStep * 3;
+          } else {
+            // Player is ahead in this truck's lane: steer to an open lane
+            const evadeDir: -1 | 1 = car.x >= 0 ? -1 : 1;
+            t.baseLaneOffset = evadeDir * 0.58;
+            const evadeStep = evadeDir * Math.min(1.0, dt * 2.5);
+            t.laneOffset = Math.max(-0.85, Math.min(0.85, t.laneOffset + evadeStep));
+            t.tiltAngle = -evadeStep * 3;
+          }
         } else if (Math.abs(t.laneOffset - t.baseLaneOffset) > 0.01) {
           // Smoothly steer back toward cruising lane once recovered
           const returnStep = (t.baseLaneOffset - t.laneOffset) * Math.min(1, dt * 1.8);
@@ -360,6 +386,8 @@ export class TrafficManager {
           trackLen,
           forkZoneStartZ,
           forkChoice,
+          truck.forkBranch,
+          truck.baseLaneOffset,
         );
         const signedLatDiff = car.x - truckEffectiveX;
         const prevSignedLatDiff = car.prevX - truckEffectiveX;

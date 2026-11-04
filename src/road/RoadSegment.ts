@@ -267,8 +267,24 @@ export function getEffectivePropOffset(
 }
 
 /**
- * Maps an AI Kei Truck's cruising `laneOffset` out of the central V-median island in the Y-fork
- * so trucks smoothly diverge onto the left or right branch instead of driving through the grass island.
+ * Deterministically assigns an AI Kei Truck to the Left (-1) or Right (+1) carriageway branch
+ * at a stage fork based on its initial lane and truck ID.
+ */
+export function getTruckForkBranch(
+  truckId: number,
+  baseLaneOffset = 0,
+  forkBranch?: -1 | 1,
+): -1 | 1 {
+  if (forkBranch !== undefined) return forkBranch;
+  if (baseLaneOffset < -0.2) return -1;
+  if (baseLaneOffset > 0.2) return 1;
+  return truckId % 2 === 0 ? 1 : -1;
+}
+
+/**
+ * Maps an AI Kei Truck's cruising `laneOffset` into its chosen fork branch (Left or Right carriageway)
+ * so trucks smoothly choose and follow one of the two branches instead of driving down the middle
+ * through the central V-median grass island.
  */
 export function getEffectiveTruckLaneOffset(
   laneOffset: number,
@@ -277,6 +293,8 @@ export function getEffectiveTruckLaneOffset(
   trackLength: number,
   forkZoneStartZ?: number,
   forkChoice: 'left' | 'right' = 'right',
+  forkBranch?: -1 | 1,
+  baseLaneOffset?: number,
 ): number {
   if (
     forkZoneStartZ === undefined ||
@@ -289,27 +307,52 @@ export function getEffectiveTruckLaneOffset(
   const span = Math.max(1, trackLength - forkZoneStartZ);
   const t = Math.max(0, Math.min(1, (worldZ - forkZoneStartZ) / span));
 
-  const sign: -1 | 1 =
-    Math.abs(laneOffset) > 0.05 ? (laneOffset > 0 ? 1 : -1) : truckId % 2 === 0 ? 1 : -1;
+  const branch: -1 | 1 = getTruckForkBranch(truckId, baseLaneOffset ?? laneOffset, forkBranch);
   const chosenSign: -1 | 1 = forkChoice === 'left' ? -1 : 1;
 
-  if (t <= 0.65) {
-    const split = t > 0.18 ? (t - 0.18) / (0.65 - 0.18) : 0;
-    const splitEase = split * split * (3 - 2 * split);
-    const branchCenter = 0.5 + 0.6 * splitEase;
-    const targetBranchX = sign * branchCenter;
-    return laneOffset + (targetBranchX - laneOffset) * splitEase;
+  // Relative lateral perturbation (from evasion or knockback) within the chosen branch
+  const cruisingBase =
+    baseLaneOffset !== undefined
+      ? baseLaneOffset
+      : Math.abs(laneOffset) > 0.2
+        ? laneOffset > 0
+          ? 0.58
+          : -0.58
+        : 0;
+  const latDelta = laneOffset - cruisingBase;
+  const branchLatOffset = Math.max(-0.35, Math.min(0.35, latDelta * 0.5));
+
+  // Phase 1: Widening & approach zone (t in [0..0.18])
+  // Smoothly diverge onto the chosen carriageway before the road physically splits!
+  if (t <= 0.18) {
+    const p = t / 0.18;
+    const pEase = p * p * (3 - 2 * p);
+    const targetSplitX = branch * 0.6 + branchLatOffset;
+    return laneOffset + (targetSplitX - laneOffset) * pEase;
   }
 
-  // Phase 3: Smooth convergence
+  // Phase 2: Diverging Left & Right asphalt branches (t in [0.18..0.65])
+  // Trucks drive centered on their chosen carriageway [-outerLimit, -innerGap] or [+innerGap, +outerLimit]
+  if (t <= 0.65) {
+    const split = (t - 0.18) / (0.65 - 0.18);
+    const splitEase = split * split * (3 - 2 * split);
+    const outerLimit = 1.2 + splitEase * 0.48;
+    const innerGap = splitEase * 0.52;
+    const branchCenter = (outerLimit + innerGap) * 0.5; // 0.60 at t=0.18 -> 1.10 at t=0.65
+    return branch * branchCenter + branchLatOffset;
+  }
+
+  // Phase 3: Smooth convergence (t in [0.65..1.0])
   const u = (t - 0.65) / 0.35;
   const ease = u * u * (3 - 2 * u);
-  if (sign === chosenSign) {
-    const startX = sign * 1.1;
-    const targetX = laneOffset;
-    return startX + (targetX - startX) * ease;
+
+  if (branch === chosenSign) {
+    // Truck chose the same branch as the player: smoothly converges back to road center (0.0)
+    const cCenter = branch * 1.1 * (1 - ease);
+    return cCenter + branchLatOffset * (1 - ease);
   } else {
-    const startX = sign * 1.1;
-    return startX + sign * 0.4 * ease;
+    // Truck chose the other branch: curves away outward with the unchosen branch
+    const unchosenCenter = branch * (1.1 + 0.5 * u);
+    return unchosenCenter + branchLatOffset;
   }
 }

@@ -74,4 +74,37 @@ describe('BeatClock & FunkAudioEngine', () => {
     expect(engine.playbackRate).toBeLessThan(0.99);
     expect(engine.playbackRate).toBeGreaterThan(0.96);
   });
+
+  it('handles pause, resume, and loadTrack while paused without desync or dropping audio', async () => {
+    const engine = new FunkAudioEngine();
+    expect(engine.paused).toBe(false);
+
+    // 1. Pause
+    await engine.pause();
+    expect(engine.paused).toBe(true);
+
+    // 2. Load a new track while paused
+    const newMap = {
+      ...DEFAULT_SYNTH_BEATMAP,
+      title: 'Paused New Song',
+      contentHash: 'hash-paused-test',
+    };
+    engine.loadTrack(newMap, null);
+    expect(engine.beatMap.title).toBe('Paused New Song');
+
+    // 3. Advancing update while paused should not advance track time
+    const pausedState = engine.update(1 / 60, { speedRatio: 0, isDrifting: false, isOffRoad: false });
+    expect(pausedState.trackTimeSec).toBe(0);
+
+    // 4. Resume
+    await engine.resume();
+    expect(engine.paused).toBe(false);
+
+    // 5. Subsequent update advances cleanly from 0 without lag jumps
+    const activeState = engine.update(1 / 60, { speedRatio: 0, isDrifting: false, isOffRoad: false });
+    expect(activeState.trackTimeSec).toBeGreaterThan(0);
+    expect(activeState.trackTimeSec).toBeLessThan(0.05);
+
+    engine.dispose();
+  });
 });

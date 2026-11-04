@@ -399,6 +399,7 @@ export class InputManager implements InputSource {
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
+    if (e.defaultPrevented) return;
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 

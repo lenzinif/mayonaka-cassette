@@ -396,6 +396,9 @@ export function stitchHorizonToTargetZ(
   const deltaY =
     track.canonical.p1WorldY[toSegIndex]! - track.segments[fromSegIndex]!.p1.worldY;
 
+  // Pre-index drop markers in a fast Set to avoid 276 linear array scans per stitch
+  const dropMarkerSet = new Set(track.dropMarkers.map((dm) => dm.segmentIndex));
+
   for (let n = 0; n < copyCount; n++) {
     const srcSeg = track.segments[fromSegIndex + n]!;
     const destSeg = track.segments[toSegIndex + n]!;
@@ -405,9 +408,7 @@ export function stitchHorizonToTargetZ(
     destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
 
     // Preserve drop marker neon billboards if the destination segment is a drop marker
-    const isDestDropMarker = track.dropMarkers.some(
-      (dm) => dm.segmentIndex === toSegIndex + n,
-    );
+    const isDestDropMarker = dropMarkerSet.has(toSegIndex + n);
     if (isDestDropMarker) {
       const dropBillboards = track.canonical.sprites[toSegIndex + n]!.filter(
         (s) => s.kind === 'billboard',

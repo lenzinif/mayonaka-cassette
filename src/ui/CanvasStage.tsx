@@ -49,12 +49,18 @@ export function CanvasStage({
       render: (alpha, fps) => game.render(ctx, alpha, fps),
     });
 
+    game.onTimingReset = () => {
+      loop.reset();
+    };
+
     const unlockOnGesture = () => {
       void audio.unlock();
     };
     const handleVisibilityChange = () => {
       if (document.hidden || document.visibilityState === 'hidden') {
         game.setPaused(true);
+      } else {
+        loop.reset();
       }
     };
     const handleCanvasClick = () => {

@@ -906,7 +906,7 @@ export function HUD({
                     return (
                       <span
                         key={segIdx}
-                        className={`h-2.5 rounded-[1px] transition-colors duration-75 ${
+                        className={`h-2.5 rounded-[1px] ${
                           isLit
                             ? isRedZone
                               ? 'bg-pink-500 shadow-[0_0_5px_#ff2a6d]'

@@ -112,6 +112,24 @@ describe('InputManager (Keyboard + Gamepad API M8)', () => {
     input.dispose();
   });
 
+  it('ignores keyboard events when defaultPrevented is true (modal Escape close)', () => {
+    const target = new MockEventTarget() as unknown as Window;
+    const input = new InputManager(target);
+
+    target.dispatchEvent({
+      type: 'keydown',
+      code: 'Escape',
+      defaultPrevented: true,
+      timeStamp: 600,
+      preventDefault: () => {},
+    } as unknown as Event);
+
+    expect(input.isDown('pause')).toBe(false);
+    expect(input.consumePresses()).toHaveLength(0);
+
+    input.dispose();
+  });
+
   it('polls Gamepad buttons with rising-edge detection and analog triggers/sticks', () => {
     let mockGp: MockGamepad | null = null;
     const getGamepads = () => [mockGp as unknown as Gamepad];

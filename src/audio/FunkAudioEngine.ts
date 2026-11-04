@@ -278,6 +278,9 @@ export class FunkAudioEngine {
 
   private isPlaying = false;
   private isPaused = false;
+  private pendingTrackStart = false;
+  private resumeId = 0;
+  private justResumed = false;
   private currentCutoffHz = 2400;
   private currentQ = 1.6;
   private currentPlaybackRate = 1.0;
@@ -364,11 +367,15 @@ export class FunkAudioEngine {
   async pause(): Promise<void> {
     if (this.isPaused) return;
     this.isPaused = true;
-    if (this.ctx && this.ctx.state === 'running') {
-      try {
-        await this.ctx.suspend();
-      } catch {
-        // Ignore suspend failure in test/unsupported environments
+    this.resumeId++;
+    if (this.ctx) {
+      this.lastAudioTimeSec = this.ctx.currentTime;
+      if (this.ctx.state === 'running') {
+        try {
+          await this.ctx.suspend();
+        } catch {
+          // Ignore suspend failure in test/unsupported environments
+        }
       }
     }
   }
@@ -379,13 +386,28 @@ export class FunkAudioEngine {
   async resume(): Promise<void> {
     if (!this.isPaused) return;
     this.isPaused = false;
+    const currentResumeId = ++this.resumeId;
+
     if (this.ctx && this.ctx.state === 'suspended') {
       try {
         await this.ctx.resume();
-        this.lastAudioTimeSec = this.ctx.currentTime;
       } catch {
         // Ignore resume failure
       }
+    }
+
+    // If pause() was called while awaiting ctx.resume(), abort
+    if (this.isPaused || this.resumeId !== currentResumeId) return;
+
+    if (this.ctx) {
+      this.lastAudioTimeSec = this.ctx.currentTime;
+    }
+    this.justResumed = true;
+
+    // Start newly loaded track or resume pending playback without dropping audio
+    if (this.pendingTrackStart || (!this.sourceNode && this.currentBuffer && this.isPlaying)) {
+      this.startSourceNode(this.virtualTrackSec, 0);
+      this.pendingTrackStart = false;
     }
   }
 
@@ -415,14 +437,20 @@ export class FunkAudioEngine {
       this.ctx = ctx;
       this.filterNode = filter;
       this.masterGain = gain;
+      this.lastAudioTimeSec = ctx.currentTime;
     }
 
     if (this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
 
-    if (!this.isPlaying && this.ctx.state === 'running') {
-      this.startSourceNode(0, 0);
+    if (this.ctx) {
+      this.lastAudioTimeSec = this.ctx.currentTime;
+    }
+
+    if (!this.isPaused && (this.pendingTrackStart || (!this.isPlaying && this.ctx.state === 'running'))) {
+      this.startSourceNode(this.virtualTrackSec, 0);
+      this.pendingTrackStart = false;
     }
   }
 
@@ -432,6 +460,7 @@ export class FunkAudioEngine {
    */
   loadTrack(beatMap: BeatMap, audioBuffer: AudioBuffer | null = null): void {
     this.stopOutgoingSource();
+    this.stopSourceNode();
     this.crossfadeRemainingSec = 0;
     this.crossfadeTotalSec = 0;
     this.outroLoopHolding = false;
@@ -440,8 +469,11 @@ export class FunkAudioEngine {
     this.isSynthLoopBuffer = audioBuffer === null;
     this.virtualTrackSec = 0;
 
-    if (this.ctx && this.ctx.state === 'running') {
+    if (this.ctx && this.ctx.state === 'running' && !this.isPaused) {
       this.startSourceNode(0, 0);
+      this.pendingTrackStart = false;
+    } else {
+      this.pendingTrackStart = true;
     }
   }
 
@@ -471,7 +503,7 @@ export class FunkAudioEngine {
     this.isSynthLoopBuffer = audioBuffer === null;
     this.virtualTrackSec = 0;
 
-    if (this.ctx && this.filterNode && this.ctx.state === 'running') {
+    if (this.ctx && this.filterNode && this.ctx.state === 'running' && !this.isPaused) {
       const now = this.ctx.currentTime;
       // Demote current active source to outgoing and ramp its gain down over 4 bars
       this.stopOutgoingSource();
@@ -497,6 +529,11 @@ export class FunkAudioEngine {
       // Start the incoming track ramping from 0 -> 1 over `fadeDurSec`
       this.startSourceNode(0, fadeDurSec);
       this.triggerFilterBlip(0.9);
+      this.pendingTrackStart = false;
+    } else {
+      this.stopOutgoingSource();
+      this.stopSourceNode();
+      this.pendingTrackStart = true;
     }
 
     return fadeDurSec;
@@ -664,7 +701,11 @@ export class FunkAudioEngine {
     const dur = Math.max(1, this.beatClock.map.durationSec);
     if (this.ctx && this.isPlaying && this.ctx.state === 'running') {
       const nowAudio = this.ctx.currentTime;
-      const elapsedAudio = Math.max(0, nowAudio - this.lastAudioTimeSec);
+      const rawElapsed = Math.max(0, nowAudio - this.lastAudioTimeSec);
+      // Clamp elapsed audio delta to 150ms on resume to absorb OS audio wake hitch; clamp to 350ms during steady state
+      const maxElapsed = this.justResumed ? 0.15 : 0.35;
+      const elapsedAudio = Math.min(rawElapsed, maxElapsed);
+      this.justResumed = false;
       this.lastAudioTimeSec = nowAudio;
       this.virtualTrackSec += elapsedAudio * this.currentPlaybackRate;
 
@@ -721,17 +762,18 @@ export class FunkAudioEngine {
     this.currentQ += (targetQ - this.currentQ) * (1 - Math.exp(-8.0 * dt));
 
     // 7. Apply already-smoothed parameters to Web Audio nodes via direct `.value` assignment
-    // (avoids appending 360 `setTargetAtTime` automation events/s into Chromium's AudioParamTimeline!)
+    // (uses perceptual delta thresholds to eliminate AudioParam IPC bus saturations during sweeps)
     if (this.ctx && this.filterNode && this.sourceNode && this.ctx.state === 'running') {
-      if (Math.abs(this.currentCutoffHz - this.lastAppliedCutoffHz) >= 1.0) {
+      const minCutoffDelta = Math.max(6.0, this.currentCutoffHz * 0.005);
+      if (Math.abs(this.currentCutoffHz - this.lastAppliedCutoffHz) >= minCutoffDelta) {
         this.filterNode.frequency.value = this.currentCutoffHz;
         this.lastAppliedCutoffHz = this.currentCutoffHz;
       }
-      if (Math.abs(this.currentQ - this.lastAppliedQ) >= 0.01) {
+      if (Math.abs(this.currentQ - this.lastAppliedQ) >= 0.02) {
         this.filterNode.Q.value = this.currentQ;
         this.lastAppliedQ = this.currentQ;
       }
-      if (Math.abs(this.currentPlaybackRate - this.lastAppliedPlaybackRate) >= 0.0005) {
+      if (Math.abs(this.currentPlaybackRate - this.lastAppliedPlaybackRate) >= 0.001) {
         this.sourceNode.playbackRate.value = this.currentPlaybackRate;
         if (this.outgoingSourceNode) {
           this.outgoingSourceNode.playbackRate.value = this.currentPlaybackRate;

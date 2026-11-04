@@ -22,7 +22,9 @@ export function App() {
   const [preloader] = useState(() => new AssetPreloader());
   const [preloadProgress, setPreloadProgress] = useState<PreloadProgress>(() => preloader.progress);
   const [preloadReady, setPreloadReady] = useState(false);
+  const [gameStarted, setGameStarted] = useState(false);
   const gameRef = useRef<Game | null>(null);
+  const wasPausedBeforeModalRef = useRef(false);
 
   const [debugOpen, setDebugOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -40,9 +42,12 @@ export function App() {
 
   useEffect(() => {
     if (trackLoaderOpen || inspectorOpen) {
+      wasPausedBeforeModalRef.current = gameRef.current?.paused ?? false;
       gameRef.current?.setPaused(true);
     } else if (preloadReady) {
-      gameRef.current?.setPaused(false);
+      if (!wasPausedBeforeModalRef.current) {
+        gameRef.current?.setPaused(false);
+      }
     }
   }, [trackLoaderOpen, inspectorOpen, preloadReady]);
 
@@ -72,12 +77,24 @@ export function App() {
         e.preventDefault();
         setTrackLoaderOpen((prev) => !prev);
       } else if (e.code === 'Escape') {
-        setTrackLoaderOpen(false);
+        if (trackLoaderOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          setTrackLoaderOpen(false);
+        } else if (inspectorOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          setInspectorOpen(false);
+        } else if (debugOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          setDebugOpen(false);
+        }
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [inspectorOpen]);
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
+  }, [inspectorOpen, trackLoaderOpen, debugOpen]);
 
   const handleSelectTrack = (item: PlaylistItem) => {
     void audio.unlock();
@@ -131,11 +148,12 @@ export function App() {
           onClose={() => setTrackLoaderOpen(false)}
         />
         {inspectorOpen && <BeatMapInspector onClose={() => setInspectorOpen(false)} />}
-        {!inspectorOpen && (
+        {!gameStarted && !inspectorOpen && (
           <LoadingScreen
             progress={preloadProgress}
             ready={preloadReady}
             onStart={() => {
+              setGameStarted(true);
               void audio.unlock();
             }}
           />
