@@ -86,6 +86,13 @@ export const DEFAULT_TUNING = {
   trafficDensity: 1.0,
   collisionSpeedRetention: 0.68,
   propBounceImpulse: 1.3,
+
+  // Weather & Sky / Fondali (Fase 2)
+  bgClouds: 1,
+  bgRain: 0,
+  bgBirds: 1,
+  bgLightningOnBeat: 1,
+  bgConstellations: 1,
 } satisfies Record<string, number>;
 
 export type TuningKey = keyof typeof DEFAULT_TUNING;
@@ -668,5 +675,51 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0.2,
     max: 3.5,
     step: 0.1,
+  },
+
+  {
+    group: 'Weather & Sky',
+    key: 'bgClouds',
+    label: 'Procedural clouds',
+    hint: 'Banchi di nuvole stratificate a scorrimento procedurale (1 = ON, 0 = OFF)',
+    min: 0,
+    max: 1,
+    step: 1,
+  },
+  {
+    group: 'Weather & Sky',
+    key: 'bgRain',
+    label: 'Rain & storm',
+    hint: 'Pioggia battente con striature diagonali pixel-art (1 = ON, 0 = OFF)',
+    min: 0,
+    max: 1,
+    step: 1,
+  },
+  {
+    group: 'Weather & Sky',
+    key: 'bgLightningOnBeat',
+    label: 'Beat lightning flash',
+    hint: 'Lampi celestiali istantanei sincronizzati sui forti downbeat (1 = ON, 0 = OFF)',
+    min: 0,
+    max: 1,
+    step: 1,
+  },
+  {
+    group: 'Weather & Sky',
+    key: 'bgBirds',
+    label: 'Birds & gulls',
+    hint: 'Stormi di rondini e gabbiani con flap animato a 3 frame (1 = ON, 0 = OFF)',
+    min: 0,
+    max: 1,
+    step: 1,
+  },
+  {
+    group: 'Weather & Sky',
+    key: 'bgConstellations',
+    label: 'Constellations & meteors',
+    hint: 'Costellazioni geometriche pulsanti e stelle cadenti (1 = ON, 0 = OFF)',
+    min: 0,
+    max: 1,
+    step: 1,
   },
 ];
