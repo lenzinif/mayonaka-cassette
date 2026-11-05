@@ -206,4 +206,53 @@ describe('PlayerCar', () => {
     expect(evaluateGrooveTier(81, 'SSS')).toBe('SSS');
     expect(evaluateGrooveTier(78, 'SSS')).toBe('HIGH');
   });
+
+  it('decays Groove in SSS and HIGH tiers when idle, but preserves MEDIUM and LOW tiers', () => {
+    // SSS decay
+    const sssCar = new PlayerCar();
+    sssCar.groove = 90;
+    sssCar.grooveTier = 'SSS';
+    sssCar.update(1.0, IDLE, 0, 0);
+    expect(sssCar.groove).toBeCloseTo(90 - tuning.grooveSssDrainRate, 1);
+
+    // HIGH decay
+    const highCar = new PlayerCar();
+    highCar.groove = 65;
+    highCar.grooveTier = 'HIGH';
+    highCar.update(1.0, IDLE, 0, 0);
+    expect(highCar.groove).toBeCloseTo(65 - tuning.grooveHighDrainRate, 1);
+
+    // MEDIUM no decay
+    const medCar = new PlayerCar();
+    medCar.groove = 40;
+    medCar.grooveTier = 'MEDIUM';
+    medCar.update(1.0, IDLE, 0, 0);
+    expect(medCar.groove).toBe(40);
+
+    // LOW no decay
+    const lowCar = new PlayerCar();
+    lowCar.groove = 15;
+    lowCar.grooveTier = 'LOW';
+    lowCar.update(1.0, IDLE, 0, 0);
+    expect(lowCar.groove).toBe(15);
+  });
+
+  it('allows drifting to overpower SSS decay and rebuild Groove', () => {
+    const car = new PlayerCar();
+    car.gearbox.gear = 5;
+    car.speed = tuning.maxSpeed * 0.8;
+    car.groove = 88;
+    car.grooveTier = 'SSS';
+
+    // Hold drift + right steer around curve for 1 second (60 steps)
+    for (let i = 0; i < 60; i++) {
+      car.x = 0; // maintain on road
+      car.update(1 / 60, { ...IDLE, accelerate: true, right: true, drift: true }, 3.0, 0);
+    }
+
+    expect(car.isDrifting).toBe(true);
+    // Net gain should be positive, overcoming SSS tier decay
+    expect(car.groove).toBeGreaterThan(88);
+    expect(car.groove).toBeCloseTo(88 + (tuning.grooveDriftGainRate - tuning.grooveSssDrainRate), 0);
+  });
 });
