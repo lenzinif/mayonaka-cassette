@@ -7,22 +7,22 @@ import type { StagePalette } from '@src/road/palette';
 const MOUNTAIN_POINTS = 64;
 const MOUNTAIN_SPAN = 960;
 const STAR_COUNT = 48;
-const CONSTELLATION_EDGES = new Uint8Array([
-  0, 5,
-  5, 11,
-  11, 18,
-  2, 8,
-  8, 14,
-  14, 22,
-  3, 9,
-  9, 15,
-]);
 const SHOOTING_STAR_COUNT = 2;
 const CITY_TOWERS = 32;
 const CITY_SPAN = 640;
 const CLOUD_COUNT = 8;
 const RAIN_COUNT = 96;
 const BIRD_COUNT = 6;
+
+// Statically indexed constellation groups connecting actual star nodes in the sky
+const CONSTELLATION_GROUPS: readonly (readonly number[])[] = [
+  // Group 0: Cassiopeia (W)
+  [0, 5, 5, 11, 11, 18, 18, 24],
+  // Group 1: Northern Cross / Cygnus
+  [2, 8, 8, 14, 14, 22, 6, 8, 8, 16],
+  // Group 2: Orion's Belt & Bow
+  [3, 9, 9, 15, 15, 23, 7, 9, 15, 27],
+];
 
 // Static color constants to avoid dynamic string interpolation in render()
 const COLOR_WHITE = '#ffffff';
@@ -61,12 +61,16 @@ function hexToRgba(hex: string, alpha: number): string {
 export class Background {
   // Layer 1: Mountain / distant ridge geometry
   private readonly ridgeHeights = new Float32Array(MOUNTAIN_POINTS);
+  private readonly hillHeights = new Float32Array(MOUNTAIN_POINTS);
   private readonly farRidgeHeights = new Float32Array(MOUNTAIN_POINTS);
 
   // Layer 1: Celestial starfield & constellations
   private readonly starX = new Float32Array(STAR_COUNT);
   private readonly starY = new Float32Array(STAR_COUNT);
   private readonly starPhase = new Float32Array(STAR_COUNT);
+  private constellationTimer = 0;
+  private constellationAlpha = 0;
+  private activeConstellationGroup = 0;
 
   // Layer 1: Shooting stars
   private readonly shootingStarActive = new Uint8Array(SHOOTING_STAR_COUNT);
@@ -137,11 +141,15 @@ export class Background {
   private cachedWaterGrad: CanvasGradient | null = null;
 
   constructor() {
-    // 1. Layer 1: Mountain ridges & far silhouettes
+    // 1. Layer 1: Mountain ridges & Mayonaka rolling hills
     for (let i = 0; i < MOUNTAIN_POINTS; i++) {
       const t = (i / MOUNTAIN_POINTS) * Math.PI * 2;
       const h = Math.sin(t * 2) * 16 + Math.sin(t * 5 + 1.1) * 10 + Math.cos(t * 11 + 0.4) * 5 + 24;
       this.ridgeHeights[i] = Math.max(6, h);
+
+      // Rolling hills for Mayonaka Bay
+      const hHill = Math.sin(t * 1.5) * 11 + Math.sin(t * 3.5 + 0.4) * 5 + 16;
+      this.hillHeights[i] = Math.max(6, hHill);
 
       const hFar = Math.sin(t * 3 + 0.7) * 22 + Math.cos(t * 7 + 1.9) * 9 + 28;
       this.farRidgeHeights[i] = Math.max(8, hFar);
@@ -286,8 +294,22 @@ export class Background {
 
     // 5. Constellations & Shooting Stars
     if (tuning.bgConstellations === 1) {
+      this.constellationTimer += dt;
+      const cycle = this.constellationTimer % 14;
+      if (cycle < 1.2) {
+        this.constellationAlpha = cycle / 1.2;
+      } else if (cycle < 4.8) {
+        this.constellationAlpha = 1.0;
+      } else if (cycle < 6.0) {
+        this.constellationAlpha = (6.0 - cycle) / 1.2;
+      } else {
+        this.constellationAlpha = 0;
+        this.activeConstellationGroup =
+          Math.floor(this.constellationTimer / 14) % CONSTELLATION_GROUPS.length;
+      }
+
       this.shootingStarTimer += dt;
-      if (this.shootingStarTimer > 5.5) {
+      if (this.shootingStarTimer > 6.5) {
         this.shootingStarTimer = 0;
         for (let s = 0; s < SHOOTING_STAR_COUNT; s++) {
           if (this.shootingStarActive[s] === 0) {
@@ -312,6 +334,8 @@ export class Background {
           }
         }
       }
+    } else {
+      this.constellationAlpha = 0;
     }
   }
 
@@ -381,28 +405,42 @@ export class Background {
       }
     }
 
-    // 2b. Constellation geometric lines
+    // 2b. Constellations connecting existing star dots occasionally
     if (tuning.bgConstellations === 1) {
-      ctx.strokeStyle = starCol1;
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.20 + pulse * 0.25;
-      ctx.beginPath();
-      const edgeCount = CONSTELLATION_EDGES.length;
-      for (let e = 0; e < edgeCount; e += 2) {
-        const idxA = CONSTELLATION_EDGES[e]!;
-        const idxB = CONSTELLATION_EDGES[e + 1]!;
-        const ax = Math.round((this.starX[idxA]! * width - starScroll + width * 3) % width);
-        const ay = Math.round(this.starY[idxA]! * (horizonY - 42)) + 4;
-        const bx = Math.round((this.starX[idxB]! * width - starScroll + width * 3) % width);
-        const by = Math.round(this.starY[idxB]! * (horizonY - 42)) + 4;
+      if (this.constellationAlpha > 0.01) {
+        const group =
+          CONSTELLATION_GROUPS[this.activeConstellationGroup] ?? CONSTELLATION_GROUPS[0]!;
+        const edgeCount = group.length;
 
-        if (Math.abs(ax - bx) < width * 0.35) {
-          ctx.moveTo(ax, ay);
-          ctx.lineTo(bx, by);
+        ctx.strokeStyle = starCol1;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = this.constellationAlpha * (0.32 + pulse * 0.38);
+        ctx.beginPath();
+        for (let e = 0; e < edgeCount; e += 2) {
+          const idxA = group[e]!;
+          const idxB = group[e + 1]!;
+          const ax = Math.round((this.starX[idxA]! * width - starScroll + width * 3) % width);
+          const ay = Math.round(this.starY[idxA]! * (horizonY - 42)) + 4;
+          const bx = Math.round((this.starX[idxB]! * width - starScroll + width * 3) % width);
+          const by = Math.round(this.starY[idxB]! * (horizonY - 42)) + 4;
+
+          if (Math.abs(ax - bx) < width * 0.35) {
+            ctx.moveTo(ax, ay);
+            ctx.lineTo(bx, by);
+          }
         }
+        ctx.stroke();
+
+        // Subtle diamond accent on the active constellation star nodes
+        ctx.fillStyle = starCol2;
+        for (let e = 0; e < edgeCount; e += 2) {
+          const idxA = group[e]!;
+          const ax = Math.round((this.starX[idxA]! * width - starScroll + width * 3) % width);
+          const ay = Math.round(this.starY[idxA]! * (horizonY - 42)) + 4;
+          ctx.fillRect(ax - 1, ay - 1, 3, 3);
+        }
+        ctx.globalAlpha = 1;
       }
-      ctx.stroke();
-      ctx.globalAlpha = 1;
 
       // 2c. Shooting Stars
       for (let s = 0; s < SHOOTING_STAR_COUNT; s++) {
@@ -500,11 +538,13 @@ export class Background {
     // -------------------------------------------------------------------------
     // 6. LAYER 1: LONTANISSIMO (Scroll ~0.10x)
     // -------------------------------------------------------------------------
-    const hasWaterHorizon = palette.id === 'night' || palette.id === 'coastal';
+    const isSunsetBoulevard = palette.id === 'og_future_funk';
+    const isAkibaNight = palette.id === 'akiba_night' || palette.id === 'weeb_funk';
+    const isMayonakaBay = !isSunsetBoulevard && !isAkibaNight;
 
-    if (hasWaterHorizon) {
-      // Mayonaka Bay / Coastal: Calm deep sea horizon with tranquil water gradient & wave sheens
-      const seaTopY = horizonY - 28;
+    if (isSunsetBoulevard) {
+      // Sunset Boulevard: Calm deep sea horizon with tranquil water gradient & shimmering sun reflection
+      const seaTopY = horizonY - 26;
       const seaH = horizonY - seaTopY;
 
       if (
@@ -515,8 +555,8 @@ export class Background {
       ) {
         const wGrad = ctx.createLinearGradient(0, seaTopY, 0, horizonY);
         wGrad.addColorStop(0, COLOR_WATER_DEEP);
-        wGrad.addColorStop(0.55, hexToRgba(palette.skyHorizon, 0.35));
-        wGrad.addColorStop(1, hexToRgba(palette.grass[0], 0.9));
+        wGrad.addColorStop(0.55, hexToRgba(palette.skyHorizon, 0.45));
+        wGrad.addColorStop(1, hexToRgba(palette.grass[0], 0.95));
         this.cachedWaterCtx = ctx;
         this.cachedWaterHorizonY = horizonY;
         this.cachedWaterPalette = palette;
@@ -527,29 +567,73 @@ export class Background {
 
       // Distant calm sea horizon line
       ctx.fillStyle = palette.mountainRim;
-      ctx.globalAlpha = 0.40 + pulse * 0.22;
+      ctx.globalAlpha = 0.50 + pulse * 0.25;
       ctx.fillRect(0, seaTopY, width, 1);
       ctx.globalAlpha = 1;
 
-      // Subtle horizontal wave sheens drifting slowly across the bay
+      // Golden setting sun reflection column on water surface directly below the sun
+      const sunRefW = Math.max(16, sunR * 0.45);
+      for (let dy = 0; dy < seaH; dy++) {
+        const y = seaTopY + dy;
+        const rip = Math.sin(this.skyTime * 4.2 + dy * 0.75) * 2.2;
+        const expand = (dy / seaH) * 22;
+        const refAlpha = (1 - (dy / seaH) * 0.40) * (0.45 + pulse * 0.28);
+        ctx.fillStyle = palette.sunBottom;
+        ctx.globalAlpha = Math.min(0.85, refAlpha);
+        ctx.fillRect(sunX - (sunRefW + expand) * 0.5 + rip, y, sunRefW + expand, 1);
+      }
+      ctx.globalAlpha = 1;
+
+      // Subtle horizontal wave sheens
       const sheenScroll = (this.scroll1 * 0.8 + this.skyTime * 8) % width;
-      ctx.fillStyle = palette.mountainRim;
-      for (let s = 0; s < 5; s++) {
-        const sx = Math.round((s * 135 - sheenScroll + width * 2) % width);
-        const sy = seaTopY + 4 + s * 5;
-        const sw = 24 + s * 6;
-        ctx.globalAlpha = 0.18 + 0.10 * Math.sin(this.skyTime * 3.5 + s);
+      ctx.fillStyle = palette.sunTop;
+      for (let s = 0; s < 4; s++) {
+        const sx = Math.round((s * 160 - sheenScroll + width * 2) % width);
+        const sy = seaTopY + 4 + s * 6;
+        const sw = 28 + s * 8;
+        ctx.globalAlpha = 0.22 + 0.12 * Math.sin(this.skyTime * 3.5 + s);
         ctx.fillRect(sx, sy, sw, 1);
       }
       ctx.globalAlpha = 1;
-    } else {
-      // Sunset Boulevard / Akiba: Majestic scrolling mountain & hill ridges
+    } else if (isMayonakaBay) {
+      // Mayonaka Bay: Rolling soft hills (colli)
       const step = MOUNTAIN_SPAN / MOUNTAIN_POINTS;
       const startIdx = Math.floor(this.scroll1 / step);
       const frac = (this.scroll1 % step) / step;
       const pointsNeeded = Math.ceil(width / step) + 2;
 
-      // Far mountain ridge silhouette
+      ctx.beginPath();
+      ctx.moveTo(0, horizonY + 2);
+      for (let i = 0; i <= pointsNeeded; i++) {
+        const idx = (startIdx + i) % MOUNTAIN_POINTS;
+        const x = (i - frac) * step;
+        const y = horizonY - this.hillHeights[idx]!;
+        ctx.lineTo(x, y);
+      }
+      ctx.lineTo(width, horizonY + 2);
+      ctx.closePath();
+      ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : palette.mountain;
+      ctx.fill();
+
+      // Soft hill rim
+      ctx.beginPath();
+      for (let i = 0; i <= pointsNeeded; i++) {
+        const idx = (startIdx + i) % MOUNTAIN_POINTS;
+        const x = (i - frac) * step;
+        const y = horizonY - this.hillHeights[idx]!;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = palette.mountainRim;
+      ctx.lineWidth = 1.0 + pulse * 0.8;
+      ctx.stroke();
+    } else {
+      // Akiba Night Rush: Jagged dark mountains enclosing the metropolis
+      const step = MOUNTAIN_SPAN / MOUNTAIN_POINTS;
+      const startIdx = Math.floor(this.scroll1 / step);
+      const frac = (this.scroll1 % step) / step;
+      const pointsNeeded = Math.ceil(width / step) + 2;
+
       ctx.beginPath();
       ctx.moveTo(0, horizonY + 2);
       for (let i = 0; i <= pointsNeeded; i++) {
@@ -560,7 +644,7 @@ export class Background {
       }
       ctx.lineTo(width, horizonY + 2);
       ctx.closePath();
-      ctx.fillStyle = palette.mountain;
+      ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : palette.mountain;
       ctx.fill();
 
       // Glowing neon mountain ridge rim
@@ -585,8 +669,8 @@ export class Background {
     const winSecondary = palette.sunTop;
     const winAccent = palette.starColors ? palette.starColors[1] : palette.mountainRim;
 
-    // In Mayonaka Bay, skyline sits across the bay at horizonY - 14; in Sunset Boulevard at horizonY - 4
-    const skylineBaseY = hasWaterHorizon ? horizonY - 14 : horizonY - 4;
+    // Tailored baseline per theme
+    const skylineBaseY = isSunsetBoulevard ? horizonY - 10 : horizonY - 4;
 
     for (let pass = -1; pass <= Math.ceil(width / CITY_SPAN); pass++) {
       const baseOffset = pass * CITY_SPAN - this.scroll2;
@@ -595,12 +679,21 @@ export class Background {
         const tw = this.towerWidths[t]!;
         if (tx + tw < -10 || tx > width + 10) continue;
 
-        const th = this.towerHeights[t]!;
+        // Tailor building heights per theme:
+        // - Sunset Boulevard: palazzi bassi (2-4 piani: 6..14px)
+        // - Akiba Night: palazzi alti (18..48px)
+        // - Mayonaka Bay: palazzi medio-alti (12..28px)
+        const th = isSunsetBoulevard
+          ? Math.min(14, 5 + ((t * 5 + 3) % 9))
+          : isAkibaNight
+            ? 18 + ((t * 13 + 7) % 32)
+            : 12 + ((t * 9 + 5) % 18);
+
         const ty = skylineBaseY - th;
         const style = this.towerStyle[t]!;
 
-        // 7a. Building silhouette (dark midnight)
-        ctx.fillStyle = COLOR_NIGHT_SKYLINE;
+        // 7a. Building silhouette (pure black on lightning flash for reverse silhouette)
+        ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : COLOR_NIGHT_SKYLINE;
         if (style === 1) {
           // Stepped art-deco tower
           const stepW = Math.max(4, Math.floor(tw * 0.65));
@@ -622,10 +715,10 @@ export class Background {
         }
 
         // 7b. Radio antenna with blinking red/cyan LED beacon
-        const antH = this.towerAntennaH[t]!;
+        const antH = isSunsetBoulevard ? 0 : this.towerAntennaH[t]!;
         if (antH > 0) {
           const antX = tx + Math.floor(tw * 0.5);
-          ctx.fillStyle = '#1e1438';
+          ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : '#1e1438';
           ctx.fillRect(antX, ty - antH, 1, antH);
 
           // LED beacon at the tip of the antenna
@@ -637,7 +730,7 @@ export class Background {
         }
 
         // 7c. Glowing window matrices breathing with the beat
-        if (th >= 12) {
+        if (th >= 10) {
           const winCols = tw >= 18 ? 3 : 2;
           const winRows = Math.min(6, Math.floor(th / 5));
           for (let r = 0; r < winRows; r++) {
@@ -660,9 +753,9 @@ export class Background {
 
     // -------------------------------------------------------------------------
     // 8. LAYER 3: TRANSIZIONE (Scroll ~0.85x)
-    // Vertical Water Reflections for Mayonaka Bay & Breakwater Wash
+    // Vertical Water Reflections for Sunset Boulevard Coast & Breakwater Wash
     // -------------------------------------------------------------------------
-    if (hasWaterHorizon) {
+    if (isSunsetBoulevard) {
       // Vertical Water Reflections directly beneath the skyline towers
       const waterTopY = skylineBaseY;
       const waterH = horizonY - waterTopY;

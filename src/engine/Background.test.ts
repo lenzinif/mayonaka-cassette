@@ -102,28 +102,27 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     expect(bg.scrollX).toBe(bg.scroll1);
   });
 
-  it('renders Mayonaka Bay (palette.id === "night") with calm water horizon and vertical water reflections', () => {
+  it('renders Mayonaka Bay (palette.id === "night") with rolling hills and urban skyline', () => {
     const bg = new Background();
     const mock = createMockCanvasContext();
 
     bg.render(mock.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
 
-    // In Mayonaka Bay, vertical water reflection slices and wave sheens call fillRect heavily
-    expect(mock.fillRectCalls).toBeGreaterThan(100);
-    // Sky gradient, sun, and mountain rim paths are drawn
+    expect(mock.fillRectCalls).toBeGreaterThan(50);
+    // Sky gradient, sun, and hill rim paths are drawn
     expect(mock.fillCalls).toBeGreaterThan(0);
+    expect(mock.strokeCalls).toBeGreaterThan(0);
   });
 
-  it('renders Sunset Boulevard (palette.id === "og_future_funk") with majestic mountain ridges', () => {
+  it('renders Sunset Boulevard (palette.id === "og_future_funk") with calm sea horizon and golden sun reflection', () => {
     const bg = new Background();
     const mock = createMockCanvasContext();
 
     bg.render(mock.ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
 
-    // Mountains call stroke() for the glowing neon rim
-    expect(mock.strokeCalls).toBeGreaterThan(0);
+    // In Sunset Boulevard, sea surface and sun reflections call fillRect heavily
+    expect(mock.fillRectCalls).toBeGreaterThan(70);
     expect(mock.fillCalls).toBeGreaterThan(0);
-    expect(mock.fillRectCalls).toBeGreaterThan(40);
   });
 
   it('renders Akiba Night Rush (palette.id === "akiba_night") with dark cobalt ridges and vibrant towers', () => {
@@ -210,6 +209,7 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     const bg = new Background();
 
     tuning.bgConstellations = 1;
+    bg.update(2.0, 0, 1.0); // Advance to active constellation window (cycle = 2.0s -> alpha = 1.0)
     const mockWithConstellations = createMockCanvasContext();
     bg.render(mockWithConstellations.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
 
