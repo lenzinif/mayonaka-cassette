@@ -39,15 +39,22 @@ Ridisegnare il cruscotto con elementi grafici anni '80 e ottimizzare la telemetr
 
 Aggiungere varietà agli ostacoli e alle decorazioni nei `RoadChunks`:
 
-- [ ] Insegne al neon e cartelloni:
-  - Cartelloni con finte pubblicità vaporwave: bibite giapponesi, sintetizzatori vintage (Roland, Korg), cassette a nastro (Maxell, TDK).
-  - Varianti con luci neon animate a ritmo di musica.
-- [ ] Arredo autostradale giapponese:
-  - Distributori automatici (jihanki) illuminati a bordo strada.
-  - Cabine telefoniche verdi e guardrail continui lungo le curve da drift.
-  - Lampioni ad arco della Shuto Expressway che sfilano a tempo.
-- [ ] Gallerie e sovrappassi:
-  - Sottopassi e tunnel con luci stroboscopiche arancioni o gialle.
+- [x] Insegne al neon e cartelloni (Fase 4):
+  - Cartelloni e palazzi in stile Akihabara con insegne a lama verticali animate a tempo di beat (`building`).
+  - Tre stili architettonici urbani: Akiba Megamart, Grattacielo Cyber-Glass a fasce e Showa Block con cartellone al neon a tetto (`カセット`).
+- [x] Arredo autostradale e scenografia giapponese (Fase 4):
+  - Distributori automatici (*jihanki*) illuminati a bordo strada con lattine calde/fredde e particelle dedicate.
+  - Cabine telefoniche pubbliche verdi (*kōshū denwa*) con vetrate trasparenti e luce interna.
+  - Portali a scavalco autostradale Shuto (*gantry*) bilingue e tabelloni a messaggio variabile (*vms*) con messaggi di prova LED ambra.
+  - Traliccio ad alta tensione a Delta con cavi aerei catenari e isolatori in ceramica (`pylon`).
+  - Frecce direzionali animate a ritmo di musica per le curve cieche (`chevron`).
+  - Arbusti e siepi a bordo carreggiata a doppia sagoma (siepe a cupola e *niwaki* a palchi asimmetrici).
+  - Segnaletica stradale normale: limite circolare 80 km/h, uscita autostradale verde Shuto C1, rombo giallo di pericolo curva (`sign`).
+- [ ] Gallerie e sovrappassi (Ponti & Tunnel):
+  - **Ponte A (Cavalcavia / Overpass a scavalco):** Struttura sopraelevata in cemento armato con travature in acciaio e piloni di sostegno laterali sotto cui l'auto transita a tutta velocità (`offset: 0`).
+  - **Ponte B (Sezione su Ponte Sospeso / Rainbow Bridge):** Tratto di strada con barriere metalliche a traliccio continuo sul bordo asfalto, torri monumentali ad arco bianco/arancio e tiranti diagonali illuminati.
+  - **Tunnel A (Portale d'Ingresso Tunnel):** Imboccatura monumentale ad arco in cemento armato con bande riflettenti di sagoma giallo/nere e luci di galleria.
+  - **Tunnel B (Interno Galleria con Luci al Neon):** Centine ad arco continuo a soffitto con tubi al neon arancioni al sodio o ciano che sfilano in rapida successione prospettica a ritmo di musica.
 - [ ] Varietà nel traffico:
   - Nuovi veicoli oltre al kei truck: berline squadrate anni '80, furgoni per le consegne e motociclette con scia luminosa.
 
