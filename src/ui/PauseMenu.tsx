@@ -29,6 +29,7 @@ export interface PauseMenuProps {
   onCycleSodaSkin: () => void;
   onToggleCleanHud: () => void;
   onTogglePerfHud: () => void;
+  onToggleAutoShift?: () => void;
 }
 
 function formatLapTime(seconds: number): string {
@@ -41,6 +42,7 @@ function formatLapTime(seconds: number): string {
 /**
  * Unified 1980s Future Funk Pause Menu overlay.
  * Replaces clashing low-res canvas text with a cohesive, beautifully styled synthwave modal.
+ * Acts as the centralized options & tuning hub during gameplay.
  */
 export function PauseMenu({
   open,
@@ -59,6 +61,7 @@ export function PauseMenu({
   sodaSpills,
   cleanHud,
   showPerfHud,
+  autoShift,
   onResume,
   onRestartRun,
   onOpenTrackLoader,
@@ -68,6 +71,7 @@ export function PauseMenu({
   onCycleSodaSkin,
   onToggleCleanHud,
   onTogglePerfHud,
+  onToggleAutoShift,
 }: PauseMenuProps) {
   if (!open) return null;
 
@@ -178,6 +182,19 @@ export function PauseMenu({
             QUICK TOGGLES &amp; OPTIONS
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+            {onToggleAutoShift && (
+              <button
+                type="button"
+                onClick={onToggleAutoShift}
+                className={`cursor-pointer rounded border py-1.5 px-2 font-semibold tracking-wider transition ${
+                  autoShift
+                    ? 'border-cyan-400 bg-cyan-950/90 text-cyan-200 shadow-[0_0_10px_rgba(5,217,232,0.4)]'
+                    : 'border-cyan-400/40 bg-[#160530]/70 text-cyan-200 hover:border-cyan-300'
+                }`}
+              >
+                GEAR: {autoShift ? 'AUTO-SHIFT' : 'MANUAL'} [G]
+              </button>
+            )}
             <button
               type="button"
               onClick={onToggleTofuMode}
@@ -211,13 +228,13 @@ export function PauseMenu({
             <button
               type="button"
               onClick={onTogglePerfHud}
-              className={`cursor-pointer rounded border py-1.5 px-2 font-semibold tracking-wider transition ${
+              className={`col-span-2 cursor-pointer rounded border py-1.5 px-2 font-semibold tracking-wider transition ${
                 showPerfHud
                   ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
                   : 'border-cyan-400/40 bg-[#160530]/70 text-cyan-200 hover:border-cyan-300'
               }`}
             >
-              PERF HUD: {showPerfHud ? 'ON' : 'OFF'} [F3]
+              PERF PROFILER: {showPerfHud ? 'ON' : 'OFF'} [F3]
             </button>
           </div>
         </div>

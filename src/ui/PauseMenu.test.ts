@@ -66,7 +66,7 @@ describe('PauseMenu (UI Layer)', () => {
     expect(text).toContain('TOFU MODE: OFF [T]');
     expect(text).toContain('CUP: MELON SODA [V]');
     expect(text).toContain('HUD: FULL [H]');
-    expect(text).toContain('PERF HUD: OFF [F3]');
+    expect(text).toContain('PERF PROFILER: OFF [F3]');
 
     // Community feedback link
     expect(text).toContain('COMMUNITY &amp; FEEDBACK');
