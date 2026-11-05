@@ -1,41 +1,36 @@
 title: "[Balance]: "
 labels: ["balance", "feedback"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Grazie per aiutarci a perfezionare il feeling arcade di **Mayonaka Cassette**!
-        Condividi le tue impressioni sulle sensazioni di guida, sulla tolleranza dei ritmi e sul bilanciamento generale.
   - type: dropdown
     id: mechanic
     attributes:
-      label: Quale meccanica o elemento desideri discutere?
+      label: Elemento da discutere
       options:
-        - Beat-shift & finestre temporali (PERFECT / GOOD)
-        - Fisica Melon Soda & Tofu Mode (sensibilità al jerk/sversamento)
-        - Tenuta, sovrasterzo e controsterzo in derapata
-        - Curva di coppia marce e velocità di punta
-        - Traffico Kei truck & tolleranza collisioni
-        - Sincronia ibrida strada-musica (Drop/Bivio)
+        - Beat-shift e finestre temporali (PERFECT / GOOD)
+        - Fisica melon soda e Tofu Mode (sensibilità al jerk e sversamento)
+        - Tenuta e controsterzo in derapata
+        - Rapporti del cambio e velocità di punta
+        - Traffico kei truck e collisioni
+        - Sincronia strada-musica (drop e bivi)
         - Altro
     validations:
       required: true
   - type: textarea
     id: current-feel
     attributes:
-      label: Come si sente attualmente durante la guida?
-      placeholder: Es. "In 3ª marcia il controsterzo fa schizzare la soda troppo facilmente..." oppure "I Kei truck spuntano troppo vicini all'uscita della curva..."
+      label: Comportamento attuale durante la guida
+      placeholder: Es. In 3ª marcia il controsterzo fa traboccare la soda troppo facilmente, oppure i kei truck compaiono troppo tardi dopo le curve cieche...
     validations:
       required: true
   - type: textarea
     id: proposed-tuning
     attributes:
-      label: Quale bilanciamento o ritocco suggerisci?
-      placeholder: Es. "Aumentare leggermente la tolleranza del GOOD su schermi a 60Hz" o "Ammorbidire lo smorzamento della soda".
+      label: Modifica suggerita
+      placeholder: Es. Aumentare la tolleranza del GOOD su schermi a 60 Hz, oppure ammorbidire lo smorzamento della soda...
     validations:
       required: false
   - type: input
     id: environment
     attributes:
-      label: Periferica e Sistema (opzionale)
-      placeholder: Es. Tastiera USB / Gamepad Xbox / Display 144Hz / Chrome su Windows
+      label: Periferica e sistema (opzionale)
+      placeholder: Es. Tastiera USB, controller Xbox, schermo 144 Hz, Chrome su Windows

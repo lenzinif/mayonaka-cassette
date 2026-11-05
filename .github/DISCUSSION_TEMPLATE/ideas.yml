@@ -1,27 +1,22 @@
 title: "[Idea]: "
 labels: ["enhancement", "idea"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Hai un'idea per rendere **Mayonaka Cassette** ancora più ricco, stiloso o divertente?
-        Condividi suggerimenti su nuove feature, biomi, arredo urbano, personalizzazioni o chicche Future Funk!
   - type: input
     id: idea-summary
     attributes:
-      label: In breve: qual è la tua proposta?
-      placeholder: Es. "Aggiungere un bioma autostradale sotto la pioggia con riflessi al neon"
+      label: Proposta in sintesi
+      placeholder: Es. Aggiungere un tracciato autostradale sotto la pioggia con riflessi al neon
     validations:
       required: true
   - type: textarea
     id: idea-details
     attributes:
-      label: Descrizione dettagliata
-      placeholder: Spiega come dovrebbe funzionare e perché si adatterebbe allo spirito arcade di Mayonaka Cassette...
+      label: Descrizione
+      placeholder: Spiega il funzionamento e come si inserisce nel gioco...
     validations:
       required: true
   - type: textarea
     id: visual-references
     attributes:
-      label: Riferimenti estetici o musicali (opzionale)
-      placeholder: Link a video, canzoni Future Funk, screenshot di anime anni '80 o vecchi arcade Sega...
+      label: Riferimenti visivi o musicali (opzionale)
+      placeholder: Link a video, brani musicali o immagini di riferimento...

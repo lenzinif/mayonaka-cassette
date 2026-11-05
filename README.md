@@ -14,28 +14,28 @@
 ## 🚦 Project Status: Playable Alpha (v0.1.0-alpha)
 
 *Mayonaka Cassette* is currently in **Playable Alpha**:
-- **Fully playable core loop:** Deterministic pseudo-3D custom canvas rasterizer, 120 Hz fixed-step physics, 4-speed beat-shift gearbox, arcade centrifugal pull and drift mechanics.
-- **Audio-reactive level generation:** Client-side Web Worker DSP analyzes uploaded songs (BPM, energy, sections) and generates a deterministic road synchronized with drops and buildups.
-- **Atmosphere & mechanics:** Dashboard Melon Soda spring-damper fluid simulation with Tofu Mode, evasive Kei truck traffic, dynamic Web Audio filter sweeps, and stage fork transitions.
-- **Next steps towards Beta:** Further pixel-art sprite expansions, enhanced CRT scanline shaders, and additional polish.
+- **Arcade core loop:** Custom pseudo-3D canvas rasterizer with 120 Hz fixed-step physics, 4-speed beat-shift gearbox, centrifugal curve pull, and tire-smoking drift handling.
+- **Audio-reactive road generator:** Client-side Web Worker DSP analyzes uploaded songs (BPM, energy, sections) and generates a deterministic highway timed to your favorite drops and buildups.
+- **Dashboard & atmosphere:** Dashboard Melon Soda spring-damper fluid simulation with Initial D-inspired Tofu Mode, evasive Kei truck traffic, dynamic Web Audio filter sweeps, and stage fork branching.
+- **Next steps towards Beta:** More roadside pixel-art scenery, custom retro biomes, and CRT scanline magic.
 
 ---
 
 ## 🎮 Play Online
 
-Experience the game directly in your browser:  
+Jump straight into the driver's seat in your browser:  
 👉 **[https://lenzinif.github.io/mayonaka-cassette/](https://lenzinif.github.io/mayonaka-cassette/)**
 
 ---
 
 ## 🌴 The Vision & Core Pillars
 
-*Mayonaka Cassette* is a **driving flow state experience**, inspired by Yu Suzuki's classic arcade ethos and the vibrant aesthetic of Japanese Future Funk:
+Inspired by Yu Suzuki's classic OutRun arcade ethos and the vibrant beat of Japanese Future Funk:
 
-1. **Feel Over Simulation:** No rigid-body physics engines. Centrifugal pull, tire slide, suspension hill cresting, and 4-speed torque curves are driven by tuned arcade formulas.
+1. **Feel Over Simulation:** No rigid-body physics engines here. Centrifugal curve pull, tire slide, suspension hill cresting, and 4-speed torque curves are driven by tuned arcade formulas.
 2. **Music Drives State, Driving Manipulates Music:** Clean drifts and high speeds open the Web Audio low-pass filter; speed drops and collisions muffle the soundscape and trigger tape pitch dips.
-3. **Protect the Flow State:** Collisions with roadside obstacles or kei trucks never stop the car dead. They deduct Groove, temporarily drop speed, muffle audio, and keep you rolling forward.
-4. **Your Music Is the Level:** Load local audio tracks to generate a deterministic, unique road track tailored to the song's energy and structure.
+3. **Protect the Flow State:** Collisions with roadside obstacles or kei trucks never stop you dead. They deduct Groove, temporarily dip speed, muffle the audio, and keep you rolling forward.
+4. **Your Music Is the Level:** Drop in your own local audio tracks to generate a deterministic, unique road tailored to the song's energy and structure.
 
 ---
 
@@ -49,14 +49,14 @@ Experience the game directly in your browser:
 | **Shift Up (Beat-Shift)** | `E` / `Space` | `Right Bumper (RB)` |
 | **Shift Down** | `Q` / `Shift` | `Left Bumper (LB)` |
 | **Pause / Resume** | `Escape` / `P` | `Start / Menu` |
-| **Debug Tuning Panel** | `F2` or `?debug` | — |
+| **Feel Tuning Panel** | `F2` or `?debug` | — |
 
 ---
 
 ## ⚙️ Architecture & Tech Stack
 
-- **Game Engine:** Pure TypeScript core (`CanvasRenderingContext2D`, 640×360 internal pixel resolution scaled with crisp nearest-neighbor raster).
-- **HUD & Overlays:** React + Tailwind CSS layered over the canvas via a throttled telemetry bridge (zero React imports in the engine render loop).
+- **Game Engine:** Pure TypeScript core rendering to an HTML5 2D canvas at 640×360 internal pixel resolution scaled with crisp nearest-neighbor raster.
+- **HUD & Overlays:** React + Tailwind CSS layered above the canvas via a throttled telemetry bridge at 15 Hz (zero React imports in the engine render loop).
 - **Audio & DSP:** Native Web Audio API (`AudioContext`, `BiquadFilterNode`, master beat clock) with client-side Web Worker DSP for offline track analysis.
 - **Physics & Details:**
   - Spring-damper liquid simulation for the dashboard Melon Soda.
@@ -86,7 +86,7 @@ npm run dev
 
 ### Quality & Tests
 ```bash
-# Run ESLint, 70+ Vitest unit tests, and Vite production build
+# Run ESLint, 90+ Vitest unit tests, and Vite production build
 npm run check
 ```
 
@@ -94,7 +94,7 @@ npm run check
 
 ## 🗺️ Roadmap & Development Plan
 
-Looking to see what's planned next? Check out the full [Project Roadmap & TODO List](docs/ROADMAP.md) detailing planned HUD overhauls, new roadside assets, environments, feedback pipelines, performance tuning, and audiovisual "funkier" enhancements.
+Curious about what's coming down the road? Check out the full [Roadmap & Task List](docs/ROADMAP.md) detailing planned VFD digidash overhauls, roadside vending machines, Shuto expressway biomes, and tape-deck audio flair.
 
 ---
 
@@ -104,7 +104,7 @@ Player feedback drives the evolution of *Mayonaka Cassette*! Join our [GitHub Di
 
 - 💡 **[Ideas & Feature Requests](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=ideas):** Suggest new biomes, roadside scenery, or arcade features.
 - ⚖️ **[Gameplay & Balance Tuning](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=gameplay-balance):** Share thoughts on handling feel, beat-shift timing windows, or Melon Soda physics.
-- 🎵 **[Music & Road Generation](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=music-and-tracks):** Tell us which tracks generated epic roads and share custom beatmaps.
+- 🎵 **[Music & Road Generation](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=music-and-tracks):** Tell us which tracks generated great roads and share custom beatmaps.
 - 🐛 **[Bug Reports](https://github.com/lenzinif/mayonaka-cassette/issues/new?template=bug_report.yml):** Report glitches or browser compatibility issues.
 
 ---

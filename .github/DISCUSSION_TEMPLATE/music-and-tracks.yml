@@ -1,29 +1,24 @@
 title: "[Track]: "
 labels: ["music", "beatmap", "road-generation"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Hai importato i tuoi brani in **Mayonaka Cassette**?
-        Facci sapere quali canzoni hanno generato piste spettacolari e quali invece hanno avuto problemi di rilevamento BPM o sincronia!
   - type: input
     id: song-title-artist
     attributes:
-      label: Titolo del brano e Artista
-      placeholder: Es. "Macross 82-99 - Fun Tonight"
+      label: Titolo del brano e artista
+      placeholder: Es. Macross 82-99 - Fun Tonight
     validations:
       required: true
   - type: input
     id: detected-bpm
     attributes:
-      label: BPM rilevato vs BPM reale (se noto)
-      placeholder: Es. "Rilevato 124 BPM (corretto)" oppure "Rilevato a metà tempo (62 BPM invece di 124)"
+      label: BPM rilevato rispetto al BPM reale (se noto)
+      placeholder: Es. Rilevato a 124 BPM (corretto), oppure a 62 BPM anziché 124
     validations:
       required: false
   - type: textarea
     id: road-feel
     attributes:
-      label: Come si comporta la strada generata?
-      placeholder: Es. "La discesa sul drop al minuto 1:15 è perfetta!" oppure "Le curve nel breakdown sono troppo frequenti..."
+      label: Comportamento della strada generata
+      placeholder: Es. La discesa sul drop al minuto 1:15 coincide bene; le curve nel breakdown risultano troppo strette...
     validations:
       required: true

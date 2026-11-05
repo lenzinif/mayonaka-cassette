@@ -127,7 +127,7 @@ export function TrackLoader({
               CASSETTE DECK // STAGE SOUNDTRACK
             </div>
             <h2 className="text-sm font-bold tracking-wider text-white uppercase">
-              Load Your Music (Local MP3 / WAV / OGG / FLAC)
+              Load Music (MP3 / WAV / OGG / FLAC)
             </h2>
           </div>
           <button
@@ -150,11 +150,10 @@ export function TrackLoader({
             }`}
           >
             <div className="text-xs font-semibold text-cyan-200">
-              DRAG &amp; DROP AUDIO FILES HERE — OR PICK FROM DISK
+              DRAG &amp; DROP AUDIO FILES HERE, OR PICK FROM DISK
             </div>
             <p className="text-[11px] text-fuchsia-300/75">
-              Decoded &amp; analysed 100% locally in a Web Worker. Cached by SHA-256 hash in
-              IndexedDB.
+              Decoded and analysed locally in a Web Worker, cached in IndexedDB.
             </p>
             <input
               type="file"
@@ -276,7 +275,7 @@ export function TrackLoader({
                 type="button"
                 onClick={handleRestoreDefaults}
                 className="cursor-pointer text-[10px] tracking-wider text-fuchsia-400/80 hover:text-cyan-300 transition uppercase"
-                title="Ripristina la playlist con le 3 tracce Future Funk predefinite"
+                title="Ripristina le tracce predefinite della playlist"
               >
                 RESTORE DEFAULTS
               </button>

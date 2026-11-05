@@ -158,7 +158,7 @@ export function HUD({
       } else if (event.type === 'tofuModeToggled') {
         showToast(
           event.active
-            ? 'TOFU MODE ON // x2 GROOVE — KEEP IT SMOOTH!'
+            ? 'TOFU MODE ON // x2 GROOVE (KEEP IT SMOOTH)'
             : 'TOFU MODE OFF',
           2000,
           event.active ? 'emerald' : 'cyan',
@@ -506,7 +506,7 @@ export function HUD({
                 {gamepadConnected && (
                   <span
                     className="rounded border border-emerald-400/50 bg-emerald-950/90 px-1 py-0.2 text-[9px] font-black text-emerald-300"
-                    title="Controller Gamepad connesso e attivo"
+                    title="Gamepad connesso"
                   >
                     GP
                   </span>
@@ -525,7 +525,7 @@ export function HUD({
                     ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
                     : 'border-cyan-400/40 bg-[#120329]/85 text-cyan-200 hover:border-cyan-300'
                 }`}
-                title="Attiva o disattiva il mini profiler arcade a schermo [F3]"
+                title="Profiler prestazioni [F3]"
               >
                 PERF [F3]
               </button>
@@ -538,7 +538,7 @@ export function HUD({
                   e.currentTarget.blur();
                 }}
                 className="pointer-events-auto flex h-7 w-full cursor-pointer items-center justify-center rounded border border-cyan-400/40 bg-[#120329]/85 px-2.5 py-0.5 tracking-wider text-cyan-200 whitespace-nowrap transition hover:border-pink-400 hover:text-pink-200"
-                title="Nascondi i menu e i tasti non necessari durante la corsa [H]"
+                title="Modalità HUD essenziale [H]"
               >
                 CLEAN HUD [H]
               </button>
@@ -551,7 +551,7 @@ export function HUD({
                   e.currentTarget.blur();
                 }}
                 className="pointer-events-auto flex h-7 w-full cursor-pointer items-center justify-center rounded border border-cyan-400/40 bg-[#120329]/85 px-2.5 py-0.5 tracking-wider text-cyan-200 whitespace-nowrap transition hover:border-pink-400 hover:text-pink-200"
-                title="Carica tracce musicali locali o playlist [M]"
+                title="Gestione tracce e playlist [M]"
               >
                 LOAD TRACK [M]
               </button>
@@ -568,7 +568,7 @@ export function HUD({
                     ? 'animate-pulse border-pink-500 bg-pink-950/90 text-pink-200 shadow-[0_0_14px_rgba(255,42,109,0.6)]'
                     : 'border-fuchsia-400/55 bg-[#1b0538]/90 text-fuchsia-200 hover:border-pink-400 hover:text-pink-200'
                 }`}
-                title="Metti in pausa e apri il menu di pausa [P] / [ESC]"
+                title="Pausa [P] o [ESC]"
               >
                 {isPaused ? 'RESUME [P]' : 'PAUSE [P]'}
               </button>
@@ -585,7 +585,7 @@ export function HUD({
                     ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
                     : 'border-cyan-400/40 bg-[#120329]/85 text-cyan-200 hover:border-emerald-400 hover:text-emerald-300'
                 }`}
-                title="Modalità Tofu Cup: x2 Groove moltiplicatore [T]"
+                title="Modalità Tofu (Groove x2) [T]"
               >
                 {tofuMode ? `TOFU ×2 (${sodaSpills}) [T]` : 'TOFU MODE [T]'}
               </button>
@@ -598,7 +598,7 @@ export function HUD({
                   e.currentTarget.blur();
                 }}
                 className="pointer-events-auto flex h-7 w-full cursor-pointer items-center justify-center rounded border border-cyan-400/40 bg-[#120329]/85 px-2.5 py-0.5 tracking-wider text-cyan-200 whitespace-nowrap transition hover:border-amber-300 hover:text-amber-200"
-                title="Cambia skin della bibita sul cruscotto [V]"
+                title="Cambia bicchiere [V]"
               >
                 SKIN: {SODA_SKIN_LABELS[sodaSkin]} [V]
               </button>
@@ -615,7 +615,7 @@ export function HUD({
                     ? 'border-cyan-400 bg-cyan-950/90 text-cyan-200 shadow-[0_0_10px_rgba(5,217,232,0.4)]'
                     : 'border-cyan-400/40 bg-[#120329]/85 text-cyan-200 hover:border-cyan-300'
                 }`}
-                title="Attiva o disattiva il cambio automatico assistito [G]"
+                title="Cambio automatico o manuale [G]"
               >
                 {autoShift ? 'AUTO-SHIFT [G]' : 'MANUAL GEAR [G]'}
               </button>
@@ -632,7 +632,7 @@ export function HUD({
                     ? 'border-pink-500 bg-pink-950/90 text-pink-200 shadow-[0_0_10px_rgba(255,42,109,0.4)]'
                     : 'border-cyan-400/40 bg-[#120329]/85 text-cyan-200 hover:border-cyan-300'
                 }`}
-                title="Pannello di tuning fisica e guida [F2]"
+                title="Regolazione parametri di guida [F2]"
               >
                 {debugOpen ? 'CLOSE TUNING [F2]' : 'TUNING [F2]'}
               </button>
@@ -645,7 +645,7 @@ export function HUD({
                   e.currentTarget.blur();
                 }}
                 className="pointer-events-auto flex h-7 w-full cursor-pointer items-center justify-center rounded border border-cyan-400/40 bg-[#120329]/85 px-2.5 py-0.5 tracking-wider text-cyan-200 whitespace-nowrap transition hover:border-fuchsia-400 hover:text-fuchsia-200"
-                title="Analizzatore BeatMap DSP (?analyze)"
+                title="Ispettore BeatMap (?analyze)"
               >
                 ANALYZE
               </button>

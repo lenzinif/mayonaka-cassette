@@ -1,144 +1,117 @@
-# 真夜中Cassette (Mayonaka Cassette) — Roadmap & TODO List
+# 真夜中Cassette (Mayonaka Cassette): roadmap e attività
 
-Documento strategico per l'evoluzione di *Mayonaka Cassette* dallo stato attuale (**Playable Alpha v0.1.0-alpha**) verso la **Beta** e il rilascio finale.
-
----
-
-## 📑 Indice dei Macro-Obiettivi
-
-1. [HUD Overhaul (Rifacimento Plancia & Interfaccia)](#1-hud-overhaul-rifacimento-plancia--interfaccia)
-2. [Nuovi Asset nei Chunk di Strada (Roadside Props)](#2-nuovi-asset-nei-chunk-di-strada-roadside-props)
-3. [Nuovi Ambienti & Biomi (Theme Expansion)](#3-nuovi-ambienti--biomi-theme-expansion)
-4. [Feedback & Balance Pipeline (Ascolto dei Giocatori)](#4-feedback--balance-pipeline-ascolto-dei-giocatori)
-5. [Ottimizzazione Performance & Rendering](#5-ottimizzazione-performance--rendering)
-6. [Nuove Feature di Gameplay & Progressione](#6-nuove-feature-di-gameplay--progressione)
-7. [Funkier (Juice, Audio-Visual Flair & Tape Magic)](#7-funkier-juice-audio-visual-flair--tape-magic)
+Piano di sviluppo per portare il gioco dalla versione alpha attuale (v0.1.0-alpha) alla beta e al rilascio.
 
 ---
 
-## 1. HUD Overhaul (Rifacimento Plancia & Interfaccia)
+## Indice
 
-*Terminologia tecnica:* **HUD Overhaul** (o **HUD Redesign** se puramente estetico). Nel contesto di un arcade driving game anni '80, l'overhaul prevede sia il restyling visivo diegetico sia la separazione ottimizzata della pipeline di telemetria.
-
-- [ ] **Stile Plancia Anni '80 (VFD / LED fluorescente):**
-  - Tachimetro e contagiri (RPM) ridisegnati con grafica a segmenti digitali verdi/turchese brillante tipici delle cruscotti digitali giapponesi anni '80 (es. Toyota Soarer / Subaru XT / Testarossa).
-  - Indicatore di marcia gigante con animazione retroilluminata per il beat-shift.
-- [ ] **Cassette Tape Groove Meter Diegetico:**
-  - Trasformare la barra del Groove in una vera musicassetta illustrata in pixel art: le bobine del nastro girano più velocemente all'aumentare della velocità e del tier di Groove (`LOW`, `MEDIUM`, `HIGH`, `SSS`).
-  - Effetto nastro srotolato o nastro allentato nei momenti di impatto o caduta di Groove.
-- [ ] **Feedback Ritmico Visivo Integrato:**
-  - Flash di giudizio (`PERFECT`, `GOOD`, `EARLY`, `LATE`) posizionati in modo più leggibile senza ostruire la linea visiva della strada (ad esempio sui montanti del cruscotto o sul quadrante marce).
-  - Beat-pulse discreto che fa pulsare la cornice dell'HUD a tempo di cassa/kick.
-- [ ] **Layout Modulare & Scalabilità Display:**
-  - Ottimizzazione per display ultrawide (21:9) e schermi ridotti (modalità finestra / tablet), mantenendo il canvas a 640×360 centrato e scalato con integer scaling (`pixelated`).
-  - Opzione per HUD "minimal" o "cinema" (toggle per nascondere tutto e godersi la guida).
+1. [Rifacimento plancia e HUD](#1-rifacimento-plancia-e-hud)
+2. [Nuovi elementi a bordo strada](#2-nuovi-elementi-a-bordo-strada)
+3. [Nuovi ambienti e biomi](#3-nuovi-ambienti-e-biomi)
+4. [Raccolta feedback e bilanciamento](#4-raccolta-feedback-e-bilanciamento)
+5. [Prestazioni e rendering](#5-prestazioni-e-rendering)
+6. [Meccaniche di gioco e progressione](#6-meccaniche-di-gioco-e-progressione)
+7. [Dettagli visivi e sonori](#7-dettagli-visivi-e-sonori)
 
 ---
 
-## 2. Nuovi Asset nei Chunk di Strada (Roadside Props)
+## 1. Rifacimento plancia e HUD
 
-Espansione della varietà visiva degli ostacoli e delle decorazioni a bordo carreggiata, arricchendo i `RoadChunks`:
+Ridisegnare il cruscotto con elementi grafici anni '80 e ottimizzare la telemetria a schermo.
 
-- [ ] **Insegne al Neon & Cartelloni Pubblicitari Retro:**
-  - Cartelloni luminosi con finte pubblicità Future Funk/Vaporwave: brand di bevande gassate giapponesi, sintetizzatori vintage (Roland, Korg), marchi di cassette vergini (Maxell, TDK).
-  - Varianti animate o a sequenza di colori neon sincronizzate con l'illuminazione notturna.
-- [ ] **Arredo Urbano Autostradale Giapponese:**
-  - Distributori automatici giapponesi (Jihanki) illuminati a bordo strada su marciapiedi sopraelevati.
-  - Cabine telefoniche verdi illuminate al neon, guardrail metallici continui nelle curve tecniche da drift.
-  - Lampioni autostradali Shuto Expressway ad arco, con pali che sfilano fluidamente a ritmo.
-- [ ] **Tunnel & Sovrappassi:**
-  - Chunk di strada con gallerie e sottopassi illuminati da luci stroboscopiche arancioni/gialle a ritmo di musica.
-- [ ] **Varietà del Traffico AI:**
-  - Oltre al Kei Truck: berline anni '80 (es. silhouette squadrata stile Toyota Mark II/Chaser), furgoncini di consegne notturne, motociclette veloci con scia di luce posteriore stile cyberpunk.
-
----
-
-## 3. Nuovi Ambienti & Biomi (Theme Expansion)
-
-Oltre al tramonto synthwave base, introduzione di temi e palette distinte caricate o alternate durante i cambi di stage / canzoni:
-
-- [ ] **Bioma 1: Tokyo Midnight Expressway (Shuto / Wangan):**
-  - Sfondo con skyline denso di grattacieli con finestre accese pixelate, torri di trasmissione rosse lampeggianti, asfalto scuro con riflessi blu/viola.
-- [ ] **Bioma 2: Sunset Coastal Highway (Enoshima / Pacific Coast):**
-  - Tramonto arancione e magenta, sole basso a strisce, filari di palme tropicali e mare con gradiente a onde riflesso in pseudo-3D sul lato strada.
-- [ ] **Bioma 3: Mount Haruna / Touge Notturno:**
-  - Strada montuosa alberata con pini scuri, tornanti tecnici, nebbia viola volumetrica sui picchi montani e cielo stellato limpido con luna piena.
-- [ ] **Bioma 4: Cyber Megacity Rainy Run:**
-  - Asfalto lucido con effetto bagnato (specular reflection delle luci), pioggia leggera stilizzata e atmosfera club sotterranea.
-- [ ] **Palette Transitions:**
-  - Dissolvenza e interpolazione morbida dei colori cielo/orizzonte durante le transizioni di stage tra brani.
+- [ ] Stile plancia anni '80 (display fluorescente VFD):
+  - Tachimetro e contagiri a segmenti digitali verdi e turchesi, ispirati ai cruscotti giapponesi dell'epoca (Toyota Soarer, Subaru XT).
+  - Indicatore di marcia retroilluminato per il beat-shift.
+- [ ] Indicatore del Groove a cassetta:
+  - Disegnare la barra del Groove come una musicassetta in pixel art, con le bobine che ruotano a seconda della velocità e del livello di Groove (`LOW`, `MEDIUM`, `HIGH`, `SSS`).
+  - Animazione del nastro allentato in caso di impatto o calo di Groove.
+- [ ] Indicatori di ritmo:
+  - Riposizionare i giudizi (`PERFECT`, `GOOD`, `EARLY`, `LATE`) sui montanti o vicino alle marce, lasciando libera la visuale della strada.
+  - Leggero impulso visivo sulla cornice a tempo di cassa.
+- [ ] Adattabilità dello schermo:
+  - Supporto per display ultrawide (21:9) e finestre ridotte, mantenendo il canvas a 640×360 centrato con integer scaling.
+  - Tasto rapido per nascondere l'HUD e guidare a schermo pulito.
 
 ---
 
-## 4. Feedback & Balance Pipeline (Ascolto dei Giocatori)
+## 2. Nuovi elementi a bordo strada
 
-Come strutturare e gestire il ciclo di feedback della community per bilanciare le meccaniche di guida e audio:
+Aggiungere varietà agli ostacoli e alle decorazioni nei `RoadChunks`:
 
-### Canali di Raccolta
-- [ ] **In-Game Quick Feedback Button:**
-  - Pulsante non invasivo nel menu di pausa (`Escape`) e nella schermata finale del voto (`GradeScreen`): *"Invia Feedback / Segnala Bug"*.
-  - Apre un form leggero (Tally.so o Google Form) o indirizza a GitHub Issues pre-compilato.
-  - **Inclusione automatica di telemetria anonima nei parametri URL:** browser/OS, risoluzione schermo, FPS medio della sessione, titolo/BPM del brano giocato, Tofu Mode on/off.
-- [ ] **GitHub Discussions Hub:**
-  - Categorie dedicate sul repository:
-    - 💡 *Idee & Nuove Meccaniche*
-    - ⚖️ *Bilanciamento (Fisica, Drift, Beat-Shift, Melon Soda)*
-    - 🎵 *Canzoni & Analisi Audio (brani che generano piste perfette vs tracce problematiche)*
-    - 🐛 *Bug Report & Performance*
-- [ ] **Community Discord / Forum:**
-  - Canale per condividere screenshot dei punteggi SSS, registrazioni di derapate e consigli sui brani musicali migliori.
-
-### Aree di Bilanciamento Primarie
-- [ ] **Tolleranza Beat-Shift:**
-  - Validare se le finestre attuali (±50ms `PERFECT`, ±100ms `GOOD`) risultano troppo severe o permissive con tastiere economiche o controller Bluetooth con latenza variabile.
-- [ ] **Sensibilità al Jerk della Melon Soda (Tofu Mode):**
-  - Calibrare la soglia di sversamento: una bella derapata continua deve inclinare la soda senza versarla; cambi bruschi di direzione o frenate da panico devono farla traboccare.
-- [ ] **Aggressività del Traffico:**
-  - Regolare distanza di avvistamento e velocità dei Kei truck per evitare collisioni inevitabili in uscita da curve cieche.
-- [ ] **Passo Ibrido Spazio-Tempo (A1/A2):**
-  - Continuare a calibrare la velocità di riferimento e il fattore elastico per fare in modo che sia il giocatore cauto che quello aggressivo arrivino all'orizzonte sincronizzati col drop.
+- [ ] Insegne al neon e cartelloni:
+  - Cartelloni con finte pubblicità vaporwave: bibite giapponesi, sintetizzatori vintage (Roland, Korg), cassette a nastro (Maxell, TDK).
+  - Varianti con luci neon animate a ritmo di musica.
+- [ ] Arredo autostradale giapponese:
+  - Distributori automatici (jihanki) illuminati a bordo strada.
+  - Cabine telefoniche verdi e guardrail continui lungo le curve da drift.
+  - Lampioni ad arco della Shuto Expressway che sfilano a tempo.
+- [ ] Gallerie e sovrappassi:
+  - Sottopassi e tunnel con luci stroboscopiche arancioni o gialle.
+- [ ] Varietà nel traffico:
+  - Nuovi veicoli oltre al kei truck: berline squadrate anni '80, furgoni per le consegne e motociclette con scia luminosa.
 
 ---
 
-## 5. Ottimizzazione Performance & Rendering
+## 3. Nuovi ambienti e biomi
 
-- [ ] **Zero-Allocation Canvas Loop Audit:**
-  - Verificare costantemente che nessun frame generi garbage collection (array temporanei, oggetti point `Vector2/3`, stringhe generate dinamicamente nei loop di rendering `RoadRenderer.render`).
-- [ ] **Supporto Monitor High-Refresh Rate (120Hz, 144Hz, 240Hz):**
-  - Ottimizzare il rendering a frame rate sbloccato garantendo che l'interpolazione temporale `alpha` di `FixedStepper` azzeri qualsiasi micro-stuttering o jittering dell'auto e della telecamera.
-- [ ] **Sprite Batching & Cache Off-Screen:**
-  - Pre-renderizzare e scalare i poligoni e gli elementi decorativi statici su offscreen canvas prima di blittarli durante il Painter's Algorithm.
-- [ ] **Memory Management Playlist Lunghe:**
-  - Rilasciare i buffer PCM o gestire una cache LRU per sessioni di gioco prolungate con dozzine di brani importati.
+Aggiungere scenari alternativi caricati tra una canzone e l'altra o al cambio di stage:
 
----
-
-## 6. Nuove Feature di Gameplay & Progressione
-
-- [ ] **Ghost Car / Replay del Miglior Giro:**
-  - Visualizzare l'auto fantasma semitrasparente che riproduce la traiettoria e la velocità del record personale sulla traccia corrente.
-- [ ] **Cassette Collection & Album Cover Art:**
-  - Creare un "Cassette Rack" virtuale nel menu dove ogni traccia completata con grado S o SSS riceve una cassetta personalizzata con etichetta pixel art generata dal titolo del brano.
-- [ ] **Personalizzazione Estetica Auto:**
-  - Selezione del colore della carrozzeria della vettura (Testarossa rosso corsa, bianco perla, viola synthwave, nero notte) e varianti di cerchi.
-- [ ] **Zen / Cruise Mode:**
-  - Modalità rilassata opzionale: collisioni e sversamenti disattivati, cambio marce automatico, per guidare ascoltando la propria musica in puro flow-state contemplativo.
-- [ ] **Biforcazioni di Stage Avanzate:**
-  - Rendere le due strade del bivio visivamente e tematicamente differenti (es. biforcazione a sinistra: rampa sopraelevata panoramica; biforcazione a destra: tunnel sotterraneo).
+- [ ] Tokyo Midnight Expressway (Shuto / Wangan): skyline con grattacieli pixelati, luci rosse sulle torri di trasmissione e asfalto scuro con riflessi blu e viola.
+- [ ] Sunset Coastal Highway: costa al tramonto arancione e magenta, sole basso a strisce, palme e gradiente marino.
+- [ ] Mount Haruna / Touge notturno: strada di montagna tra i pini, tornanti stretti, nebbia viola sui crinali e luna piena.
+- [ ] Cyber Megacity: asfalto bagnato con riflessi di luce, pioggia leggera e atmosfera notturna.
+- [ ] Transizioni di palette: dissolvenza graduale dei colori tra cielo e orizzonte durante il passaggio tra i brani.
 
 ---
 
-## 7. Funkier (Juice, Audio-Visual Flair & Tape Magic)
+## 4. Raccolta feedback e bilanciamento
 
-Migliorare l'impatto emotivo, il ritmo e l'atmosfera "Future Funk" (il cosiddetto *game juice*):
+Strumenti per raccogliere impressioni di guida e bilanciare la fisica:
 
-- [ ] **Tape Audio Wow & Flutter:**
-  - Nelle curve al limite o quando si subisce un urto con un guardrail, oltre al muffle del filtro passa-basso, introdurre una leggera ondulazione di pitch tipica di un registratore a nastro portatile con le pile scariche.
-- [ ] **Audio-Reactive Scenery Pulse:**
-  - Grattacieli, stelle e insegne al neon dell'orizzonte che pulsano di luminosità in sincrono con i bassi e la cassa della traccia audio.
-- [ ] **DJ Scratch & Backspin alle Biforcazioni:**
-  - Quando si imbocca una diramazione al bivio di fine canzone, accompagnare il crossfade con un effetto sonoro analogico di scratch o reverse tape rewind per accentuare il passaggio al nuovo brano.
-- [ ] **Particelle al Neon:**
-  - Fumo rosa/turchese dalle gomme in derapata ad alto Groove.
-  - Scintille dal fondo della scocca quando la macchina scollina bruscamente da una discesa ripida.
-  - Gocce di soda fluorescente che lasciano un breve alone semitrasparente sul parabrezza prima di evaporare.
+### Canali di raccolta
+- [ ] Pulsante rapido per il feedback:
+  - Voce nel menu di pausa (`Escape`) e nella schermata di fine corsa per inviare commenti o aprire una issue precompilata su GitHub.
+  - Inclusione di dati tecnici utili nei parametri URL: browser, risoluzione, framerate medio, brano giocato e stato della modalità Tofu.
+- [ ] Spazi di discussione:
+  - Categorie dedicate su GitHub Discussions per nuove idee, bilanciamento del modello di guida, analisi dei brani e bug.
+  - Canale della community per condividere punteggi, registrazioni e consigli sui brani.
+
+### Bilanciamento prioritario
+- [ ] Finestre di beat-shift: verificare se le tolleranze attuali (±50 ms per `PERFECT`, ±100 ms per `GOOD`) funzionano bene anche con tastiere economiche o controller wireless con latenza variabile.
+- [ ] Sensibilità della melon soda (Tofu Mode): regolare la soglia in modo che una derapata controllata inclini il bicchiere senza farlo traboccare, punendo solo cambi bruschi di traiettoria e frenate improvvise.
+- [ ] Traffico: regolare distanza di avvistamento e velocità dei furgoncini per evitare impatti inevitabili all'uscita delle curve cieche.
+- [ ] Passo ibrido spazio-tempo: affinare la velocità di riferimento e il riallineamento elastico per far coincidere lo scollinamento con il drop sia per chi guida pulito sia per chi rallenta.
+
+---
+
+## 5. Prestazioni e rendering
+
+- [ ] Controllo delle allocazioni nel loop di rendering: assicurarsi che nessun fotogramma crei oggetti temporanei (vettori, array o stringhe) durante `RoadRenderer.render`.
+- [ ] Supporto per frequenze elevate (120 Hz, 144 Hz, 240 Hz): mantenere l'interpolazione temporale in `FixedStepper` priva di scatti o tremolii della telecamera a framerate elevati.
+- [ ] Disegno e cache off-screen: pre-renderizzare forme ed elementi statici su canvas secondari per velocizzare la composizione.
+- [ ] Gestione della memoria per playlist lunghe: liberare i buffer audio non utilizzati o implementare una cache per sessioni prolungate con molti brani.
+
+---
+
+## 6. Meccaniche di gioco e progressione
+
+- [ ] Auto fantasma: mostrare una sagoma semitrasparente che ripercorre traiettoria e tempi del proprio record personale sulla traccia.
+- [ ] Raccolta cassette: schermata dedicata in cui ogni brano completato con grado S o SSS assegna una cassetta personalizzata in pixel art con il titolo del brano.
+- [ ] Colori della vettura: selezione della livrea (rosso corsa, bianco perla, viola o nero) e varianti di cerchioni.
+- [ ] Modalità crociera (Zen): guida rilassata senza collisioni né sversamenti, con cambio automatico, per ascoltare la musica senza penalità.
+- [ ] Bivi di percorso differenziati: rendere le due diramazioni visivamente distinte, ad esempio una rampa panoramica sopraelevata a sinistra e un sottopasso a destra.
+
+---
+
+## 7. Dettagli visivi e sonori
+
+Dettagli per rafforzare l'atmosfera retro e il ritmo:
+
+- [ ] Effetto nastro rovinato (wow e flutter): aggiungere una leggera oscillazione di tonalità tipica delle cassette usurate quando si urta un guardrail o si esce di strada.
+- [ ] Scenari reattivi alla musica: grattacieli, stelle e insegne che pulsano in sincrono con i bassi e la cassa della traccia.
+- [ ] Scratch e riavvolgimento ai bivi: accompagnare il cambio di brano al bivio con un breve effetto di scratch o nastro che si riavvolge.
+- [ ] Particelle al neon:
+  - Fumo color magenta e turchese dalle gomme durante le derapate ad alto Groove.
+  - Scintille dal fondo piatto quando l'auto tocca l'asfalto al termine di una discesa ripida.
+  - Gocce di soda che lasciano un alone temporaneo sul parabrezza prima di svanire.

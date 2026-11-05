@@ -1,16 +1,12 @@
-name: 🐛 Segnalazione Bug
-description: Segnala un bug, glitch visivo o problema tecnico durante il gioco.
+name: Segnalazione bug
+description: Segnala un malfunzionamento, un difetto visivo o un problema tecnico.
 labels: ["bug"]
 body:
-  - type: markdown
-    attributes:
-      value: |
-        Grazie per segnalare un bug in **Mayonaka Cassette**!
   - type: textarea
     id: bug-description
     attributes:
       label: Cosa è successo?
-      placeholder: Descrivi chiaramente cosa si è verificato e cosa ti aspettavi invece che accadesse...
+      placeholder: Descrivi il problema e il comportamento atteso...
     validations:
       required: true
   - type: textarea
@@ -26,12 +22,12 @@ body:
   - type: input
     id: environment
     attributes:
-      label: Browser e Sistema Operativo
-      placeholder: Es. Chrome 124 su Windows 11 / Firefox su macOS / Schermo 144Hz
+      label: Browser e sistema operativo
+      placeholder: Es. Chrome 124 su Windows 11, display 144 Hz
     validations:
       required: true
   - type: textarea
     id: console-errors
     attributes:
-      label: Errori nella console del browser (F12) se presenti
+      label: Eventuali errori nella console (F12)
       render: shell
