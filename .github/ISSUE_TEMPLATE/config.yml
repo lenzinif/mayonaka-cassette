@@ -4,8 +4,12 @@ contact_links:
     url: https://github.com/lenzinif/mayonaka-cassette/discussions
     about: Unisciti alla community per discutere di gameplay, condividere record e consigliare brani musicali.
   - name: 💡 Idee & Nuove Funzionalità
-    url: https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=ideas
+    url: https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=ideas-feature-requests
     about: Proponi nuove idee, biomi, arredo urbano e chicche Future Funk.
   - name: ⚖️ Bilanciamento & Guida
     url: https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=gameplay-balance
     about: Condividi il tuo feedback sulle sensazioni di guida, tolleranze del beat-shift e fisica della Melon Soda.
+  - name: 🎵 Brani & Tracciati
+    url: https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=music-tracks
+    about: Condividi brani che generano tracciati spettacolari e scambia beatmap personalizzati.
+

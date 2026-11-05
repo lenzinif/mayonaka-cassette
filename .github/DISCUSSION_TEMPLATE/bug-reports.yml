@@ -1,0 +1,26 @@
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### 🐛 Segnalazione Bug
+        Per consentirci di riprodurre, tracciare e correggere rapidamente i problemi tecnici, ti invitiamo a utilizzare il nostro **Issue Tracker** ufficiale:
+
+        👉 **[Apri una Segnalazione Bug su GitHub Issues](https://github.com/lenzinif/mayonaka-cassette/issues/new?template=bug_report.yml)**
+
+        Se invece preferisci parlarne qui con la community prima di aprire un ticket, puoi compilare i campi sottostanti.
+  - type: textarea
+    id: bug-summary
+    attributes:
+      label: Descrizione del problema
+      placeholder: Cosa è successo e cosa ti saresti aspettato invece?
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Browser e dispositivo (opzionale)
+      placeholder: Es. Chrome 124 su Windows 11, schermo 144 Hz
+    validations:
+      required: false

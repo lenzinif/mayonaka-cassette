@@ -487,9 +487,10 @@ export class FunkAudioEngine {
     beatMap: BeatMap,
     audioBuffer: AudioBuffer | null = null,
     crossfadeBars = 4,
+    forceRestart = false,
   ): number {
-    // Avoid restarting an identical crossfade if already crossfading into this exact song
-    if (this.isCrossfading && this.beatClock.map.contentHash === beatMap.contentHash) {
+    // Avoid restarting an identical crossfade if already crossfading into this exact song (unless forceRestart is true)
+    if (!forceRestart && this.isCrossfading && this.beatClock.map.contentHash === beatMap.contentHash) {
       return this.crossfadeTotalSec;
     }
 
@@ -824,9 +825,13 @@ export class FunkAudioEngine {
         this.startSourceNode(this.virtualTrackSec, 0.08);
       }
     } else {
+      const wasHoldingOutro = this.outroLoopHolding;
       this.virtualTrackSec %= dur;
       this.outroLoopHolding = false;
       this.beatClock.resetCrossingState();
+      if (wasHoldingOutro && this.ctx && this.ctx.state === 'running' && !this.isSynthLoopBuffer) {
+        this.startSourceNode(this.virtualTrackSec, 0.08);
+      }
     }
   }
 

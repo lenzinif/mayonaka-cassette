@@ -111,12 +111,14 @@ const DEFAULT_FORK_CROSS_SECTION: ForkCrossSection = {
 export function getChosenForkCenter(t: number, choice: 'left' | 'right' = 'right'): number {
   const sign = choice === 'left' ? -1 : 1;
   if (t <= 0.18) {
-    return sign * 0.5;
+    const p = t / 0.18;
+    const pEase = p * p * (3 - 2 * p);
+    return sign * (0.58 + (0.60 - 0.58) * pEase);
   }
   if (t <= 0.65) {
     const split = (t - 0.18) / (0.65 - 0.18);
     const splitEase = split * split * (3 - 2 * split);
-    return sign * (0.5 + 0.6 * splitEase);
+    return sign * (0.60 + 0.50 * splitEase);
   }
   // Phase 3: Smooth convergence from ±1.10 down to 0.00 at finish line
   const u = (t - 0.65) / 0.35;
@@ -129,10 +131,14 @@ export function getChosenForkCenter(t: number, choice: 'left' | 'right' = 'right
  */
 export function getChosenForkHalfWidth(t: number): number {
   if (t <= 0.18) {
-    return 1.0 + (t / 0.18) * 0.2;
+    const p = t / 0.18;
+    const pEase = p * p * (3 - 2 * p);
+    return 0.58 + (0.60 - 0.58) * pEase;
   }
   if (t <= 0.65) {
-    return 0.58;
+    const split = (t - 0.18) / (0.65 - 0.18);
+    const splitEase = split * split * (3 - 2 * split);
+    return 0.60 - 0.02 * splitEase;
   }
   // Phase 3: Smoothly expands from 0.58 back to standard road half-width 1.00
   const u = (t - 0.65) / 0.35;
@@ -175,7 +181,7 @@ export function getForkCrossSection(
     const outerLimit = 1.0 + (t / 0.18) * 0.2;
     out.outerLimit = outerLimit;
     out.innerGap = 0;
-    out.branchCenter = 0.5;
+    out.branchCenter = Math.abs(getChosenForkCenter(t, forkChoice));
     out.activeLeftEdge = -outerLimit;
     out.activeRightEdge = outerLimit;
     out.recenterProgress = 0;

@@ -1,5 +1,10 @@
 name: Deploy Mayonaka Cassette to GitHub Pages
 
+# Production Deployment Pipeline:
+# This workflow deploys the live static site to GitHub Pages (https://lenzinif.github.io/mayonaka-cassette/).
+# In accordance with our release strategy, deployment is triggered EXCLUSIVELY on merges into `main`
+# (or manual dispatch). Development and feature integration occur on `develop` and do NOT trigger deploy.
+
 on:
   push:
     branches:

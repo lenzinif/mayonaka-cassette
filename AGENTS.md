@@ -27,6 +27,15 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 - **User Audio Privacy:** User-loaded files are decoded and analysed entirely client-side. They are never uploaded, sent over the network, or bundled. No streaming-service integrations (Spotify, YouTube, Apple Music) — DRM and ToS make them out of scope.
 - **`@src/ui/` (React Overlay):** Subscribes to engine telemetry via a throttled pub/sub bridge (`TELEMETRY_HZ = 15` Hz updates or discrete state changes like Groove milestones/stage forks). **NEVER trigger React state updates on every `requestAnimationFrame` tick.**
 
+### Git Branching & CI/CD Strategy (CRITICAL INVARIANTS)
+
+- **`main` (Production / Static Deploy):** Represents live production (`https://lenzinif.github.io/mayonaka-cassette/`). Merging `develop` into `main` is the **ONLY** trigger that redeploys the static GitHub Pages site (`.github/workflows/deploy.yml`). Direct commits or premature pushes to `main` are strictly forbidden.
+- **`develop` (Primary Development & Integration):** The default branch of the repository. All feature branches branch from and merge back into `develop`. Every push or PR targeting `develop` triggers quality verification CI (`.github/workflows/ci.yml`: lint, Vitest unit tests, build), but **NEVER deploys**.
+- **Cohesive Feature / Batch Branches (`<feature>` or `feat/<name>`):**
+  - **One branch per feature or batch of connected features** (e.g., `graphics-overhaul`).
+  - Even if a feature or overhaul consists of multiple phases (e.g. palette rework, road shaders, sprite rendering, debug controls), **all related phases must reside on the same branch** so the entire cohesive system can be tested, balanced, and verified as a whole before integrating into `develop`.
+  - Interdependent sub-phases must never be fragmented into piecemeal branches that cannot be tested together.
+
 ---
 
 ## 3. Canonical Directory Structure
@@ -101,6 +110,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 7. **Analysis Off the Hot Path:** `decodeAudioData` runs on the main thread (workers have no `AudioContext`); all DSP (onset envelope, tempo autocorrelation, energy, sections) runs in `analysis.worker.ts` on transferred `Float32Array` PCM. Analysis happens only at import time, never during a run.
 8. **Beat Judgement Uses Event Timestamps:** Beat-quantized inputs (gear shifts) are judged from the keydown `event.timeStamp` mapped to the audio clock (`AudioContext.getOutputTimestamp()`), not from the fixed-step tick that polls them.
 9. **Canvas-Owned Animated Insets:** Anything animated every frame (melon soda inset) is drawn by the engine on the canvas. React only renders static frames/labels around it.
+10. **Branch Discipline & Release Gates:** Work on a single dedicated branch for each cohesive feature or batch of related features (e.g. `graphics-overhaul`). Multi-phase features remain together on that branch so they can be tested and balanced as a unified whole. Always branch off `develop` and open PRs to `develop`. Live static redeployment to GitHub Pages occurs exclusively upon merging `develop` into `main`.
 
 ---
 

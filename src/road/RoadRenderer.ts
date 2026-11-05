@@ -93,10 +93,11 @@ export class RoadRenderer {
     let x = 0;
     let dx = -(base.curve * basePercent);
     let maxy = height;
+    const effectiveFogDensity = view.fogDensity * (palette.fogDensity ?? 1.0);
     for (let n = 0; n < drawDistance; n++) {
       const seg = segments[(base.index + n) % segments.length]!;
       const cameraZ = position - (seg.index < base.index ? trackLength : 0);
-      seg.fog = exponentialFog(n / drawDistance, view.fogDensity);
+      seg.fog = exponentialFog(n / drawDistance, effectiveFogDensity);
       project(seg.p1, cameraXBase - x, cameraY, cameraZ, cameraDepth, width, height, roadWidth);
       project(
         seg.p2,
@@ -300,20 +301,49 @@ export class RoadRenderer {
       const choice: 'left' | 'right' = forkChoice ?? 'right';
 
       if (t2 <= 0.18) {
-        // Phase 1: Pre-split widening zone with center chevron warning strip
-        const outerW1 = w1 * (1 + (t1 / 0.18) * 0.2);
-        const outerW2 = w2 * (1 + (t2 / 0.18) * 0.2);
+        // Phase 1: Pre-split widening zone with center chevron warning gore
+        const p1 = t1 / 0.18;
+        const p2 = t2 / 0.18;
+        const pEase1 = p1 * p1 * (3 - 2 * p1);
+        const pEase2 = p2 * p2 * (3 - 2 * p2);
 
+        const outerW1 = w1 * (1 + pEase1 * 0.2);
+        const outerW2 = w2 * (1 + pEase2 * 0.2);
+
+        // Outer rumble strips
         ctx.fillStyle = palette.rumble[stripe];
         polygon(ctx, x1 - outerW1 - r1, y1, x1 - outerW1, y1, x2 - outerW2, y2, x2 - outerW2 - r2, y2);
         polygon(ctx, x1 + outerW1 + r1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + outerW2 + r2, y2);
 
+        // Asphalt road surface
         ctx.fillStyle = palette.road[stripe];
         polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
-        const c1 = r1 * 0.65;
-        const c2 = r2 * 0.65;
-        ctx.fillStyle = stripe === 0 ? '#ffd319' : '#ff2a6d';
-        polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
+
+        // Central median gore chevron / triangle (widens smoothly from width 0 at t=0 to ir at t=0.18)
+        const ir1 = r1 * 0.7;
+        const ir2 = r2 * 0.7;
+        const c1 = ir1 * pEase1;
+        const c2 = ir2 * pEase2;
+        if (c2 > 0.5) {
+          ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
+          polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
+        }
+
+        // Continuous lane lines (seamlessly diverging from ±1/3 normal road into ±0.60 branch centers)
+        if (stripe === 0 && w1 >= 6) {
+          const l1 = Math.max(1, w1 / 32);
+          const l2 = Math.max(1, w2 / 32);
+          const leftLine1 = x1 - (1 / 3 + (0.60 - 1 / 3) * pEase1) * w1;
+          const leftLine2 = x2 - (1 / 3 + (0.60 - 1 / 3) * pEase2) * w2;
+          const rightLine1 = x1 + (1 / 3 + (0.60 - 1 / 3) * pEase1) * w1;
+          const rightLine2 = x2 + (1 / 3 + (0.60 - 1 / 3) * pEase2) * w2;
+
+          ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
+          polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+
+          ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
+          polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+        }
       } else if (t2 <= 0.65) {
         // Phase 2: Diverging Left & Right asphalt branches with a central V-chevron median island
         const split1 = Math.max(0, (t1 - 0.18) / (0.65 - 0.18));
@@ -358,8 +388,8 @@ export class RoadRenderer {
         ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
         polygon(ctx, x1 + gap1, y1, x1 + gap1 + ir1, y1, x2 + gap2 + ir2, y2, x2 + gap2, y2);
 
-        // Center guide lines down each branch
-        if (stripe === 0) {
+        // Center guide lines down each branch (from ±0.60 at t=0.18 to ±1.10 at t=0.65)
+        if (stripe === 0 && w1 >= 6) {
           const l1 = Math.max(1, w1 / 32);
           const l2 = Math.max(1, w2 / 32);
           const leftMid1 = x1 - (outerW1 + gap1) * 0.5;
@@ -394,14 +424,53 @@ export class RoadRenderer {
         ctx.fillStyle = stripe === 0 ? '#392858' : '#31214c';
         polygon(ctx, cLeft1, y1, cRight1, y1, cRight2, y2, cLeft2, y2);
 
-        // Chosen branch center guide line (smoothly merges to normal road center line)
-        if (stripe === 0) {
+        // Seamless lane lines converging into standard 3-lane highway dividers (±1/3)
+        if (stripe === 0 && w1 >= 6) {
           const l1 = Math.max(1, w1 / 32);
           const l2 = Math.max(1, w2 / 32);
-          const mid1 = x1 + cCenter1;
-          const mid2 = x2 + cCenter2;
-          ctx.fillStyle = choice === 'left' ? '#05d9e8' : '#ffd319';
-          polygon(ctx, mid1 - l1, y1, mid1 + l1, y1, mid2 + l2, y2, mid2 - l2, y2);
+
+          const u1 = Math.max(0, Math.min(1, (t1 - 0.65) / 0.35));
+          const u2 = Math.max(0, Math.min(1, (t2 - 0.65) / 0.35));
+          const ease1 = u1 * u1 * (3 - 2 * u1);
+          const ease2 = u2 * u2 * (3 - 2 * u2);
+
+          if (choice === 'right') {
+            // Right branch lane line: smoothly converges from +1.10 to +1/3 (the right lane divider of normal road!)
+            const rightLine1 = x1 + (1.10 * (1 - ease1) + (1 / 3) * ease1) * w1;
+            const rightLine2 = x2 + (1.10 * (1 - ease2) + (1 / 3) * ease2) * w2;
+            ctx.fillStyle = ease1 < 0.85 ? '#ffd319' : palette.lane;
+            polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+
+            // Left highway divider (-1/3) smoothly emerges as road widens past the median
+            const leftLine1 = x1 - (1 / 3) * w1;
+            const leftLine2 = x2 - (1 / 3) * w2;
+            if (leftLine1 > cLeft1 + l1 * 2) {
+              const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
+              ctx.save();
+              ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+              ctx.fillStyle = palette.lane;
+              polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+              ctx.restore();
+            }
+          } else {
+            // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
+            const leftLine1 = x1 - (1.10 * (1 - ease1) + (1 / 3) * ease1) * w1;
+            const leftLine2 = x2 - (1.10 * (1 - ease2) + (1 / 3) * ease2) * w2;
+            ctx.fillStyle = ease1 < 0.85 ? '#05d9e8' : palette.lane;
+            polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+
+            // Right highway divider (+1/3) smoothly emerges as road widens past the median
+            const rightLine1 = x1 + (1 / 3) * w1;
+            const rightLine2 = x2 + (1 / 3) * w2;
+            if (rightLine1 < cRight1 - l1 * 2) {
+              const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
+              ctx.save();
+              ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+              ctx.fillStyle = palette.lane;
+              polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+              ctx.restore();
+            }
+          }
         }
 
         // Unchosen branch curves outward and fades away into distance

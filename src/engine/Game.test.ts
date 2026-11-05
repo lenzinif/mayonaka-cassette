@@ -173,17 +173,21 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     expect(
       events.some((e) => e.type === 'stageTransition' && e.stageNumber === 2),
     ).toBe(true);
+    // Flow State: Car must smoothly carry over its momentum into Stage 2 without stopping!
+    expect(game.car.speed).toBeGreaterThan(5000);
+    expect(game.hasStartedDriving).toBe(true);
 
-    // Advance through Stage 2 -> Stage 3
+    // Advance through Stage 2 -> Stage 3 with preserved speed
     game.position = game.track.length - 10;
     game.car.x = 0.5; // Right lane
-    game.car.speed = 6000;
     game.update(1 / 60);
 
     expect(library.currentIndex).toBe(2);
     expect(
       events.some((e) => e.type === 'stageTransition' && e.stageNumber === 3),
     ).toBe(true);
+    expect(game.car.speed).toBeGreaterThan(5000);
+    expect(game.hasStartedDriving).toBe(true);
 
     // In Stage 3 (final track), the Right fork option is 'finishRun'
     game.position = game.track.length - 1500;
@@ -524,5 +528,71 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     // Restarting run resets hasStartedDriving back to false
     game.restartPlaylistRun();
     expect(game.hasStartedDriving).toBe(false);
+  });
+
+  it('correctly resets audio on lap 2 loop and does not trap stopped car in outro loop', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const audio = new FunkAudioEngine();
+    const library = new TrackLibrary();
+    const game = new Game({ input, bridge, audio, library });
+    const gameAcc = game as unknown as {
+      position: number;
+      car: { x: number };
+      forkChoice: 'left' | 'right';
+      lap: number;
+      roadBarIndex: number;
+      sectionRole: string;
+      drivingAudioParams: { holdOutroLoop?: boolean };
+    };
+
+    const dt = 1 / 60;
+    input.setDown('accelerate', true);
+    for (let i = 0; i < 60; i++) game.update(dt);
+
+    // Fast-forward into fork approach zone
+    const forkStart = game.getForkZoneStartZ()!;
+    gameAcc.position = forkStart + 20;
+    gameAcc.car.x = -0.6;
+    game.update(dt);
+    expect(gameAcc.forkChoice).toBe('left');
+
+    // Simulate audio reaching outro near end of lap 1
+    (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 110;
+
+    // Cross finish line into lap 2
+    gameAcc.position = game.track.length - 10;
+    game.update(dt);
+
+    expect(gameAcc.lap).toBe(2);
+    // Road is at start of track
+    expect(gameAcc.roadBarIndex).toBeLessThanOrEqual(1);
+
+    // Audio MUST be reset/crossfaded to the start of the track (intro)
+    expect((audio as unknown as { virtualTrackSec: number }).virtualTrackSec).toBeLessThan(1.0);
+    expect(gameAcc.sectionRole).toBe('intro');
+
+    // Drive 5 seconds into Lap 2
+    for (let i = 0; i < 300; i++) game.update(dt);
+    expect(gameAcc.roadBarIndex).toBeLessThan(10);
+
+    // Stop the car on Lap 2
+    input.setDown('accelerate', false);
+    input.setDown('brake', true);
+    for (let i = 0; i < 180; i++) game.update(dt);
+
+    expect(game.car.speed).toBe(0);
+    // Stopped at the beginning of the road -> holdOutroLoop MUST NOT BE TRUE!
+    // (A stopped car at bar 2 is not falling behind the fork; it is at the start!)
+    expect(gameAcc.drivingAudioParams.holdOutroLoop).toBe(false);
+    expect(audio.isOutroLooping).toBe(false);
+
+    // Advancing time past song duration while car is stopped:
+    // Audio should wrap back to intro and NEVER get trapped in an outro loop!
+    const dur = audio.beatMap.durationSec;
+    for (let sec = 0; sec < dur + 10; sec += 1) {
+      for (let i = 0; i < 60; i++) game.update(dt);
+    }
+    expect(audio.isOutroLooping).toBe(false);
   });
 });

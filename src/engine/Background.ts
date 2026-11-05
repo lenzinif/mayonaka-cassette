@@ -6,10 +6,27 @@ const MOUNTAIN_SPAN = 960;
 const STAR_COUNT = 36;
 const CITY_TOWERS = 24;
 
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.startsWith('#') ? hex.slice(1) : hex;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (clean.length === 3) {
+    r = parseInt(clean[0]! + clean[0]!, 16);
+    g = parseInt(clean[1]! + clean[1]!, 16);
+    b = parseInt(clean[2]! + clean[2]!, 16);
+  } else if (clean.length >= 6) {
+    r = parseInt(clean.slice(0, 2), 16);
+    g = parseInt(clean.slice(2, 4), 16);
+    b = parseInt(clean.slice(4, 6), 16);
+  }
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
 /**
  * Procedural synthwave skybox: vertical gradient sky, twinkling pixel-art starfield,
- * striped retro sun, scrolling neon-rimmed mountain silhouette, and parallax pixel city skyline
- * (AGENTS.md §3, §4.3, §4.4 & §5 M7).
+ * striped retro sun, scrolling neon-rimmed mountain silhouette, parallax pixel city skyline,
+ * and beat-responsive atmospheric horizon wash (AGENTS.md §3, §4.3, §4.4 & §5 M7).
  *
  * Precomputes ridge heights, star coordinates, and city tower heights once at construction
  * (zero per-frame allocations).
@@ -24,10 +41,22 @@ export class Background {
   private scrollX = 0;
   private sunOffset = 0;
   private skyTime = 0;
+
+  // Cached gradients to guarantee ZERO per-frame garbage collection allocations
   private cachedSkyCtx: CanvasRenderingContext2D | null = null;
   private cachedSkyHorizonY = -1;
   private cachedSkyPalette: StagePalette | null = null;
   private cachedSkyGrad: CanvasGradient | null = null;
+
+  private cachedSunCtx: CanvasRenderingContext2D | null = null;
+  private cachedSunHorizonY = -1;
+  private cachedSunPalette: StagePalette | null = null;
+  private cachedSunGrad: CanvasGradient | null = null;
+
+  private cachedGlowCtx: CanvasRenderingContext2D | null = null;
+  private cachedGlowHorizonY = -1;
+  private cachedGlowPalette: StagePalette | null = null;
+  private cachedGlowGrad: CanvasGradient | null = null;
 
   constructor() {
     for (let i = 0; i < MOUNTAIN_POINTS; i++) {
@@ -93,14 +122,16 @@ export class Background {
     ctx.fillStyle = this.cachedSkyGrad;
     ctx.fillRect(0, 0, width, horizonY + 2);
 
-    // 1b. Twinkling pixel-art stars in upper sky
+    // 1b. Twinkling pixel-art stars tinted with active palette's celestial accents
     const starScroll = this.scrollX * 0.25;
+    const starCol1 = palette.starColors ? palette.starColors[0] : palette.mountainRim;
+    const starCol2 = palette.starColors ? palette.starColors[1] : '#fff3b0';
     for (let i = 0; i < STAR_COUNT; i++) {
       const sx = Math.round((this.starX[i]! * width - starScroll + width * 2) % width);
       const sy = Math.round(this.starY[i]! * (horizonY - 38)) + 4;
       const twinkle = Math.sin(this.skyTime * 3.2 + this.starPhase[i]!);
       if (twinkle > -0.25) {
-        ctx.fillStyle = i % 3 === 0 ? palette.mountainRim : '#fff3b0';
+        ctx.fillStyle = i % 3 === 0 ? starCol1 : starCol2;
         const size = twinkle > 0.65 || pulse > 0.6 ? 2 : 1;
         ctx.fillRect(sx, sy, size, size);
       }
@@ -111,13 +142,26 @@ export class Background {
     const sunX = width * 0.5 - this.sunOffset;
     const sunY = horizonY - 18;
     const sunR = 58 + pulse * 4.5 + downPulse * 2.5;
-    const sunGrad = ctx.createLinearGradient(0, sunY - sunR, 0, sunY + sunR);
-    sunGrad.addColorStop(0, palette.sunTop);
-    sunGrad.addColorStop(1, palette.sunBottom);
+
+    if (
+      this.cachedSunCtx !== ctx ||
+      this.cachedSunHorizonY !== horizonY ||
+      this.cachedSunPalette !== palette ||
+      !this.cachedSunGrad
+    ) {
+      const maxR = 66;
+      const sunGrad = ctx.createLinearGradient(0, horizonY - 18 - maxR, 0, horizonY - 18 + maxR);
+      sunGrad.addColorStop(0, palette.sunTop);
+      sunGrad.addColorStop(1, palette.sunBottom);
+      this.cachedSunCtx = ctx;
+      this.cachedSunHorizonY = horizonY;
+      this.cachedSunPalette = palette;
+      this.cachedSunGrad = sunGrad;
+    }
 
     ctx.beginPath();
     ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2);
-    ctx.fillStyle = sunGrad;
+    ctx.fillStyle = this.cachedSunGrad;
     ctx.fill();
 
     // Horizontal scanline cutouts across the lower half of the sun (chord-clipped analytically)
@@ -135,20 +179,12 @@ export class Background {
       }
     }
 
-    // Subtle horizon beat glow on kick/downbeat (kept in the sky above horizonY)
-    if (pulse > 0.05) {
-      ctx.globalAlpha = Math.min(0.45, pulse * 0.22 + downPulse * 0.15);
-      ctx.fillStyle = palette.sunBottom;
-      ctx.fillRect(0, horizonY - 14, width, 14);
-      ctx.globalAlpha = 1;
-    }
-
     // 3. Fallback ground fill below horizon in case a steep downhill exposes a sliver
     // Rendered AFTER the sun so ground terrain always occludes the celestial body.
     ctx.fillStyle = palette.grass[1];
     ctx.fillRect(0, horizonY, width, height - horizonY);
 
-    // 4. Parallax mountain silhouette + neon cyan rim
+    // 4. Parallax mountain silhouette + neon rim
     const step = MOUNTAIN_SPAN / MOUNTAIN_POINTS;
     const startIdx = Math.floor(this.scrollX / step);
     const frac = (this.scrollX % step) / step;
@@ -179,10 +215,14 @@ export class Background {
     ctx.lineWidth = 1.2 + pulse * 1.1;
     ctx.stroke();
 
-    // 5. Pixel-art distant city skyline silhouettes & glowing windows along horizon base
+    // 5. Pixel-art distant city skyline silhouettes & glowing windows tinted with theme accents
     const citySpan = 480;
     const cityScroll = (this.scrollX * 0.65) % citySpan;
     const towerSpacing = citySpan / CITY_TOWERS;
+    const winPrimary = palette.starColors ? palette.starColors[0] : palette.mountainRim;
+    const winSecondary = palette.sunTop;
+    const winAccent = palette.starColors ? palette.starColors[1] : palette.mountainRim;
+
     for (let pass = -1; pass <= Math.ceil(width / citySpan); pass++) {
       const baseOffset = pass * citySpan - cityScroll;
       for (let t = 0; t < CITY_TOWERS; t++) {
@@ -195,13 +235,41 @@ export class Background {
         ctx.fillRect(tx, ty, tw, th + 1);
         // Tiny neon pixel window lights pulsing on the beat
         if (th >= 10) {
-          ctx.fillStyle = t % 2 === 0 ? palette.mountainRim : palette.sunTop;
+          ctx.fillStyle = t % 2 === 0 ? winPrimary : winSecondary;
           ctx.fillRect(tx + 2, ty + 2, 2, 2);
           if (tw >= 14) {
+            ctx.fillStyle = t % 3 === 0 ? winAccent : winPrimary;
             ctx.fillRect(tx + tw - 4, ty + 4, 2, 2);
           }
         }
       }
     }
+
+    // 6. Subtle atmospheric wash band right above horizonY (using palette.horizonGlow)
+    // Seamlessly merges distant skyline, water reflections, and terrain base into the road fog,
+    // breathing dynamically with Future Funk kick and downbeat pulses.
+    const glowH = 26;
+    const glowColor = palette.horizonGlow ?? palette.skyHorizon;
+    if (
+      this.cachedGlowCtx !== ctx ||
+      this.cachedGlowHorizonY !== horizonY ||
+      this.cachedGlowPalette !== palette ||
+      !this.cachedGlowGrad
+    ) {
+      const grad = ctx.createLinearGradient(0, horizonY - glowH, 0, horizonY);
+      grad.addColorStop(0, hexToRgba(glowColor, 0));
+      grad.addColorStop(0.4, hexToRgba(glowColor, 0.35));
+      grad.addColorStop(1, hexToRgba(glowColor, 0.95));
+      this.cachedGlowCtx = ctx;
+      this.cachedGlowHorizonY = horizonY;
+      this.cachedGlowPalette = palette;
+      this.cachedGlowGrad = grad;
+    }
+
+    const washAlpha = Math.min(0.75, 0.22 + pulse * 0.36 + downPulse * 0.18);
+    ctx.globalAlpha = washAlpha;
+    ctx.fillStyle = this.cachedGlowGrad;
+    ctx.fillRect(0, horizonY - glowH, width, glowH);
+    ctx.globalAlpha = 1;
   }
 }

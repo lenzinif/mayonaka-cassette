@@ -90,6 +90,11 @@ npm run dev
 npm run check
 ```
 
+### Git & Branching Workflow
+- **`develop` (Default Branch):** Active integration branch. Pushes and Pull Requests trigger verification CI (`ci.yml`: lint, test, build) without deploying.
+- **Feature & Batch Branches:** Create a single branch per feature or cohesive batch of related features (e.g. `graphics-overhaul`). For multi-phase projects, keep all interdependent sub-phases on the same branch to verify and balance the full experience together before opening a PR to `develop`.
+- **`main` (Production):** Strictly mirrors live production. Merging `develop` into `main` is the **only trigger** that redeploys the static game to [GitHub Pages](https://lenzinif.github.io/mayonaka-cassette/). Direct pushes to `main` are disallowed.
+
 ---
 
 ## 🗺️ Roadmap & Development Plan
@@ -102,13 +107,15 @@ Curious about what's coming down the road? Check out the full [Roadmap & Task Li
 
 Player feedback drives the evolution of *Mayonaka Cassette*! Join our [GitHub Discussions](https://github.com/lenzinif/mayonaka-cassette/discussions):
 
-- 💡 **[Ideas & Feature Requests](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=ideas):** Suggest new biomes, roadside scenery, or arcade features.
-- ⚖️ **[Gameplay & Balance Tuning](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=gameplay-balance):** Share thoughts on handling feel, beat-shift timing windows, or Melon Soda physics.
-- 🎵 **[Music & Road Generation](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=music-tracks):** Tell us which tracks generated great roads and share custom beatmaps.
-- 🐛 **[Bug Reports](https://github.com/lenzinif/mayonaka-cassette/issues/new?template=bug_report.yml):** Report glitches or browser compatibility issues.
+- 💡 **[Ideas & Feature Requests](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=ideas-feature-requests):** Suggest new biomes, roadside scenery, or arcade features.
+- ⚖️ **[Gameplay & Balance](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=gameplay-balance):** Share thoughts on handling feel, beat-shift timing windows, or Melon Soda physics.
+- 🎵 **[Music & Tracks](https://github.com/lenzinif/mayonaka-cassette/discussions/new?category=music-tracks):** Tell us which tracks generated great roads and share custom beatmaps.
+
+Found a glitch or technical issue?
+- 🐛 **[Bug Reports](https://github.com/lenzinif/mayonaka-cassette/issues/new?template=bug_report.yml):** File a ticket in our Issue Tracker with your browser, OS, and reproduction steps.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE) © 2026 Francesco Lenzini (lenzinif).
+This project is licensed under the [MIT License](LICENSE) © 2026 Mayonaka Cassette.

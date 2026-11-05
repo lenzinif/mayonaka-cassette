@@ -234,7 +234,7 @@ export function HUD({
   const sodaDanger = snap?.sodaDanger ?? 0;
   const sodaSpills = snap?.sodaSpills ?? 0;
   const stageNumber = snap?.stageNumber ?? 1;
-  const stagePaletteName = snap?.stagePaletteName ?? 'SUNSET BOULEVARD';
+  const stagePaletteName = snap?.stagePaletteName ?? 'MAYONAKA BAY';
   const playlistIndex = snap?.playlistIndex ?? 0;
   const playlistLength = snap?.playlistLength ?? 1;
   const stageScore = snap?.stageScore ?? 0;

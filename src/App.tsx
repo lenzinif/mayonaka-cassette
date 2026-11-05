@@ -139,7 +139,12 @@ export function App() {
           onOpenTrackLoader={() => setTrackLoaderOpen(true)}
         />
         <CRTOverlay />
-        <DebugPanel open={debugOpen} onClose={() => setDebugOpen(false)} bridge={bridge} />
+        <DebugPanel
+          open={debugOpen}
+          onClose={() => setDebugOpen(false)}
+          bridge={bridge}
+          onSelectPalette={(idx) => gameRef.current?.setStagePaletteIndex(idx)}
+        />
         <TrackLoader
           open={trackLoaderOpen}
           library={library}

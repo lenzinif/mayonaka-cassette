@@ -47,7 +47,14 @@ export interface DebugPanelProps {
   open: boolean;
   onClose: () => void;
   bridge?: TelemetryBridge<TelemetrySnapshot, GameEvent>;
+  onSelectPalette?: (index: number) => void;
 }
+
+export const FUTURE_FUNK_THEMES = [
+  { index: 0, name: 'MAYONAKA BAY', sub: 'Night Funk', color: '#00f0b5' },
+  { index: 1, name: 'SUNSET BOULEVARD', sub: 'OG Future Funk', color: '#ffd447' },
+  { index: 2, name: 'AKIBA NIGHT RUSH', sub: 'Electric Night', color: '#00f5d4' },
+] as const;
 
 const GROUPS = Array.from(new Set(TUNING_CONTROLS.map((c) => c.group)));
 
@@ -58,7 +65,7 @@ type DebugTab = 'tuning' | 'profiler';
  * Mutates `tuning` in place so changes are felt on the very next simulation step,
  * and monitors real-time frame time, physics cost, and draw counts with zero runtime overhead.
  */
-export function DebugPanel({ open, onClose, bridge }: DebugPanelProps) {
+export function DebugPanel({ open, onClose, bridge, onSelectPalette }: DebugPanelProps) {
   const [tab, setTab] = useState<DebugTab>('tuning');
   const [values, setValues] = useState<Tuning>(() => ({ ...tuning }));
   const [copied, setCopied] = useState(false);
@@ -72,6 +79,19 @@ export function DebugPanel({ open, onClose, bridge }: DebugPanelProps) {
   useEffect(() => {
     if (open) setValues({ ...tuning });
   }, [open]);
+
+  // Keyboard shortcut: pressing '1', '2', '3' while debug panel is open switches theme
+  useEffect(() => {
+    if (!open || !onSelectPalette) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === '1') onSelectPalette(0);
+      else if (e.key === '2') onSelectPalette(1);
+      else if (e.key === '3') onSelectPalette(2);
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [open, onSelectPalette]);
 
   if (!open) return null;
 
@@ -259,6 +279,41 @@ export function DebugPanel({ open, onClose, bridge }: DebugPanelProps) {
       {/* Tab Body */}
       {tab === 'tuning' ? (
         <div className="flex-1 space-y-4 overflow-y-auto p-3">
+          {/* Future Funk Atmosphere & Palette Switcher */}
+          <div className="space-y-2 rounded border border-cyan-400/40 bg-[#090117]/90 p-2.5">
+            <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.2em] text-cyan-300 uppercase">
+              <span>ATMOSPHERE / PALETTE</span>
+              <span className="text-[9px] font-normal text-fuchsia-300">KEYS 1–3</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {FUTURE_FUNK_THEMES.map((theme) => {
+                const isActive = snap?.stagePaletteName === theme.name;
+                return (
+                  <button
+                    key={theme.name}
+                    type="button"
+                    onClick={() => onSelectPalette?.(theme.index)}
+                    className={`flex cursor-pointer flex-col justify-between rounded border p-1.5 text-left transition ${
+                      isActive
+                        ? 'border-cyan-400 bg-cyan-950/70 shadow-[0_0_10px_rgba(5,217,232,0.35)]'
+                        : 'border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60 hover:bg-[#200a45]/60'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold" style={{ color: theme.color }}>
+                        [{theme.index + 1}] {theme.name}
+                      </span>
+                      {isActive && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_4px_#05d9e8]" />
+                      )}
+                    </div>
+                    <span className="text-[9px] text-fuchsia-200/70">{theme.sub}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {GROUPS.map((group) => (
             <div key={group} className="space-y-2.5">
               <div className="border-b border-fuchsia-500/25 pb-1 text-[10px] font-bold tracking-[0.2em] text-pink-400 uppercase">

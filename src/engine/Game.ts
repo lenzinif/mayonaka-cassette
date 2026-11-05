@@ -26,7 +26,7 @@ import {
 import { TrafficManager, type CollisionEvent } from '@src/entities/TrafficAndProps';
 import {
   getStagePalette,
-  PALETTE_SUNSET_BOULEVARD,
+  PALETTE_NIGHT_FUNK,
   type StagePalette,
 } from '@src/road/palette';
 import { cameraDepthFromFov, interpolate } from '@src/road/RoadProjection';
@@ -361,7 +361,7 @@ export class Game {
     this.bridge = options.bridge ?? new TelemetryBridge<TelemetrySnapshot, GameEvent>(TELEMETRY_HZ);
     this.audio = options.audio ?? new FunkAudioEngine();
     this.library = options.library ?? new TrackLibrary();
-    this.palette = options.palette ?? PALETTE_SUNSET_BOULEVARD;
+    this.palette = options.palette ?? PALETTE_NIGHT_FUNK;
     this.hasCustomTrack = options.track !== undefined;
     this.activeRoadBeatMap = this.audio.beatMap;
     this.track = options.track ?? generateSongRoad(this.audio.beatMap);
@@ -410,6 +410,44 @@ export class Game {
   }
 
   /**
+   * Advances seamlessly into the next stage of the playlist without stopping the car.
+   * Preserves vehicle momentum (speed, gear, RPM, groove) while updating road, palette, and traffic.
+   */
+  private transitionToNextStage(beatMap: BeatMap, nextPos: number): void {
+    const prevLength = this.track.length;
+    const overshoot = Math.max(0, nextPos - prevLength);
+    const songTrack = generateSongRoad(beatMap);
+    this.track = songTrack;
+    this.activeRoadBeatMap = beatMap;
+    this.crossedDropBars.clear();
+    this.earlyCrossfadeStarted = false;
+    this.forkManualLock = null;
+    this.forkActive = false;
+    this.forkProgress = 0;
+    this.forkLastSign = 0;
+    this.horizonStitchCooldown = 0;
+    this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
+
+    // Flow State (AGENTS.md Pillar 3): preserve vehicle momentum and continuous driving state
+    this.hasStartedDriving = true;
+    this.position = overshoot % songTrack.length;
+    this.prevPosition = this.position;
+    // this.car.speed, this.car.gearbox.gear, this.car.gearbox.rpm, this.car.groove are preserved!
+    this.lap = 1;
+    this.lapTime = 0;
+    this.resetStageMetrics();
+
+    this.renderDirty = true;
+    this.updateRoadProgressTelemetry();
+    this.bridge.emit({
+      type: 'songRoadGenerated',
+      title: beatMap.title,
+      totalBars: songTrack.totalBars,
+      chunkCount: songTrack.chunks.length,
+    });
+  }
+
+  /**
    * Restarts the playlist run from the first track (`index = 0`), resetting stage counters and scores.
    */
   restartPlaylistRun(): void {
@@ -432,6 +470,15 @@ export class Game {
       bestScore: best?.bestScore ?? null,
       bestGrade: best?.bestGrade ?? null,
     });
+  }
+
+  /**
+   * Directly sets the active stage palette by index and notifies HUD and DebugPanel immediately.
+   */
+  setStagePaletteIndex(index: number): void {
+    this.palette = getStagePalette(index);
+    this.renderDirty = true;
+    this.bridge.publish(this.buildSnapshot);
   }
 
   update = (dt: number): void => {
@@ -686,11 +733,19 @@ export class Game {
     this.drivingAudioParams.isDrifting = this.car.isDrifting;
     this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
     this.drivingAudioParams.offRoadDepth = this.car.offRoadDepth;
-    // If multi-track playlist is active and the player hasn't reached the final 2 bars yet,
-    // instruct the DJ to loop the last 8 outro bars if the song finishes early (docs/DESIGN.md §3).
+    // If multi-track playlist is active and the player is in the late approach to the stage fork
+    // but hasn't reached the fork split line yet (docs/DESIGN.md §3), instruct the DJ to loop
+    // the last 8 outro bars if the song finishes early.
+    // If the player is in early/mid stage (e.g. at the start of a lap or stopped),
+    // the song wraps naturally to the intro rather than skipping to the outro.
+    const forkApproachWindowBars = Math.max(
+      4,
+      Math.min(FORK_APPROACH_BARS + 4, Math.floor(this.totalBars * 0.5)),
+    );
     this.drivingAudioParams.holdOutroLoop =
       this.library.hasMultipleTracks &&
       !this.hasCustomTrack &&
+      this.roadBarIndex >= this.totalBars - forkApproachWindowBars &&
       this.roadBarIndex < Math.max(1, this.totalBars - 2);
 
     const prevRole = this.sectionRole;
@@ -938,13 +993,8 @@ export class Game {
 
     // Single-track playlist OR player chose Left branch (LOOP CURRENT TRACK):
     if (!this.library.hasMultipleTracks || this.hasCustomTrack || this.forkChoice === 'left') {
-      if (
-        this.earlyCrossfadeStarted &&
-        this.audio.beatMap.contentHash !== completedBeatMap.contentHash
-      ) {
-        const currentItem = this.library.activeItem;
-        this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2);
-      }
+      const currentItem = this.library.activeItem;
+      this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true);
       this.earlyCrossfadeStarted = false;
       if (isSongTrack(this.track)) {
         restoreCanonicalTrack(this.track);
@@ -967,7 +1017,7 @@ export class Game {
       this.stageNumber++;
       this.palette = getStagePalette(this.stageNumber - 1);
       this.audio.crossfadeToTrack(nextItem.beatMap, nextItem.audioBuffer, 4);
-      this.loadBeatMapRoad(nextItem.beatMap, true);
+      this.transitionToNextStage(nextItem.beatMap, nextPos);
 
       const best = this.library.getBestScore(nextItem.contentHash);
       this.bridge.emit({
@@ -994,6 +1044,8 @@ export class Game {
       this.lap++;
       this.lapTime = 0;
       this.resetStageMetrics();
+      const currentItem = this.library.activeItem;
+      this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true);
     }
   }
 
