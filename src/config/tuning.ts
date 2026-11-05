@@ -69,13 +69,16 @@ export const DEFAULT_TUNING = {
   shiftGoodMs: 100,
 
   // Groove Meter (M5)
-  grooveCruiseGainRate: 4.5,
+  grooveCruiseGainRate: 2.4,
   grooveDriftGainRate: 12.0,
+  grooveHighDrainRate: 1.0,
+  grooveSssDrainRate: 2.8,
+  grooveSssCruiseScale: 0.5,
   grooveShiftPerfectGain: 8.5,
   grooveShiftGoodGain: 4.5,
   grooveDropSyncGain: 15.0,
   grooveOffRoadDrainRate: 10.0,
-  grooveCollisionPenalty: 12.0,
+  grooveCollisionPenalty: 18.0,
 
   // Tofu Mode & Melon Soda (M5)
   tofuGrooveMultiplier: 2.0,
@@ -83,7 +86,7 @@ export const DEFAULT_TUNING = {
   sodaDamping: 2.4,
   sodaSensitivity: 0.7,
   sodaSpillThreshold: 0.75,
-  tofuSpillGroovePenaltyPct: 0.1,
+  tofuSpillGroovePenaltyPct: 0.2,
 
   // Traffic & Collisions (M5)
   trafficDensity: 1.0,
@@ -604,6 +607,36 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0,
     max: 30,
     step: 1,
+  },
+  {
+    group: 'Groove',
+    key: 'grooveHighDrainRate',
+    label: 'HIGH tier decay',
+    hint: 'Decadimento naturale di Groove al secondo nel tier HIGH (55-85%)',
+    unit: '/s',
+    min: 0,
+    max: 10,
+    step: 0.2,
+  },
+  {
+    group: 'Groove',
+    key: 'grooveSssDrainRate',
+    label: 'SSS tier decay',
+    hint: 'Decadimento naturale di Groove al secondo nel tier SSS / Overdrive (>85%)',
+    unit: '/s',
+    min: 0,
+    max: 15,
+    step: 0.2,
+  },
+  {
+    group: 'Groove',
+    key: 'grooveSssCruiseScale',
+    label: 'SSS cruise gain scale',
+    hint: 'Fattore di riduzione del guadagno da crociera mentre si è in tier SSS',
+    unit: '×',
+    min: 0,
+    max: 1,
+    step: 0.05,
   },
   {
     group: 'Groove',

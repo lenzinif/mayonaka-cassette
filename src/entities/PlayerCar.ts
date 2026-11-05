@@ -563,18 +563,39 @@ export class PlayerCar {
       if (Math.abs(this.bumpVx) < 0.01) this.bumpVx = 0;
     }
 
-    // 5. Continuous Groove meter update (cruise, drift, off-road drain).
+    // 5. Continuous Groove meter update (cruise, drift, off-road drain, and tier-based hype decay).
     if (this.isOffRoad) {
       this.deductGroove(
         tuning.grooveOffRoadDrainRate * (0.2 + 0.8 * offRoadDepth) * dt,
         onEvent,
       );
     } else {
+      let continuousGain = 0;
       if (this.driftDir !== 0) {
-        this.addGroove(tuning.grooveDriftGainRate * dt, tofuActive, onEvent);
+        continuousGain =
+          tuning.grooveDriftGainRate * (tofuActive ? tuning.tofuGrooveMultiplier : 1);
       } else if (speedRatio >= 0.55) {
         const cruiseFactor = (speedRatio - 0.5) / 0.5;
-        this.addGroove(tuning.grooveCruiseGainRate * cruiseFactor * dt, tofuActive, onEvent);
+        const sssCruiseScale = this.grooveTier === 'SSS' ? tuning.grooveSssCruiseScale : 1.0;
+        continuousGain =
+          tuning.grooveCruiseGainRate *
+          cruiseFactor *
+          sssCruiseScale *
+          (tofuActive ? tuning.tofuGrooveMultiplier : 1);
+      }
+
+      let tierDecayRate = 0;
+      if (this.grooveTier === 'SSS') {
+        tierDecayRate = tuning.grooveSssDrainRate;
+      } else if (this.grooveTier === 'HIGH') {
+        tierDecayRate = tuning.grooveHighDrainRate;
+      }
+
+      const netDelta = (continuousGain - tierDecayRate) * dt;
+      if (netDelta > 0) {
+        this.addGroove(netDelta, false, onEvent);
+      } else if (netDelta < 0) {
+        this.deductGroove(-netDelta, onEvent);
       }
     }
 
