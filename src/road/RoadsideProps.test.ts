@@ -7,10 +7,12 @@ function createMockCanvas(): {
   get rectCalls(): number;
   get fillCalls(): number;
   get stateChanges(): number;
+  get fills(): readonly string[];
 } {
   let rectCalls = 0;
   let fillCalls = 0;
   const stateChanges = 0;
+  const fills: string[] = [];
   const noop = () => {};
 
   const ctx = {
@@ -33,6 +35,7 @@ function createMockCanvas(): {
     stroke: noop,
     fillRect: () => {
       rectCalls++;
+      fills.push(ctx.fillStyle as string);
     },
     createLinearGradient: () => ({ addColorStop: noop }),
   } as unknown as CanvasRenderingContext2D;
@@ -47,6 +50,9 @@ function createMockCanvas(): {
     },
     get stateChanges() {
       return stateChanges;
+    },
+    get fills() {
+      return fills;
     },
   };
 }
@@ -127,6 +133,26 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
 
     expect(mockCalm.rectCalls).toBeGreaterThan(0);
     expect(mockBeat.rectCalls).toBeGreaterThan(0);
+  });
+
+  it('renders chevron arrows with correct direction and neon palette per variant', () => {
+    const mockRight = createMockCanvas();
+    const mockLeft = createMockCanvas();
+
+    // Variant 0: Right curve warning (>>>) with magenta neon trim (#ff007f)
+    drawProp(mockRight.ctx, 'chevron', 200, 240, 0.02, -1, 0, 0.0);
+    expect(mockRight.fills).toContain('#ff007f');
+    expect(mockRight.fills).not.toContain('#00f5d4');
+
+    // Variant 1: Left curve warning (<<<) with cyan neon trim (#00f5d4)
+    drawProp(mockLeft.ctx, 'chevron', 200, 240, 0.02, 1, 1, 0.0);
+    expect(mockLeft.fills).toContain('#00f5d4');
+    expect(mockLeft.fills).not.toContain('#ff007f');
+
+    // Beat pulse turns arrow glyphs white (#ffffff)
+    const mockPulse = createMockCanvas();
+    drawProp(mockPulse.ctx, 'chevron', 200, 240, 0.02, -1, 0, 0.85);
+    expect(mockPulse.fills).toContain('#ffffff');
   });
 
   it('renders 3 distinct building styles (Akiba Mart, Shinjuku Cyber Glass, Showa Retro Block)', () => {

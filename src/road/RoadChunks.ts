@@ -322,6 +322,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 3, curve: -CURVE.MEDIUM * 0.95, elevation: HILL.LOW * 0.4, easeRatio: [0.2, 0.2] },
     ],
     props: [
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
       { kind: 'lamp', placement: 'both', everyBeats: 1, offset: 1.22 },
       { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, offset: 1.72 },
     ],
@@ -378,6 +379,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 3, curve: CURVE.HARD * 0.9, elevation: HILL.LOW * 0.5, easeRatio: [0.2, 0.2] },
     ],
     props: [
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
       { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, offset: 1.68 },
       { kind: 'palm', placement: 'inside-curve', everyBeats: 2, offset: 1.35 },
     ],
@@ -411,6 +413,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: CURVE.MEDIUM * 1.1, elevation: HILL.LOW * 0.8, easeRatio: [0.2, 0.2] },
     ],
     props: [
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
       { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, offset: 1.66 },
       { kind: 'lamp', placement: 'inside-curve', everyBeats: 1, offset: 1.22 },
     ],

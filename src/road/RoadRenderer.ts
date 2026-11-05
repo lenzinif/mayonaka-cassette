@@ -155,7 +155,7 @@ export class RoadRenderer {
       if (sprites.length === 0 && firstTruckIdx === -1) continue;
 
       // Skip segment sprites/traffic if occluded behind a hill crest
-      if (p1.screenY - 3500 * scaledPpu >= segClipY) continue;
+      if (p1.screenY - 12000 * scaledPpu >= segClipY) continue;
 
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       for (let i = 0; i < sprites.length; i++) {

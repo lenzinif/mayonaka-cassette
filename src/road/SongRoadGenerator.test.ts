@@ -2,7 +2,8 @@ import type { BeatMap, SectionRole } from '@src/audio/BeatMap';
 import { DEFAULT_SYNTH_BEATMAP } from '@src/audio/FunkAudioEngine';
 import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { describe, expect, it } from 'vitest';
-import { getChunksForRole, ROAD_CHUNKS, validateRoadChunk } from './RoadChunks';
+import { defineChunk, getChunksForRole, ROAD_CHUNKS, type RoadChunk, validateRoadChunk } from './RoadChunks';
+import { CURVE } from './TrackBuilder';
 import {
   barToWorldZ,
   generateSongRoad,
@@ -183,6 +184,87 @@ describe('SongRoadGenerator', () => {
       const nearEndZ = road.length - (drawDistance + 5) * road.segmentLength;
       const endRes = stitchHorizonToTargetZ(road, nearEndZ, nearEndZ + 4000, drawDistance);
       expect(endRes).toBeNull();
+    });
+  });
+
+  describe('Curve Warning Chevrons', () => {
+    it('places chevrons ONLY before curves and signals the correct direction (right: >>>, left: <<<)', () => {
+      const testChunk: RoadChunk = defineChunk({
+        id: 'test-chevron-chunk',
+        description: 'Test chunk for chevron direction and placement',
+        role: 'drop',
+        bars: 8,
+        maneuvers: [
+          { bars: 3, curve: CURVE.MEDIUM, elevation: 0 },
+          { bars: 2, curve: 0, elevation: 0 },
+          { bars: 3, curve: -CURVE.MEDIUM, elevation: 0 },
+        ],
+        props: [
+          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
+        ],
+      });
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:chevron-test-track',
+        barEnergy: new Array<number>(8).fill(0.8),
+        sections: [{ startBar: 0, bars: 8, role: 'drop' }],
+      };
+
+      const road = generateSongRoad(customMap, {
+        catalog: [testChunk],
+      });
+
+      interface ChevronInfo {
+        segIndex: number;
+        barIndex: number;
+        offset: number;
+        variant: number;
+        curve: number;
+      }
+      const chevrons: ChevronInfo[] = [];
+
+      for (let i = 0; i < road.segments.length; i++) {
+        const seg = road.segments[i]!;
+        for (const s of seg.sprites) {
+          if (s.kind === 'chevron') {
+            chevrons.push({
+              segIndex: i,
+              barIndex: Math.floor(i / road.segmentsPerBar),
+              offset: s.offset,
+              variant: s.variant,
+              curve: seg.curve,
+            });
+          }
+        }
+      }
+
+      expect(chevrons.length).toBeGreaterThan(0);
+
+      // 1. Right turn chevrons (preceding maneuver 0):
+      // Must be on outside (left shoulder: offset < 0), point right (variant: 0)
+      const rightTurnChevrons = chevrons.filter((c) => c.barIndex < 2);
+      expect(rightTurnChevrons.length).toBeGreaterThanOrEqual(2);
+      for (const c of rightTurnChevrons) {
+        expect(c.variant).toBe(0); // Right: >>>
+        expect(c.offset).toBeLessThan(0); // Left shoulder
+      }
+
+      // 2. Middle straight section (bars 3 to 4, maneuver 1):
+      // Must contain ZERO chevrons! Chevrons must never appear on straights.
+      const middleStraightChevrons = chevrons.filter(
+        (c) => c.segIndex >= 3.5 * road.segmentsPerBar && c.segIndex < 4.4 * road.segmentsPerBar,
+      );
+      expect(middleStraightChevrons.length).toBe(0);
+
+      // 3. Left turn chevrons (preceding maneuver 2):
+      // Must be on outside (right shoulder: offset > 0), point left (variant: 1)
+      const leftTurnChevrons = chevrons.filter((c) => c.barIndex >= 4.5);
+      expect(leftTurnChevrons.length).toBeGreaterThanOrEqual(2);
+      for (const c of leftTurnChevrons) {
+        expect(c.variant).toBe(1); // Left: <<<
+        expect(c.offset).toBeGreaterThan(0); // Right shoulder
+      }
     });
   });
 });

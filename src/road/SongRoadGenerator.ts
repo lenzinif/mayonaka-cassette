@@ -564,6 +564,69 @@ function selectChunk(
   });
 }
 
+/**
+ * Populates directional curve chevrons in advance of sharp or medium curves.
+ *
+ * Chevrons appear ONLY before curves (warning the driver of the upcoming turn)
+ * and signal the correct direction:
+ * - Right curve (targetCurve > 0): arrows point RIGHT (>>>), placed on outside (left shoulder, offset < 0).
+ * - Left curve (targetCurve < 0): arrows point LEFT (<<<), placed on outside (right shoulder, offset > 0).
+ * Chevrons never appear on straight road sections or during the middle/exit of curves.
+ */
+function populateChunkChevrons(
+  segments: RoadSegment[],
+  startSeg: number,
+  segCount: number,
+  segmentsPerBeat: number,
+  chunk: RoadChunk,
+  mirrorSign: -1 | 1,
+  baseOffset: number,
+): void {
+  const actualBars = segCount / (segmentsPerBeat * 4);
+  const barScale = actualBars / chunk.bars;
+
+  let mCursorSeg = startSeg;
+  for (let mIdx = 0; mIdx < chunk.maneuvers.length; mIdx++) {
+    const m = chunk.maneuvers[mIdx]!;
+    const isLastManeuverInChunk = mIdx === chunk.maneuvers.length - 1;
+    const mSegCount = isLastManeuverInChunk
+      ? startSeg + segCount - mCursorSeg
+      : Math.max(4, Math.round(m.bars * barScale * segmentsPerBeat * 4));
+
+    if (mSegCount <= 0) continue;
+
+    const targetCurve = m.curve * mirrorSign;
+
+    // Only place warning chevrons for genuine curves (curve >= 0.8 in magnitude)
+    if (Math.abs(targetCurve) >= 0.8) {
+      const isRight = targetCurve > 0;
+      // Variant 0: Right (>>>), Variant 1: Left (<<<)
+      const variant = isRight ? 0 : 1;
+      // Outside shoulder: left shoulder (-baseOffset) for right turn, right shoulder (+baseOffset) for left turn
+      const offset = isRight ? -baseOffset : baseOffset;
+
+      // Place 4 warning chevrons in the approach leading into the curve
+      const beatOffsets = [-1.5, -0.5, 0.5, 1.5];
+      for (const bo of beatOffsets) {
+        const segIdx = mCursorSeg + Math.round(bo * segmentsPerBeat);
+        if (segIdx < 0 || segIdx >= segments.length) continue;
+        const seg = segments[segIdx];
+        if (!seg) continue;
+
+        // Prevent duplicate chevrons on the same segment
+        const hasChevron = seg.sprites.some(
+          (s) => s.kind === 'chevron' && Math.sign(s.offset) === Math.sign(offset),
+        );
+        if (!hasChevron) {
+          seg.sprites.push({ kind: 'chevron', offset, variant });
+        }
+      }
+    }
+
+    mCursorSeg += mSegCount;
+  }
+}
+
 function populateChunkProps(
   segments: RoadSegment[],
   startSeg: number,
@@ -576,6 +639,18 @@ function populateChunkProps(
   const totalBeats = Math.floor(segCount / Math.max(1, segmentsPerBeat));
 
   for (const rule of chunk.props) {
+    if (rule.kind === 'chevron') {
+      populateChunkChevrons(
+        segments,
+        startSeg,
+        segCount,
+        segmentsPerBeat,
+        chunk,
+        mirrorSign,
+        rule.offset ?? 1.35,
+      );
+      continue;
+    }
     const stepBeats = Math.max(1, Math.round(rule.everyBeats));
     const baseOffset = rule.offset ?? (
       rule.kind === 'building'
@@ -586,7 +661,7 @@ function populateChunkProps(
             ? 1.85
             : rule.kind === 'gantry'
               ? 0
-              : rule.kind === 'chevron' || rule.kind === 'shrub'
+              : rule.kind === 'shrub'
                 ? 1.35
                 : rule.kind === 'sign'
                   ? 1.38

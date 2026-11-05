@@ -317,6 +317,8 @@ function drawBillboard(
 // ---------------------------------------------------------------------------
 // 4. AKIBA URBAN CANYON FACADE & VERTICAL NEON SIGNS (3 Distinct Architectures)
 // ---------------------------------------------------------------------------
+// 4. AKIBA URBAN CANYON FACADE & VERTICAL NEON SIGNS (3 Distinct Architectures)
+// ---------------------------------------------------------------------------
 function drawBuilding(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -325,6 +327,8 @@ function drawBuilding(
   side: number,
   variant: number,
 ): void {
+  const rx = Math.round(x);
+  const ry = Math.round(y);
   const archVariant = variant % 3;
 
   if (archVariant === 0) {
@@ -333,8 +337,7 @@ function drawBuilding(
     // =========================================================================
     const w = Math.max(6, Math.round(3400 * ppu));
     const h = Math.max(14, Math.round(7600 * ppu));
-    const topY = Math.round(y - h);
-    const rx = Math.round(x);
+    const topY = ry - h;
     const left = side < 0 ? rx - w : rx;
     const v = variant % BUILDING_BODY.length;
 
@@ -342,25 +345,31 @@ function drawBuilding(
     ctx.fillStyle = BUILDING_BODY[v]!;
     ctx.fillRect(left, topY, w, h);
 
-    // Structural edge / pillar
+    // Structural edge / pillar on road side
     ctx.fillStyle = BUILDING_TRIM[v]!;
     const trimW = Math.max(1, Math.round(w * 0.08));
     ctx.fillRect(side < 0 ? left + w - trimW : left, topY, trimW, h);
 
-    // Roof parapet & HVAC units
+    // Roof parapet
     const roofH = Math.max(2, Math.round(h * 0.06));
     ctx.fillRect(left, topY, w, roofH);
 
-    // Distant Low LOD
-    if (w < 18 || h < 35) {
+    // Usable facade width between trim and outer wall
+    const usableW = Math.max(4, w - trimW);
+    const facadeLeft = side < 0 ? left : left + trimW;
+
+    // Distant Low LOD: simple warm storefront glow strip
+    if (w < 16 || h < 30) {
       ctx.fillStyle = BUILDING_SIGN_BG[v]!;
       ctx.fillRect(left, topY, w, Math.max(1, Math.round(roofH * 0.5)));
+      ctx.fillStyle = '#fff4cc';
+      ctx.fillRect(facadeLeft + 1, ry - Math.max(2, Math.round(h * 0.15)), usableW - 2, Math.max(1, Math.round(h * 0.1)));
       return;
     }
 
     // Ground Floor: Illuminated Shopfront / Karaoke / Arcade Awning
     const shopH = Math.max(5, Math.round(h * 0.22));
-    const shopY = y - shopH;
+    const shopY = ry - shopH;
     ctx.fillStyle = '#05030a';
     ctx.fillRect(left, shopY, w, shopH);
 
@@ -369,37 +378,41 @@ function drawBuilding(
     ctx.fillStyle = BUILDING_AWNING[v]!;
     ctx.fillRect(left, shopY, w, awnH);
 
-    // Shop interior warm glow
+    // Shop interior warm glow (centered within usable facade)
     ctx.fillStyle = '#fff4cc';
-    const shopWindowW = Math.max(4, w - trimW * 2 - 4);
+    const shopMargin = Math.max(1, Math.round(usableW * 0.04));
+    const shopWindowW = Math.max(4, usableW - shopMargin * 2);
     const shopWindowH = Math.max(3, shopH - awnH - 2);
-    const shopWinX = side < 0 ? left + 2 : left + trimW + 2;
+    const shopWinX = facadeLeft + shopMargin;
     ctx.fillRect(shopWinX, shopY + awnH + 1, shopWindowW, shopWindowH);
 
-    // Window Matrix across Upper Floors
-    const winCols = w >= 40 ? 4 : 3;
-    const winRows = Math.min(8, Math.floor((h - shopH - roofH) / (12 * ppu * 40 + 6)));
-    const winW = Math.max(2, Math.round(w * 0.14));
-    const winH = Math.max(2, Math.round(h * 0.055));
-    const winSpacingX = Math.floor((w - trimW - 4 - winCols * winW) / (winCols + 1));
-    const startWinY = topY + roofH + Math.round(h * 0.04);
+    // Window Matrix across Upper Floors (Fixed 5 floors, 3 columns: zero flickering or jumping)
+    const upperH = shopY - (topY + roofH);
+    const floors = 5;
+    const cols = 3;
+    const floorStep = upperH / floors;
+    const winW = Math.max(2, Math.round(usableW * 0.18));
+    const margin = Math.max(2, Math.round(usableW * 0.06));
+    const colStep = (usableW - margin * 2 - winW) / (cols - 1);
 
-    for (let r = 0; r < winRows; r++) {
-      const wy = startWinY + r * (winH + Math.max(2, Math.round(winH * 0.8)));
-      if (wy + winH >= shopY - 2) break;
-      for (let c = 0; c < winCols; c++) {
-        const wx = side < 0 ? left + 2 + (c + 1) * winSpacingX + c * winW : left + trimW + 2 + c * (winW + winSpacingX);
-        const isLit = (c * 3 + r * 5 + variant) % 3 !== 0;
+    for (let f = 0; f < floors; f++) {
+      const wy = Math.round(topY + roofH + f * floorStep + floorStep * 0.18);
+      const winH = Math.max(2, Math.round(floorStep * 0.55));
+      if (wy + winH >= shopY) break;
+
+      for (let c = 0; c < cols; c++) {
+        const wx = Math.round(facadeLeft + margin + c * colStep);
+        const isLit = (c * 7 + f * 13 + variant) % 3 !== 0;
         if (isLit) {
-          ctx.fillStyle = (c + r) % 2 === 0 ? '#ffeaa7' : '#00f5d4';
+          ctx.fillStyle = (c + f) % 2 === 0 ? '#ffeaa7' : '#00f5d4';
           ctx.fillRect(wx, wy, winW, winH);
         }
       }
     }
 
-    // Signature Akiba Feature: Cantilevered Vertical Neon Blade Sign
-    const signW = Math.max(3, Math.round(w * 0.2));
-    const signH = Math.max(10, Math.round(h * 0.48));
+    // Signature Akiba Feature: Cantilevered Vertical Neon Blade Sign on road corner
+    const signW = Math.max(3, Math.round(w * 0.18));
+    const signH = Math.max(10, Math.round(h * 0.46));
     const signY = topY + Math.round(h * 0.16);
     const signX = side < 0 ? left + w - signW + Math.max(1, Math.round(signW * 0.2)) : left - Math.max(1, Math.round(signW * 0.2));
 
@@ -432,44 +445,49 @@ function drawBuilding(
     // =========================================================================
     const w = Math.max(6, Math.round(3100 * ppu));
     const h = Math.max(18, Math.round(9600 * ppu));
-    const topY = Math.round(y - h);
-    const rx = Math.round(x);
+    const topY = ry - h;
     const left = side < 0 ? rx - w : rx;
-
-    // Dark sleek high-tech corporate body
-    ctx.fillStyle = '#070a18';
-    ctx.fillRect(left, topY, w, h);
 
     // Stepped Setback Crown (Top 26% is narrower)
     const crownH = Math.max(4, Math.round(h * 0.26));
     const setbackW = Math.max(1, Math.round(w * 0.15));
-    // Trim out setbacks
-    ctx.fillStyle = '#080417'; // blend into sky
-    if (side < 0) {
-      ctx.fillRect(left, topY, setbackW, crownH);
-    } else {
-      ctx.fillRect(left + w - setbackW, topY, setbackW, crownH);
-    }
+    const crownLeft = side < 0 ? left + setbackW : left;
+    const crownW = w - setbackW;
+
+    // Dark sleek high-tech corporate body (constructed additively with zero sky-erasing hack)
+    ctx.fillStyle = '#070a18';
+    ctx.fillRect(left, topY + crownH, w, h - crownH); // Lower main tower body
+    ctx.fillRect(crownLeft, topY, crownW, crownH);    // Upper setback crown
 
     // Skyscraper Structural Edge Trim (Cobalt Neon)
     ctx.fillStyle = '#19284e';
-    ctx.fillRect(left, topY + crownH, Math.max(1, Math.round(w * 0.05)), h - crownH);
-    ctx.fillRect(left + w - Math.max(1, Math.round(w * 0.05)), topY + crownH, Math.max(1, Math.round(w * 0.05)), h - crownH);
+    const trimW = Math.max(1, Math.round(w * 0.05));
+    // Full-height trim on straight side
+    const straightTrimX = side < 0 ? left + w - trimW : left;
+    ctx.fillRect(straightTrimX, topY, trimW, h);
+    // Lower body trim on setback side
+    const setbackTrimX = side < 0 ? left : left + w - trimW;
+    ctx.fillRect(setbackTrimX, topY + crownH, trimW, h - crownH);
+    // Crown setback ledge horizontal trim
+    ctx.fillRect(side < 0 ? left : left + crownW, topY + crownH, setbackW, Math.max(1, Math.round(trimW * 0.6)));
 
-    // Continuous Horizontal Illuminated Ribbon Windows (Cyan & Ice Blue Bands)
+    // Continuous Horizontal Illuminated Ribbon Windows (Cyan & Ice Blue Bands: fixed 6 bands)
     if (w >= 14 && h >= 30) {
-      const bandCount = Math.min(10, Math.floor(h / (10 * ppu * 40 + 8)));
-      const bandH = Math.max(2, Math.round(h * 0.04));
-      const bandGap = Math.max(3, Math.round(h * 0.055));
+      const bands = 6;
+      const padTop = Math.round(h * 0.04);
+      const padBottom = Math.round(h * 0.05);
+      const availH = (h - crownH) - padTop - padBottom;
+      const bandStep = availH / bands;
+      const bandLeft = left + Math.max(2, Math.round(w * 0.08));
+      const bandW = w - Math.max(4, Math.round(w * 0.16));
 
-      for (let b = 0; b < bandCount; b++) {
-        const by = topY + crownH + Math.round(h * 0.05) + b * (bandH + bandGap);
-        if (by + bandH >= y - Math.round(h * 0.06)) break;
+      for (let b = 0; b < bands; b++) {
+        const by = Math.round(topY + crownH + padTop + b * bandStep);
+        const bandH = Math.max(2, Math.round(bandStep * 0.44));
+        if (by + bandH >= ry - Math.round(h * 0.04)) break;
 
         const isCyan = b % 2 === 0;
         ctx.fillStyle = isCyan ? '#00f5d4' : '#3a86ff';
-        const bandLeft = left + Math.max(2, Math.round(w * 0.08));
-        const bandW = w - Math.max(4, Math.round(w * 0.16));
         ctx.fillRect(bandLeft, by, bandW, bandH);
 
         // Subtle vertical mullion dividers
@@ -480,25 +498,27 @@ function drawBuilding(
       }
 
       // Glowing Corporate Diamond Logo on the Crown
-      const logoSize = Math.max(3, Math.round(w * 0.22));
-      const logoX = side < 0 ? left + w - Math.round(w * 0.5) : left + Math.round(w * 0.2);
-      const logoY = topY + Math.round(crownH * 0.35);
+      const logoSize = Math.max(3, Math.round(crownW * 0.24));
+      const logoX = Math.round(crownLeft + (crownW - logoSize) * 0.5);
+      const logoY = topY + Math.round((crownH - logoSize) * 0.45);
       ctx.fillStyle = '#00f5d4';
       ctx.fillRect(logoX, logoY, logoSize, logoSize);
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(logoX + 1, logoY + 1, Math.max(1, logoSize - 2), Math.max(1, logoSize - 2));
     }
 
-    // Twin Rooftop Aviation Beacons (Red flashing)
+    // Twin Aviation Beacons on Crown Rooftop (Red flashing)
     ctx.fillStyle = '#ff0055';
-    ctx.fillRect(left + 1, topY + crownH - 2, 2, 2);
-    ctx.fillRect(left + w - 3, topY + crownH - 2, 2, 2);
-    // Spire
-    const spireX = side < 0 ? left + w - Math.round(w * 0.4) : left + Math.round(w * 0.4);
+    ctx.fillRect(crownLeft + 1, topY - 2, 2, 2);
+    ctx.fillRect(crownLeft + crownW - 3, topY - 2, 2, 2);
+
+    // Spire centered on crown
+    const spireX = Math.round(crownLeft + crownW * 0.5);
+    const spireH = Math.max(3, Math.round(h * 0.14));
     ctx.fillStyle = '#3a86ff';
-    ctx.fillRect(spireX, topY - Math.max(3, Math.round(h * 0.12)), 1, Math.max(3, Math.round(h * 0.12)));
+    ctx.fillRect(spireX, topY - spireH, 1, spireH);
     ctx.fillStyle = '#ff0055';
-    ctx.fillRect(spireX - 1, topY - Math.max(3, Math.round(h * 0.12)) - 1, 2, 2);
+    ctx.fillRect(spireX - 1, topY - spireH - 1, 2, 2);
 
   } else {
     // =========================================================================
@@ -506,8 +526,7 @@ function drawBuilding(
     // =========================================================================
     const w = Math.max(8, Math.round(4100 * ppu));
     const h = Math.max(13, Math.round(6800 * ppu));
-    const topY = Math.round(y - h);
-    const rx = Math.round(x);
+    const topY = ry - h;
     const left = side < 0 ? rx - w : rx;
 
     // Dark brick / concrete Showa building body
@@ -520,32 +539,41 @@ function drawBuilding(
       ctx.fillRect(left, topY + Math.round(h * (f / 5)), w, Math.max(1, Math.round(h * 0.025)));
     }
 
-    // Windows with protruding air-conditioner units
+    // Fire escape width on outer flank away from traffic
+    const escapeW = Math.max(3, Math.round(w * 0.18));
+    const escapeX = side < 0 ? left + 2 : left + w - escapeW - 2;
+
+    // Windows with protruding air-conditioner units (strictly within window zone)
     if (w >= 16 && h >= 25) {
       const rows = 4;
       const cols = 3;
-      const winW = Math.max(2, Math.round(w * 0.15));
-      const winH = Math.max(2, Math.round(h * 0.07));
-      const colSpacing = Math.round((w * 0.7) / (cols + 1));
-      const baseWinX = side < 0 ? left + Math.round(w * 0.05) : left + Math.round(w * 0.25);
+      const winZoneW = w - escapeW - 8;
+      const winZoneLeft = side < 0 ? left + escapeW + 5 : left + 3;
+      const winW = Math.max(2, Math.round(winZoneW * 0.22));
+      const colStep = (winZoneW - winW) / (cols - 1);
 
       for (let r = 0; r < rows; r++) {
-        const wy = topY + Math.round(h * 0.14) + r * Math.round(h * 0.19);
+        const floorBaseY = topY + Math.round(h * (r / 5));
+        const floorH = Math.round(h * 0.2);
+        const winH = Math.max(2, Math.round(floorH * 0.38));
+        const wy = floorBaseY + Math.round((floorH - winH) * 0.45);
+
         for (let c = 0; c < cols; c++) {
-          const wx = baseWinX + c * (winW + colSpacing);
+          const wx = Math.round(winZoneLeft + c * colStep);
           // Warm interior amber glow
           ctx.fillStyle = (r + c) % 2 === 0 ? '#ffbe0b' : '#ff9e00';
           ctx.fillRect(wx, wy, winW, winH);
 
           // Protruding grey Air Conditioning box unit below window
+          const acW = Math.max(2, Math.round(winW * 0.65));
+          const acH = Math.max(1, Math.round(winH * 0.4));
+          const acX = wx + Math.round((winW - acW) * 0.5);
           ctx.fillStyle = '#4a3e6b';
-          ctx.fillRect(wx - 1, wy + winH, Math.max(2, Math.round(winW * 0.6)), Math.max(1, Math.round(winH * 0.4)));
+          ctx.fillRect(acX, wy + winH, acW, acH);
         }
       }
 
       // External Steel Zigzag Fire Escape Stairs (on outer flank)
-      const escapeX = side < 0 ? left + w - Math.round(w * 0.2) : left + 2;
-      const escapeW = Math.max(3, Math.round(w * 0.18));
       ctx.fillStyle = '#3a2d52';
       for (let r = 0; r < rows; r++) {
         const platY = topY + Math.round(h * 0.2) + r * Math.round(h * 0.19);
@@ -566,13 +594,15 @@ function drawBuilding(
       // Massive Illuminated Rooftop Billboard Frame on Steel Stilts
       const boardW = Math.max(10, Math.round(w * 0.75));
       const boardH = Math.max(6, Math.round(h * 0.28));
-      const boardY = topY - boardH - Math.max(2, Math.round(h * 0.05));
+      const boardGap = Math.max(2, Math.round(h * 0.05));
+      const boardY = topY - boardH - boardGap;
       const boardX = left + Math.round((w - boardW) * 0.5);
 
-      // Steel stilts
+      // Steel stilts connected seamlessly from rooftop to billboard bottom
       ctx.fillStyle = '#261b3d';
-      ctx.fillRect(boardX + 2, topY - Math.round(h * 0.06), 2, Math.round(h * 0.06));
-      ctx.fillRect(boardX + boardW - 4, topY - Math.round(h * 0.06), 2, Math.round(h * 0.06));
+      const stiltY = topY - boardGap;
+      ctx.fillRect(boardX + 2, stiltY, 2, boardGap);
+      ctx.fillRect(boardX + boardW - 4, stiltY, 2, boardGap);
 
       // Billboard face (Vibrant Future Funk Magenta / Gold)
       ctx.fillStyle = '#ff007f';
@@ -585,7 +615,7 @@ function drawBuilding(
       // Japanese Kanji / Katakana stylization: "カセット" (Cassette)
       ctx.fillStyle = '#ffe600';
       const kH = Math.max(2, Math.round(boardH * 0.55));
-      const ky = boardY + Math.round(boardH * 0.22);
+      const ky = boardY + Math.round((boardH - kH) * 0.5);
       ctx.fillRect(boardX + Math.round(boardW * 0.12), ky, Math.round(boardW * 0.16), kH);
       ctx.fillRect(boardX + Math.round(boardW * 0.38), ky, Math.round(boardW * 0.22), kH);
       ctx.fillRect(boardX + Math.round(boardW * 0.68), ky, Math.round(boardW * 0.18), kH);
@@ -927,9 +957,11 @@ function drawChevron(
   x: number,
   y: number,
   ppu: number,
-  side: number,
-  beatPulse: number,
+  _side: number,
+  variant = 0,
+  beatPulse = 0,
 ): void {
+  const isLeft = variant % 2 === 1;
   const w = Math.max(5, Math.round(1800 * ppu));
   const h = Math.max(4, Math.round(1100 * ppu));
   const postH = Math.max(2, Math.round(700 * ppu));
@@ -945,8 +977,8 @@ function drawChevron(
   ctx.fillStyle = CHEVRON_BG;
   ctx.fillRect(left, topY, w, h);
 
-  // Neon trim
-  ctx.fillStyle = side < 0 ? CHEVRON_CYAN : CHEVRON_MAGENTA;
+  // Neon trim (Cyan for Left turn, Magenta for Right turn)
+  ctx.fillStyle = isLeft ? CHEVRON_CYAN : CHEVRON_MAGENTA;
   ctx.fillRect(left, topY, w, 1);
   ctx.fillRect(left, topY + h - 1, w, 1);
 
@@ -956,11 +988,11 @@ function drawChevron(
   const arrowH = Math.max(2, Math.round(h * 0.65));
   const arrowY = topY + Math.round((h - arrowH) * 0.5);
 
-  ctx.fillStyle = isPulse ? '#ffffff' : side < 0 ? CHEVRON_CYAN : CHEVRON_MAGENTA;
+  ctx.fillStyle = isPulse ? '#ffffff' : isLeft ? CHEVRON_CYAN : CHEVRON_MAGENTA;
 
   for (let c = 0; c < 3; c++) {
     const ax = left + Math.round(w * 0.15) + c * Math.round(w * 0.28);
-    if (side > 0) {
+    if (!isLeft) {
       // Right Chevron: >>>
       ctx.fillRect(ax, arrowY, Math.max(1, Math.round(arrowW * 0.45)), arrowH);
       ctx.fillRect(ax + Math.round(arrowW * 0.45), arrowY + Math.round(arrowH * 0.25), Math.max(1, Math.round(arrowW * 0.45)), Math.max(1, Math.round(arrowH * 0.5)));
@@ -1446,7 +1478,7 @@ export function drawProp(
       drawVMS(ctx, x, y, ppu, variant, beatPulse);
       break;
     case 'chevron':
-      drawChevron(ctx, x, y, ppu, side, beatPulse);
+      drawChevron(ctx, x, y, ppu, side, variant, beatPulse);
       break;
     case 'pylon':
       drawPylon(ctx, x, y, ppu);
