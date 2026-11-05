@@ -6,22 +6,185 @@ import type { StagePalette } from '@src/road/palette';
 // ---------------------------------------------------------------------------
 const MOUNTAIN_POINTS = 64;
 const MOUNTAIN_SPAN = 960;
-const STAR_COUNT = 48;
+const STAR_COUNT = 56;
 const SHOOTING_STAR_COUNT = 2;
 const CITY_TOWERS = 32;
 const CITY_SPAN = 640;
-const CLOUD_COUNT = 8;
-const RAIN_COUNT = 96;
+const CLOUD_COUNT = 9;
+const LOBES_PER_CLOUD = 6;
+const RAIN_COUNT = 120;
+const SPLASH_COUNT = 28;
 const BIRD_COUNT = 6;
 
-// Statically indexed constellation groups connecting actual star nodes in the sky
-const CONSTELLATION_GROUPS: readonly (readonly number[])[] = [
-  // Group 0: Cassiopeia (W)
-  [0, 5, 5, 11, 11, 18, 18, 24],
-  // Group 1: Northern Cross / Cygnus
-  [2, 8, 8, 14, 14, 22, 6, 8, 8, 16],
-  // Group 2: Orion's Belt & Bow
-  [3, 9, 9, 15, 15, 23, 7, 9, 15, 27],
+const BOLT_MAIN_NODES = 10;
+const BOLT_BRANCH_COUNT = 3;
+const BOLT_BRANCH_NODES = 4;
+
+// ---------------------------------------------------------------------------
+// Real Astronomical Constellations (accurate relative coordinates & magnitudes)
+// ---------------------------------------------------------------------------
+interface ConstellationStar {
+  readonly dx: number;
+  readonly dy: number;
+  /** 2 = alpha/bright principal star (cross flare), 1 = standard star */
+  readonly mag: 1 | 2;
+  /** Optional spectral tint override (e.g. Betelgeuse / Antares warm supergiant) */
+  readonly color?: string;
+}
+
+interface RealConstellation {
+  readonly name: string;
+  readonly anchorX: number;
+  readonly anchorY: number;
+  readonly stars: readonly ConstellationStar[];
+  /** Flat pairs of indices [a0, b0, a1, b1, ...] connecting stars in `stars` */
+  readonly edges: readonly number[];
+}
+
+const REAL_CONSTELLATIONS: readonly RealConstellation[] = [
+  // 0. Ursa Major (Orsa Maggiore / Grande Carro — Big Dipper)
+  {
+    name: 'Ursa Major',
+    anchorX: 76,
+    anchorY: 28,
+    stars: [
+      { dx: -28, dy: -9, mag: 2 }, // 0: Dubhe (α)
+      { dx: -25, dy: 6, mag: 2 }, // 1: Merak (β)
+      { dx: -8, dy: 8, mag: 1 }, // 2: Phecda (γ)
+      { dx: -6, dy: -4, mag: 1 }, // 3: Megrez (δ)
+      { dx: 8, dy: -6, mag: 2 }, // 4: Alioth (ε)
+      { dx: 20, dy: -5, mag: 2 }, // 5: Mizar (ζ)
+      { dx: 33, dy: 3, mag: 2 }, // 6: Alkaid (η)
+    ],
+    edges: [0, 1, 1, 2, 2, 3, 3, 0, 3, 4, 4, 5, 5, 6],
+  },
+  // 1. Cassiopeia (La Regina — Iconic Asymmetric 'W')
+  {
+    name: 'Cassiopeia',
+    anchorX: 204,
+    anchorY: 22,
+    stars: [
+      { dx: -24, dy: -6, mag: 2 }, // 0: Caph (β)
+      { dx: -12, dy: 8, mag: 2, color: '#ffd6a5' }, // 1: Shedir (α)
+      { dx: 0, dy: -3, mag: 2 }, // 2: Gamma Cas / Navi (γ)
+      { dx: 13, dy: 9, mag: 1 }, // 3: Ruchbah (δ)
+      { dx: 26, dy: -5, mag: 1 }, // 4: Segin (ε)
+    ],
+    edges: [0, 1, 1, 2, 2, 3, 3, 4],
+  },
+  // 2. Orion (Orione — Hourglass, 3-Star Belt, Sword & Hunter's Bow)
+  {
+    name: 'Orion',
+    anchorX: 336,
+    anchorY: 32,
+    stars: [
+      { dx: 0, dy: -21, mag: 1 }, // 0: Meissa (λ - Head)
+      { dx: -15, dy: -12, mag: 2, color: '#ff9e5e' }, // 1: Betelgeuse (α - Red Supergiant)
+      { dx: 13, dy: -10, mag: 2, color: '#caf0f8' }, // 2: Bellatrix (γ)
+      { dx: -5, dy: 1, mag: 2 }, // 3: Alnitak (ζ - Belt Left)
+      { dx: 0, dy: 0, mag: 2 }, // 4: Alnilam (ε - Belt Center)
+      { dx: 5, dy: -1, mag: 2 }, // 5: Mintaka (δ - Belt Right)
+      { dx: -12, dy: 17, mag: 1 }, // 6: Saiph (κ - Left Foot)
+      { dx: 15, dy: 15, mag: 2, color: '#90e0ef' }, // 7: Rigel (β - Blue Supergiant)
+      { dx: -1, dy: 8, mag: 1, color: '#ff85c0' }, // 8: Orion Nebula M42 (Sword)
+      { dx: 25, dy: -8, mag: 1 }, // 9: Pi3 Orionis (Bow Center)
+      { dx: 22, dy: -16, mag: 1 }, // 10: Pi1 Orionis (Bow Top)
+      { dx: 22, dy: 1, mag: 1 }, // 11: Pi6 Orionis (Bow Bottom)
+    ],
+    edges: [
+      1, 0, 0, 2, 1, 2, 1, 3, 2, 5, 3, 4, 4, 5, 3, 6, 5, 7, 6, 7, 4, 8, 2, 9, 10, 9, 9, 11,
+    ],
+  },
+  // 3. Cygnus (Il Cigno — Northern Cross)
+  {
+    name: 'Cygnus',
+    anchorX: 468,
+    anchorY: 25,
+    stars: [
+      { dx: 0, dy: -16, mag: 2, color: '#e0fbfc' }, // 0: Deneb (α - Tail)
+      { dx: 0, dy: -3, mag: 2 }, // 1: Sadr (γ - Chest)
+      { dx: 0, dy: 16, mag: 2, color: '#ffd166' }, // 2: Albireo (β - Beak)
+      { dx: -17, dy: -1, mag: 1 }, // 3: Gienah (ε - Left Wing)
+      { dx: 17, dy: -1, mag: 1 }, // 4: Delta Cygni (δ - Right Wing)
+      { dx: -28, dy: 5, mag: 1 }, // 5: Aljanah (Left Wingtip)
+      { dx: 28, dy: 5, mag: 1 }, // 6: Fawaris (Right Wingtip)
+    ],
+    edges: [0, 1, 1, 2, 5, 3, 3, 1, 1, 4, 4, 6],
+  },
+  // 4. Scorpius (Lo Scorpione — Claws, Antares & Hooked Stinger Tail)
+  {
+    name: 'Scorpius',
+    anchorX: 588,
+    anchorY: 30,
+    stars: [
+      { dx: -20, dy: -14, mag: 1 }, // 0: Acrab (β - Top Claw)
+      { dx: -23, dy: -5, mag: 2 }, // 1: Dschubba (δ - Mid Claw)
+      { dx: -19, dy: 3, mag: 1 }, // 2: Pi Scorpii (π - Bottom Claw)
+      { dx: -9, dy: -3, mag: 2, color: '#ff6b6b' }, // 3: Antares (α - Red Heart)
+      { dx: -2, dy: 3, mag: 1 }, // 4: Tau Scorpii (τ)
+      { dx: 5, dy: 12, mag: 1 }, // 5: Epsilon Scorpii (ε)
+      { dx: 14, dy: 17, mag: 2 }, // 6: Sargas (θ - Tail Loop)
+      { dx: 23, dy: 14, mag: 1 }, // 7: Kappa Scorpii (κ)
+      { dx: 25, dy: 6, mag: 2 }, // 8: Shaula (λ - Stinger)
+    ],
+    edges: [0, 1, 2, 1, 1, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Vibeful Lightning Color Themes (Synthwave / OutRun / Cyberpunk)
+// ---------------------------------------------------------------------------
+interface LightningTheme {
+  readonly skyTopWash: string;
+  readonly skyHorizonWash: string;
+  readonly cloudRim: string;
+  readonly cloudBody: string;
+  readonly boltOuter: string;
+  readonly boltMid: string;
+  readonly boltCore: string;
+}
+
+const LIGHTNING_THEMES: readonly LightningTheme[] = [
+  // 0: Electric Cyber Magenta
+  {
+    skyTopWash: '#3b0944',
+    skyHorizonWash: '#ff2a85',
+    cloudRim: '#ff70b8',
+    cloudBody: '#691460',
+    boltOuter: '#ff007f',
+    boltMid: '#ff70b8',
+    boltCore: '#ffe8f5',
+  },
+  // 1: OutRun Neon Cyan
+  {
+    skyTopWash: '#062c43',
+    skyHorizonWash: '#00f5d4',
+    cloudRim: '#72efdd',
+    cloudBody: '#114b5f',
+    boltOuter: '#00bbf9',
+    boltMid: '#72efdd',
+    boltCore: '#e8RSff'.replace('RS', 'fb'),
+  },
+  // 2: Ultraviolet Synth Purple
+  {
+    skyTopWash: '#240046',
+    skyHorizonWash: '#9d4edd',
+    cloudRim: '#e0aaff',
+    cloudBody: '#480ca8',
+    boltOuter: '#7b2cbf',
+    boltMid: '#c77dff',
+    boltCore: '#f5e6ff',
+  },
+  // 3: Laser Sunset Gold & Hot Coral
+  {
+    skyTopWash: '#4a0e2e',
+    skyHorizonWash: '#ff6d00',
+    cloudRim: '#ffbe0b',
+    cloudBody: '#801a4a',
+    boltOuter: '#ff5400',
+    boltMid: '#ffbe0b',
+    boltCore: '#fff6cc',
+  },
 ];
 
 // Static color constants to avoid dynamic string interpolation in render()
@@ -29,8 +192,17 @@ const COLOR_WHITE = '#ffffff';
 const COLOR_NIGHT_SKYLINE = '#080417';
 const COLOR_BEACON_RED = '#ff2a75';
 const COLOR_BEACON_CYAN = '#00f5d4';
-const COLOR_RAIN = '#90d8ff';
+const COLOR_RAIN_FAR = '#72b8f0';
+const COLOR_RAIN_MID = '#a2dcff';
+const COLOR_RAIN_NEAR = '#dcf3ff';
 const COLOR_WATER_DEEP = '#030514';
+
+// Relative template for the 6 volumetric puff lobes of a cumulus cloud
+// Normalized to cloudWidth (dx, rx) and cloudHeight (dy, ry)
+const CLOUD_LOBE_DX = new Float32Array([-0.32, -0.14, 0.06, 0.28, -0.06, 0.16]);
+const CLOUD_LOBE_DY = new Float32Array([0.18, -0.08, -0.22, 0.14, 0.22, 0.04]);
+const CLOUD_LOBE_RX = new Float32Array([0.22, 0.26, 0.28, 0.22, 0.30, 0.25]);
+const CLOUD_LOBE_RY = new Float32Array([0.46, 0.62, 0.72, 0.48, 0.44, 0.56]);
 
 function hexToRgba(hex: string, alpha: number): string {
   const clean = hex.startsWith('#') ? hex.slice(1) : hex;
@@ -54,7 +226,8 @@ function hexToRgba(hex: string, alpha: number): string {
  * - Layer 1: Lontanissimo (~0.10x) — calm deep water sea / majestic mountain ridges & chord-clipped sun/moon
  * - Layer 2: Intermedio (~0.45x) — dense pixel-art skyline with radio antennas & breathing window matrices
  * - Layer 3: Transizione (~0.85x) — shimmering vertical water reflections (Mayonaka Bay) & seamless horizon wash
- * - Weather & Celestial — procedural stepped clouds, beat-responsive lightning, 3-frame flap birds, constellations & shooting stars
+ * - Weather & Celestial — volumetric cumulus clouds, vibeful neon forked lightning, 3-depth rain + splashes,
+ *   3-frame flap birds, real astronomical constellations & shooting stars.
  *
  * Performance Invariant (AGENTS.md §4.3): STRICT ZERO GC ALLOCATIONS per frame.
  */
@@ -88,20 +261,38 @@ export class Background {
   private readonly towerAntennaH = new Uint8Array(CITY_TOWERS);
   private readonly towerBlinkPhase = new Float32Array(CITY_TOWERS);
 
-  // Weather: Procedural Clouds
+  // Weather: Volumetric Cumulus Clouds
   private readonly cloudX = new Float32Array(CLOUD_COUNT);
   private readonly cloudY = new Float32Array(CLOUD_COUNT);
   private readonly cloudWidth = new Float32Array(CLOUD_COUNT);
   private readonly cloudHeight = new Float32Array(CLOUD_COUNT);
   private readonly cloudSpeed = new Float32Array(CLOUD_COUNT);
+  private readonly cloudLayer = new Uint8Array(CLOUD_COUNT); // 0 = high/far, 1 = mid/near
+  private readonly cloudVariant = new Uint8Array(CLOUD_COUNT);
 
-  // Weather: Rain & Beat Lightning
+  // Weather: 3-Layer Rain & Water Splashes
   private readonly rainX = new Float32Array(RAIN_COUNT);
   private readonly rainY = new Float32Array(RAIN_COUNT);
   private readonly rainSpeed = new Float32Array(RAIN_COUNT);
   private readonly rainLength = new Float32Array(RAIN_COUNT);
+  private readonly rainLayer = new Uint8Array(RAIN_COUNT); // 0 = far, 1 = mid, 2 = near
+  private currentWindX = -65;
+
+  private readonly splashX = new Float32Array(SPLASH_COUNT);
+  private readonly splashY = new Float32Array(SPLASH_COUNT);
+  private readonly splashPhase = new Float32Array(SPLASH_COUNT);
+  private readonly splashSpeed = new Float32Array(SPLASH_COUNT);
+
+  // Weather: Vibeful Sudden Lightning & Procedural Forked Bolt
   private lightningAlpha = 0;
+  private lightningAge = 10;
+  private lightningThemeIdx = 0;
+  private lightningStrikeCount = 0;
   private prevDownbeatPulse = 0;
+  private readonly boltMainX = new Float32Array(BOLT_MAIN_NODES);
+  private readonly boltMainY = new Float32Array(BOLT_MAIN_NODES);
+  private readonly boltBranchX = new Float32Array(BOLT_BRANCH_COUNT * BOLT_BRANCH_NODES);
+  private readonly boltBranchY = new Float32Array(BOLT_BRANCH_COUNT * BOLT_BRANCH_NODES);
 
   // Weather: Birds & Gulls
   private readonly birdX = new Float32Array(BIRD_COUNT);
@@ -144,7 +335,8 @@ export class Background {
     // 1. Layer 1: Mountain ridges & Mayonaka rolling hills
     for (let i = 0; i < MOUNTAIN_POINTS; i++) {
       const t = (i / MOUNTAIN_POINTS) * Math.PI * 2;
-      const h = Math.sin(t * 2) * 16 + Math.sin(t * 5 + 1.1) * 10 + Math.cos(t * 11 + 0.4) * 5 + 24;
+      const h =
+        Math.sin(t * 2) * 16 + Math.sin(t * 5 + 1.1) * 10 + Math.cos(t * 11 + 0.4) * 5 + 24;
       this.ridgeHeights[i] = Math.max(6, h);
 
       // Rolling hills for Mayonaka Bay
@@ -155,10 +347,10 @@ export class Background {
       this.farRidgeHeights[i] = Math.max(8, hFar);
     }
 
-    // 2. Starfield & Constellation nodes
+    // 2. Background Starfield
     for (let i = 0; i < STAR_COUNT; i++) {
       this.starX[i] = ((i * 73 + 19) % 100) / 100;
-      this.starY[i] = ((i * 41 + 11) % 65) / 100;
+      this.starY[i] = ((i * 41 + 11) % 68) / 100;
       this.starPhase[i] = (i * 1.37) % (Math.PI * 2);
     }
 
@@ -171,33 +363,105 @@ export class Background {
       this.towerBlinkPhase[i] = ((i * 1.7) % 4) * Math.PI;
     }
 
-    // 4. Procedural Clouds
+    // 4. Volumetric Cumulus Clouds (2 depth layers)
     for (let i = 0; i < CLOUD_COUNT; i++) {
-      this.cloudX[i] = (i * 110 + 35) % 700;
-      this.cloudY[i] = 14 + ((i * 23 + 7) % 65);
-      this.cloudWidth[i] = 48 + ((i * 17) % 36);
-      this.cloudHeight[i] = 10 + ((i * 5) % 6);
-      this.cloudSpeed[i] = 5 + ((i * 3) % 8);
+      const isNear = i >= 4 ? 1 : 0;
+      this.cloudLayer[i] = isNear;
+      this.cloudVariant[i] = i % 3;
+      this.cloudX[i] = (i * 98 + 25) % 760;
+      this.cloudY[i] = isNear ? 34 + ((i * 19 + 5) % 42) : 18 + ((i * 23 + 11) % 34);
+      this.cloudWidth[i] = isNear ? 76 + ((i * 19) % 44) : 54 + ((i * 13) % 30);
+      this.cloudHeight[i] = isNear ? 22 + ((i * 7) % 12) : 14 + ((i * 5) % 8);
+      this.cloudSpeed[i] = isNear ? 7 + ((i * 3) % 6) : 3.5 + ((i * 2) % 4);
     }
 
-    // 5. Rain particles
+    // 5. 3-Layer Rain particles & surface splashes
     for (let i = 0; i < RAIN_COUNT; i++) {
-      this.rainX[i] = ((i * 47 + 13) % 640);
-      this.rainY[i] = ((i * 29 + 17) % 360);
-      this.rainSpeed[i] = 380 + ((i * 31) % 180);
-      this.rainLength[i] = 8 + ((i * 7) % 8);
+      const layer = i < 45 ? 0 : i < 90 ? 1 : 2;
+      this.rainLayer[i] = layer;
+      this.rainX[i] = (i * 53 + 17) % 640;
+      this.rainY[i] = (i * 37 + 11) % 360;
+      if (layer === 0) {
+        this.rainSpeed[i] = 310 + ((i * 19) % 70);
+        this.rainLength[i] = 7 + ((i * 5) % 5);
+      } else if (layer === 1) {
+        this.rainSpeed[i] = 450 + ((i * 29) % 110);
+        this.rainLength[i] = 13 + ((i * 7) % 7);
+      } else {
+        this.rainSpeed[i] = 630 + ((i * 31) % 140);
+        this.rainLength[i] = 20 + ((i * 9) % 9);
+      }
     }
+
+    for (let s = 0; s < SPLASH_COUNT; s++) {
+      this.splashX[s] = (s * 67 + 23) % 620 + 10;
+      this.splashY[s] = 172 + ((s * 43 + 19) % 180);
+      this.splashPhase[s] = (s * 0.37) % 1.0;
+      this.splashSpeed[s] = 2.6 + ((s * 7) % 5) * 0.35;
+    }
+
+    // Initialize default bolt geometry
+    this.rebuildLightningBolt(320, 180, 0);
 
     // 6. Birds / Gulls
     for (let i = 0; i < BIRD_COUNT; i++) {
       this.birdX[i] = 50 + i * 95;
       this.birdY[i] = 45 + ((i * 31) % 55);
       this.birdVx[i] = 18 + ((i * 7) % 15);
-      this.birdVy[i] = ((i % 2 === 0 ? 1 : -1) * 3);
+      this.birdVy[i] = (i % 2 === 0 ? 1 : -1) * 3;
       this.birdPhase[i] = i * 1.1;
       this.birdFrame[i] = i % 3;
       this.birdFlapTimer[i] = 0;
     }
+  }
+
+  /**
+   * Pre-computes a jagged forked lightning bolt into pre-allocated TypedArrays (Zero GC).
+   */
+  private rebuildLightningBolt(originX: number, horizonY: number, seed: number): void {
+    const startY = 8 + ((seed * 13) % 20);
+    const endY = Math.max(startY + 40, horizonY - 6);
+    const spanY = endY - startY;
+
+    let curX = originX;
+    this.boltMainX[0] = curX;
+    this.boltMainY[0] = startY;
+
+    for (let i = 1; i < BOLT_MAIN_NODES; i++) {
+      const t = i / (BOLT_MAIN_NODES - 1);
+      const zig = (((seed + i * 7) % 5) - 2) * 9 + (i % 2 === 0 ? 11 : -11);
+      curX = Math.max(24, Math.min(616, curX + zig));
+      this.boltMainX[i] = curX;
+      this.boltMainY[i] = startY + t * spanY;
+    }
+
+    // 3 Forked side branches
+    for (let b = 0; b < BOLT_BRANCH_COUNT; b++) {
+      const rootNode = 2 + b * 2;
+      const dir = (seed + b) % 2 === 0 ? 1 : -1;
+      let bx = this.boltMainX[rootNode]!;
+      let by = this.boltMainY[rootNode]!;
+      const baseIdx = b * BOLT_BRANCH_NODES;
+      this.boltBranchX[baseIdx] = bx;
+      this.boltBranchY[baseIdx] = by;
+
+      for (let n = 1; n < BOLT_BRANCH_NODES; n++) {
+        bx += dir * (8 + ((seed + b * 3 + n * 5) % 9));
+        by += 10 + ((seed + n * 7) % 8);
+        this.boltBranchX[baseIdx + n] = bx;
+        this.boltBranchY[baseIdx + n] = by;
+      }
+    }
+  }
+
+  private triggerLightningStrike(): void {
+    this.lightningStrikeCount++;
+    this.lightningAge = 0;
+    this.lightningAlpha = 1.0;
+    this.lightningThemeIdx = this.lightningStrikeCount % LIGHTNING_THEMES.length;
+
+    const strikeX = 90 + ((this.lightningStrikeCount * 173 + Math.floor(this.skyTime * 97)) % 460);
+    this.rebuildLightningBolt(strikeX, 180, this.lightningStrikeCount);
   }
 
   /**
@@ -240,38 +504,69 @@ export class Background {
     // Weather System Updates (Zero GC: mutate pre-allocated TypedArrays)
     // -------------------------------------------------------------------------
 
-    // 1. Procedural Clouds (slow wind drift + curve parallax)
+    // 1. Volumetric Clouds (depth-layered wind drift + curve parallax)
     if (tuning.bgClouds === 1) {
       for (let i = 0; i < CLOUD_COUNT; i++) {
-        this.cloudX[i] += (this.cloudSpeed[i]! - curveSpd * 18) * dt;
-        if (this.cloudX[i]! > 760) this.cloudX[i]! -= 860;
-        else if (this.cloudX[i]! < -100) this.cloudX[i]! += 860;
+        const parallaxFactor = this.cloudLayer[i] === 1 ? 22 : 12;
+        this.cloudX[i] += (this.cloudSpeed[i]! - curveSpd * parallaxFactor) * dt;
+        if (this.cloudX[i]! > 780) this.cloudX[i]! -= 920;
+        else if (this.cloudX[i]! < -140) this.cloudX[i]! += 920;
       }
     }
 
-    // 2. Rain & Storm Physics
+    // 2. Rain & Storm Physics (3 depth tiers + surface splashes)
     if (tuning.bgRain === 1) {
-      const windX = -65 - curveSpd * 85;
+      const targetWindX = -72 - curveSpd * 95;
+      this.currentWindX += (targetWindX - this.currentWindX) * Math.min(1, dt * 8);
+
       for (let i = 0; i < RAIN_COUNT; i++) {
+        const layerScale = this.rainLayer[i] === 0 ? 0.65 : this.rainLayer[i] === 1 ? 1.0 : 1.35;
         this.rainY[i] += this.rainSpeed[i]! * dt;
-        this.rainX[i] += windX * dt;
-        if (this.rainY[i]! > 365) {
+        this.rainX[i] += this.currentWindX * layerScale * dt;
+        if (this.rainY[i]! > 368) {
           this.rainY[i] = -this.rainLength[i]!;
-          this.rainX[i] = (this.rainX[i]! + 260) % 640;
+          this.rainX[i] = (this.rainX[i]! + 257) % 640;
         }
-        if (this.rainX[i]! < -10) this.rainX[i]! += 660;
-        else if (this.rainX[i]! > 650) this.rainX[i]! -= 660;
+        if (this.rainX[i]! < -20) this.rainX[i]! += 680;
+        else if (this.rainX[i]! > 660) this.rainX[i]! -= 680;
+      }
+
+      for (let s = 0; s < SPLASH_COUNT; s++) {
+        this.splashPhase[s] += this.splashSpeed[s]! * dt;
+        if (this.splashPhase[s]! >= 1.0) {
+          this.splashPhase[s]! -= 1.0;
+          this.splashX[s] = (this.splashX[s]! + 173) % 620 + 10;
+        }
       }
     }
 
-    // 3. Lightning Flash (beat-responsive on strong downbeats or drops)
-    if (tuning.bgLightningOnBeat === 1 && downbeatPulse > 0.8 && this.prevDownbeatPulse <= 0.8) {
-      this.lightningAlpha = 0.95;
+    // 3. Sudden Vibeful Lightning Flash (multi-flicker envelope on strong downbeats)
+    const threshold = tuning.bgRain === 1 ? 0.72 : 0.8;
+    if (
+      tuning.bgLightningOnBeat === 1 &&
+      downbeatPulse > threshold &&
+      this.prevDownbeatPulse <= threshold
+    ) {
+      this.triggerLightningStrike();
     }
     this.prevDownbeatPulse = downbeatPulse;
 
     if (this.lightningAlpha > 0) {
-      this.lightningAlpha = Math.max(0, this.lightningAlpha - dt * 5.5);
+      this.lightningAge += dt;
+      // Sudden double-flicker envelope:
+      // 0..42ms: full sudden flash (1.0)
+      // 42..80ms: sharp micro-dip (0.28)
+      // 80..135ms: secondary re-strike (0.92)
+      // >135ms: rapid synthwave afterglow decay
+      if (this.lightningAge < 0.042) {
+        this.lightningAlpha = 1.0;
+      } else if (this.lightningAge < 0.08) {
+        this.lightningAlpha = 0.28;
+      } else if (this.lightningAge < 0.135) {
+        this.lightningAlpha = 0.92;
+      } else {
+        this.lightningAlpha = Math.max(0, this.lightningAlpha - dt * 4.2);
+      }
     }
 
     // 4. Birds & Gulls
@@ -292,21 +587,21 @@ export class Background {
       }
     }
 
-    // 5. Constellations & Shooting Stars
+    // 5. Real Constellations & Shooting Stars
     if (tuning.bgConstellations === 1) {
       this.constellationTimer += dt;
-      const cycle = this.constellationTimer % 14;
+      const cycle = this.constellationTimer % 12;
       if (cycle < 1.2) {
-        this.constellationAlpha = cycle / 1.2;
-      } else if (cycle < 4.8) {
+        this.constellationAlpha = 0.35 + (cycle / 1.2) * 0.65;
+      } else if (cycle < 8.5) {
         this.constellationAlpha = 1.0;
-      } else if (cycle < 6.0) {
-        this.constellationAlpha = (6.0 - cycle) / 1.2;
+      } else if (cycle < 10.5) {
+        this.constellationAlpha = 0.35 + ((10.5 - cycle) / 2.0) * 0.65;
       } else {
-        this.constellationAlpha = 0;
-        this.activeConstellationGroup =
-          Math.floor(this.constellationTimer / 14) % CONSTELLATION_GROUPS.length;
+        this.constellationAlpha = 0.35;
       }
+      this.activeConstellationGroup =
+        Math.floor(this.constellationTimer / 12) % REAL_CONSTELLATIONS.length;
 
       this.shootingStarTimer += dt;
       if (this.shootingStarTimer > 6.5) {
@@ -351,11 +646,18 @@ export class Background {
     const pulse = beatPulse * tuning.bpmPulseStrength;
     const downPulse = downbeatPulse * tuning.bpmPulseStrength;
 
-    // Check for downbeat lightning trigger if called via render
-    if (tuning.bgLightningOnBeat === 1 && downbeatPulse > 0.8 && this.prevDownbeatPulse <= 0.8) {
-      this.lightningAlpha = 0.95;
+    // Check for downbeat lightning trigger if called directly via render
+    const threshold = tuning.bgRain === 1 ? 0.72 : 0.8;
+    if (
+      tuning.bgLightningOnBeat === 1 &&
+      downbeatPulse > threshold &&
+      this.prevDownbeatPulse <= threshold
+    ) {
+      this.triggerLightningStrike();
     }
     this.prevDownbeatPulse = downbeatPulse;
+
+    const lTheme = LIGHTNING_THEMES[this.lightningThemeIdx] ?? LIGHTNING_THEMES[0]!;
 
     // -------------------------------------------------------------------------
     // 1. SKY GRADIENT (Cached across frames unless palette or height changes)
@@ -378,25 +680,41 @@ export class Background {
     ctx.fillStyle = this.cachedSkyGrad;
     ctx.fillRect(0, 0, width, horizonY + 2);
 
-    // 1b. Beat Lightning Sky Flash (if active)
+    // 1b. Vibeful Sudden Lightning Sky Wash & Forked Neon Bolt (if active)
     if (this.lightningAlpha > 0.01) {
-      ctx.fillStyle = COLOR_WHITE;
-      ctx.globalAlpha = this.lightningAlpha * 0.65;
-      ctx.fillRect(0, 0, width, horizonY + 2);
+      const upperH = Math.floor(horizonY * 0.58);
+      // Upper sky deep electric wash
+      ctx.fillStyle = lTheme.skyTopWash;
+      ctx.globalAlpha = this.lightningAlpha * 0.72;
+      ctx.fillRect(0, 0, width, upperH);
+
+      // Lower horizon vibrant neon flash
+      ctx.fillStyle = lTheme.skyHorizonWash;
+      ctx.globalAlpha = this.lightningAlpha * 0.62;
+      ctx.fillRect(0, upperH, width, horizonY - upperH + 2);
+
+      // Intense localized plasma glow around the lightning origin
+      const originX = this.boltMainX[0]!;
+      ctx.fillStyle = lTheme.boltMid;
+      ctx.globalAlpha = this.lightningAlpha * 0.38;
+      ctx.fillRect(Math.max(0, originX - 90), 0, 180, horizonY);
+      ctx.fillStyle = lTheme.boltCore;
+      ctx.globalAlpha = this.lightningAlpha * 0.25;
+      ctx.fillRect(Math.max(0, originX - 42), 0, 84, Math.floor(horizonY * 0.75));
       ctx.globalAlpha = 1;
     }
 
     // -------------------------------------------------------------------------
-    // 2. CELESTIAL VAULT: Stars, Constellations & Shooting Stars
+    // 2. CELESTIAL VAULT: Twinkling Stars, Real Constellations & Shooting Stars
     // -------------------------------------------------------------------------
     const starScroll = this.scroll1 * 0.45;
     const starCol1 = palette.starColors ? palette.starColors[0] : palette.mountainRim;
     const starCol2 = palette.starColors ? palette.starColors[1] : '#fff3b0';
 
-    // 2a. Twinkling Stars
+    // 2a. Background Twinkling Stars
     for (let i = 0; i < STAR_COUNT; i++) {
       const sx = Math.round((this.starX[i]! * width - starScroll + width * 3) % width);
-      const sy = Math.round(this.starY[i]! * (horizonY - 42)) + 4;
+      const sy = Math.round(this.starY[i]! * (horizonY - 46)) + 4;
       const twinkle = Math.sin(this.skyTime * 3.2 + this.starPhase[i]!);
       if (twinkle > -0.25) {
         ctx.fillStyle = i % 3 === 0 ? starCol1 : starCol2;
@@ -405,42 +723,58 @@ export class Background {
       }
     }
 
-    // 2b. Constellations connecting existing star dots occasionally
+    // 2b. Real Astronomical Constellations (Ursa Major, Cassiopeia, Orion, Cygnus, Scorpius)
     if (tuning.bgConstellations === 1) {
-      if (this.constellationAlpha > 0.01) {
-        const group =
-          CONSTELLATION_GROUPS[this.activeConstellationGroup] ?? CONSTELLATION_GROUPS[0]!;
-        const edgeCount = group.length;
+      const activeAlpha = Math.max(0.32, this.constellationAlpha);
+      for (let cIdx = 0; cIdx < REAL_CONSTELLATIONS.length; cIdx++) {
+        const c = REAL_CONSTELLATIONS[cIdx]!;
+        const isSpotlight = cIdx === this.activeConstellationGroup;
+        const cAlpha = isSpotlight
+          ? activeAlpha * (0.52 + pulse * 0.35)
+          : 0.24 + pulse * 0.14;
 
-        ctx.strokeStyle = starCol1;
-        ctx.lineWidth = 1;
-        ctx.globalAlpha = this.constellationAlpha * (0.32 + pulse * 0.38);
+        // Rigid constellation anchor so stars never split across screen wrap
+        const anchorX = ((c.anchorX - starScroll) % width + width) % width;
+        const anchorY = c.anchorY;
+
+        // Soft astronomical chart connecting lines
+        ctx.strokeStyle = isSpotlight ? starCol1 : starCol2;
+        ctx.lineWidth = isSpotlight ? 1.15 : 0.75;
+        ctx.globalAlpha = Math.min(0.92, cAlpha);
         ctx.beginPath();
-        for (let e = 0; e < edgeCount; e += 2) {
-          const idxA = group[e]!;
-          const idxB = group[e + 1]!;
-          const ax = Math.round((this.starX[idxA]! * width - starScroll + width * 3) % width);
-          const ay = Math.round(this.starY[idxA]! * (horizonY - 42)) + 4;
-          const bx = Math.round((this.starX[idxB]! * width - starScroll + width * 3) % width);
-          const by = Math.round(this.starY[idxB]! * (horizonY - 42)) + 4;
-
-          if (Math.abs(ax - bx) < width * 0.35) {
-            ctx.moveTo(ax, ay);
-            ctx.lineTo(bx, by);
-          }
+        const edges = c.edges;
+        for (let e = 0; e < edges.length; e += 2) {
+          const sA = c.stars[edges[e]!]!;
+          const sB = c.stars[edges[e + 1]!]!;
+          ctx.moveTo(anchorX + sA.dx, anchorY + sA.dy);
+          ctx.lineTo(anchorX + sB.dx, anchorY + sB.dy);
         }
         ctx.stroke();
 
-        // Subtle diamond accent on the active constellation star nodes
-        ctx.fillStyle = starCol2;
-        for (let e = 0; e < edgeCount; e += 2) {
-          const idxA = group[e]!;
-          const ax = Math.round((this.starX[idxA]! * width - starScroll + width * 3) % width);
-          const ay = Math.round(this.starY[idxA]! * (horizonY - 42)) + 4;
-          ctx.fillRect(ax - 1, ay - 1, 3, 3);
+        // Render true constellation stars & cross-flares on magnitude-2 alpha stars
+        for (let s = 0; s < c.stars.length; s++) {
+          const st = c.stars[s]!;
+          const sx = Math.round(anchorX + st.dx);
+          const sy = Math.round(anchorY + st.dy);
+          if (sx < -8 || sx > width + 8) continue;
+
+          ctx.fillStyle = st.color ?? (st.mag === 2 ? starCol2 : starCol1);
+          if (st.mag === 2) {
+            ctx.globalAlpha = isSpotlight ? Math.min(1, activeAlpha + 0.25) : 0.75;
+            ctx.fillRect(sx - 1, sy - 1, 3, 3);
+            if (isSpotlight) {
+              // 4-point celestial cross flare on principal stars
+              ctx.globalAlpha = activeAlpha * (0.45 + pulse * 0.35);
+              ctx.fillRect(sx - 3, sy, 7, 1);
+              ctx.fillRect(sx, sy - 3, 1, 7);
+            }
+          } else {
+            ctx.globalAlpha = isSpotlight ? 0.85 : 0.55;
+            ctx.fillRect(sx, sy, 2, 2);
+          }
         }
-        ctx.globalAlpha = 1;
       }
+      ctx.globalAlpha = 1;
 
       // 2c. Shooting Stars
       for (let s = 0; s < SHOOTING_STAR_COUNT; s++) {
@@ -461,33 +795,7 @@ export class Background {
     }
 
     // -------------------------------------------------------------------------
-    // 3. PROCEDURAL CLOUDS (stepped pixel-art dithering)
-    // -------------------------------------------------------------------------
-    if (tuning.bgClouds === 1) {
-      for (let i = 0; i < CLOUD_COUNT; i++) {
-        const cx = Math.round(this.cloudX[i]!);
-        const cy = Math.round(this.cloudY[i]!);
-        const cw = Math.round(this.cloudWidth[i]!);
-        const ch = Math.round(this.cloudHeight[i]!);
-
-        if (cx + cw < -20 || cx > width + 20) continue;
-
-        // Cloud base fill
-        ctx.fillStyle = this.lightningAlpha > 0.1 ? COLOR_WHITE : palette.skyMid;
-        ctx.globalAlpha = this.lightningAlpha > 0.1 ? 0.75 : 0.40;
-        ctx.fillRect(cx + 6, cy, cw - 12, ch);
-        ctx.fillRect(cx, cy + 3, cw, ch - 5);
-
-        // Stepped pixel-art bottom rim
-        ctx.fillStyle = this.lightningAlpha > 0.1 ? COLOR_WHITE : palette.skyHorizon;
-        ctx.globalAlpha = this.lightningAlpha > 0.1 ? 0.90 : 0.48;
-        ctx.fillRect(cx + 4, cy + ch - 2, cw - 8, 2);
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    // -------------------------------------------------------------------------
-    // 4. RETRO SYNTHWAVE SUN / MOON (in Layer 1)
+    // 3. RETRO SYNTHWAVE SUN / MOON (in Layer 1, behind near clouds)
     // -------------------------------------------------------------------------
     const sunX = width * 0.5 - this.sunOffset;
     const sunY = horizonY - 22;
@@ -530,6 +838,17 @@ export class Background {
     }
 
     // -------------------------------------------------------------------------
+    // 3b. VOLUMETRIC CUMULUS CLOUDS & FORKED NEON LIGHTNING BOLT
+    // -------------------------------------------------------------------------
+    if (this.lightningAlpha > 0.05) {
+      this.renderForkedLightningBolt(ctx, lTheme);
+    }
+
+    if (tuning.bgClouds === 1) {
+      this.renderVolumetricClouds(ctx, width, sunX, palette, lTheme);
+    }
+
+    // -------------------------------------------------------------------------
     // 5. FALLBACK GROUND FILL (occludes celestial body below road horizon)
     // -------------------------------------------------------------------------
     ctx.fillStyle = palette.grass[1];
@@ -566,19 +885,19 @@ export class Background {
       ctx.fillRect(0, seaTopY, width, seaH + 2);
 
       // Distant calm sea horizon line
-      ctx.fillStyle = palette.mountainRim;
-      ctx.globalAlpha = 0.50 + pulse * 0.25;
+      ctx.fillStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
+      ctx.globalAlpha = 0.5 + pulse * 0.25;
       ctx.fillRect(0, seaTopY, width, 1);
       ctx.globalAlpha = 1;
 
       // Golden setting sun reflection column on water surface directly below the sun
       const sunRefW = Math.max(16, sunR * 0.45);
-      ctx.fillStyle = palette.sunBottom;
+      ctx.fillStyle = this.lightningAlpha > 0.2 ? lTheme.boltMid : palette.sunBottom;
       for (let dy = 0; dy < seaH; dy++) {
         const y = seaTopY + dy;
         const rip = Math.sin(this.skyTime * 4.2 + dy * 0.75) * 2.2;
         const expand = (dy / seaH) * 22;
-        const refAlpha = (1 - (dy / seaH) * 0.40) * (0.45 + pulse * 0.28);
+        const refAlpha = (1 - (dy / seaH) * 0.4) * (0.45 + pulse * 0.28);
         ctx.globalAlpha = Math.min(0.85, refAlpha);
         ctx.fillRect(sunX - (sunRefW + expand) * 0.5 + rip, y, sunRefW + expand, 1);
       }
@@ -612,10 +931,10 @@ export class Background {
       }
       ctx.lineTo(width, horizonY + 2);
       ctx.closePath();
-      ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : palette.mountain;
+      ctx.fillStyle = this.lightningAlpha > 0.08 ? '#04020a' : palette.mountain;
       ctx.fill();
 
-      // Soft hill rim
+      // Soft hill rim (flashes with electric lightning rim on strike)
       ctx.beginPath();
       for (let i = 0; i <= pointsNeeded; i++) {
         const idx = (startIdx + i) % MOUNTAIN_POINTS;
@@ -624,8 +943,8 @@ export class Background {
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = palette.mountainRim;
-      ctx.lineWidth = 1.0 + pulse * 0.8;
+      ctx.strokeStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
+      ctx.lineWidth = 1.0 + pulse * 0.8 + this.lightningAlpha * 1.2;
       ctx.stroke();
     } else {
       // Akiba Night Rush: Jagged dark mountains enclosing the metropolis
@@ -644,7 +963,7 @@ export class Background {
       }
       ctx.lineTo(width, horizonY + 2);
       ctx.closePath();
-      ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : palette.mountain;
+      ctx.fillStyle = this.lightningAlpha > 0.08 ? '#04020a' : palette.mountain;
       ctx.fill();
 
       // Glowing neon mountain ridge rim
@@ -656,8 +975,8 @@ export class Background {
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = palette.mountainRim;
-      ctx.lineWidth = 1.2 + pulse * 1.1;
+      ctx.strokeStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
+      ctx.lineWidth = 1.2 + pulse * 1.1 + this.lightningAlpha * 1.4;
       ctx.stroke();
     }
 
@@ -679,10 +998,6 @@ export class Background {
         const tw = this.towerWidths[t]!;
         if (tx + tw < -10 || tx > width + 10) continue;
 
-        // Tailor building heights per theme:
-        // - Sunset Boulevard: palazzi bassi (2-4 piani: 6..14px)
-        // - Akiba Night: palazzi alti (18..48px)
-        // - Mayonaka Bay: palazzi medio-alti (12..28px)
         const th = isSunsetBoulevard
           ? Math.min(14, 5 + ((t * 5 + 3) % 9))
           : isAkibaNight
@@ -692,8 +1007,8 @@ export class Background {
         const ty = skylineBaseY - th;
         const style = this.towerStyle[t]!;
 
-        // 7a. Building silhouette (pure black on lightning flash for reverse silhouette)
-        ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : COLOR_NIGHT_SKYLINE;
+        // 7a. Building silhouette (deep contrast on lightning flash)
+        ctx.fillStyle = this.lightningAlpha > 0.08 ? '#030108' : COLOR_NIGHT_SKYLINE;
         if (style === 1) {
           // Stepped art-deco tower
           const stepW = Math.max(4, Math.floor(tw * 0.65));
@@ -714,11 +1029,19 @@ export class Background {
           ctx.fillRect(tx, ty, tw, th + (horizonY - skylineBaseY));
         }
 
+        // Rooftop neon rim highlight during lightning
+        if (this.lightningAlpha > 0.12 && style !== 2) {
+          ctx.fillStyle = lTheme.boltMid;
+          ctx.globalAlpha = this.lightningAlpha * 0.7;
+          ctx.fillRect(tx, ty, tw, 1);
+          ctx.globalAlpha = 1;
+        }
+
         // 7b. Radio antenna with blinking red/cyan LED beacon
         const antH = isSunsetBoulevard ? 0 : this.towerAntennaH[t]!;
         if (antH > 0) {
           const antX = tx + Math.floor(tw * 0.5);
-          ctx.fillStyle = this.lightningAlpha > 0.05 ? '#000000' : '#1e1438';
+          ctx.fillStyle = this.lightningAlpha > 0.08 ? '#030108' : '#1e1438';
           ctx.fillRect(antX, ty - antH, 1, antH);
 
           // LED beacon at the tip of the antenna
@@ -756,7 +1079,6 @@ export class Background {
     // Vertical Water Reflections for Sunset Boulevard Coast & Breakwater Wash
     // -------------------------------------------------------------------------
     if (isSunsetBoulevard) {
-      // Vertical Water Reflections directly beneath the skyline towers
       const waterTopY = skylineBaseY;
       const waterH = horizonY - waterTopY;
 
@@ -770,7 +1092,6 @@ export class Background {
           const th = this.towerHeights[t]!;
           if (th < 12) continue;
 
-          // Shimmering vertical light columns stretching down across the water
           const colColor = t % 2 === 0 ? winPrimary : winAccent;
           ctx.fillStyle = colColor;
           const refW = Math.max(3, tw - 4);
@@ -809,7 +1130,10 @@ export class Background {
       this.cachedGlowGrad = grad;
     }
 
-    const washAlpha = Math.min(0.78, 0.22 + pulse * 0.36 + downPulse * 0.18);
+    const washAlpha = Math.min(
+      0.85,
+      0.22 + pulse * 0.36 + downPulse * 0.18 + this.lightningAlpha * 0.28,
+    );
     ctx.globalAlpha = washAlpha;
     ctx.fillStyle = this.cachedGlowGrad;
     ctx.fillRect(0, horizonY - glowH, width, glowH);
@@ -849,21 +1173,252 @@ export class Background {
     }
 
     // -------------------------------------------------------------------------
-    // 11. PIOGGIA & TEMPESTA (fast angled rain streaks, single batch stroke)
+    // 11. MULTI-LAYER ATMOSPHERIC RAIN (Far & Mid sky tiers + specular streaks)
     // -------------------------------------------------------------------------
     if (tuning.bgRain === 1) {
-      ctx.strokeStyle = COLOR_RAIN;
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.52;
+      this.renderRainLayers(ctx, palette, lTheme, false);
+    }
+  }
+
+  /**
+   * Optional foreground weather pass called by `Game.render()` after road & car
+   * so near-camera raindrops and wet road splashes appear in front of the asphalt.
+   */
+  renderForegroundWeather(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    palette: StagePalette,
+  ): void {
+    const lTheme = LIGHTNING_THEMES[this.lightningThemeIdx] ?? LIGHTNING_THEMES[0]!;
+
+    // Subtle atmospheric neon wash on road/car during a lightning strike
+    if (this.lightningAlpha > 0.02) {
+      const horizonY = Math.floor(height * 0.5);
+      ctx.fillStyle = lTheme.skyHorizonWash;
+      ctx.globalAlpha = this.lightningAlpha * 0.16;
+      ctx.fillRect(0, horizonY, width, height - horizonY);
+      ctx.globalAlpha = 1;
+    }
+
+    if (tuning.bgRain === 1) {
+      this.renderRainLayers(ctx, palette, lTheme, true);
+    }
+  }
+
+  /**
+   * Renders the forked neon lightning bolt in 3 passes (outer neon glow, mid plasma, bright core).
+   */
+  private renderForkedLightningBolt(
+    ctx: CanvasRenderingContext2D,
+    lTheme: LightningTheme,
+  ): void {
+    const alpha = this.lightningAlpha;
+
+    // Pass 1: Wide electric neon halo
+    ctx.strokeStyle = lTheme.boltOuter;
+    ctx.lineWidth = 4.2;
+    ctx.globalAlpha = alpha * 0.52;
+    this.traceLightningPaths(ctx);
+    ctx.stroke();
+
+    // Pass 2: Mid neon plasma
+    ctx.strokeStyle = lTheme.boltMid;
+    ctx.lineWidth = 2.2;
+    ctx.globalAlpha = alpha * 0.85;
+    this.traceLightningPaths(ctx);
+    ctx.stroke();
+
+    // Pass 3: Crisp incandescent core
+    ctx.strokeStyle = lTheme.boltCore;
+    ctx.lineWidth = 1.0;
+    ctx.globalAlpha = alpha;
+    this.traceLightningPaths(ctx);
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+  }
+
+  private traceLightningPaths(ctx: CanvasRenderingContext2D): void {
+    ctx.beginPath();
+    ctx.moveTo(this.boltMainX[0]!, this.boltMainY[0]!);
+    for (let i = 1; i < BOLT_MAIN_NODES; i++) {
+      ctx.lineTo(this.boltMainX[i]!, this.boltMainY[i]!);
+    }
+    for (let b = 0; b < BOLT_BRANCH_COUNT; b++) {
+      const baseIdx = b * BOLT_BRANCH_NODES;
+      ctx.moveTo(this.boltBranchX[baseIdx]!, this.boltBranchY[baseIdx]!);
+      for (let n = 1; n < BOLT_BRANCH_NODES; n++) {
+        ctx.lineTo(this.boltBranchX[baseIdx + n]!, this.boltBranchY[baseIdx + n]!);
+      }
+    }
+  }
+
+  /**
+   * Renders true multi-lobed volumetric cumulus clouds with 4-tone shading:
+   * 1. Sun/Moon upper crown rim highlight
+   * 2. Billowing puff domes (arc lobes + sculpted pixel-art volume steps)
+   * 3. Deep atmospheric shadow belly
+   * 4. Horizon neon under-glow rim
+   */
+  private renderVolumetricClouds(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    sunX: number,
+    palette: StagePalette,
+    lTheme: LightningTheme,
+  ): void {
+    const isFlashing = this.lightningAlpha > 0.1;
+    const crownColor = isFlashing ? lTheme.boltCore : palette.sunTop;
+    const bodyColor = isFlashing ? lTheme.cloudBody : palette.skyMid;
+    const bellyShadowColor = palette.skyTop;
+    const underRimColor = isFlashing ? lTheme.cloudRim : palette.skyHorizon;
+
+    for (let i = 0; i < CLOUD_COUNT; i++) {
+      const cx = Math.round(this.cloudX[i]!);
+      const cy = Math.round(this.cloudY[i]!);
+      const cw = Math.round(this.cloudWidth[i]!);
+      const ch = Math.round(this.cloudHeight[i]!);
+      const isNear = this.cloudLayer[i] === 1;
+      const variant = this.cloudVariant[i]!;
+
+      if (cx + cw < -40 || cx - cw > width + 40) continue;
+
+      const centerX = cx + cw * 0.5;
+      const centerY = cy + ch * 0.55;
+      const sunDir = centerX < sunX ? 1.5 : -1.5;
+      const layerAlpha = isNear ? 0.86 : 0.58;
+
+      // 1. Upper Sunlit / Moonlit Crown Highlight Lobes (offset toward sun & top)
+      ctx.fillStyle = crownColor;
+      ctx.globalAlpha = (isFlashing ? 0.88 : 0.52) * layerAlpha;
       ctx.beginPath();
-      for (let i = 0; i < RAIN_COUNT; i++) {
+      for (let l = 0; l < LOBES_PER_CLOUD; l++) {
+        const flip = variant === 1 ? -1 : 1;
+        const lx = centerX + CLOUD_LOBE_DX[l]! * cw * flip + sunDir;
+        const ly = centerY + CLOUD_LOBE_DY[l]! * ch - 2.2;
+        const r = Math.max(5, (CLOUD_LOBE_RX[l]! * cw + CLOUD_LOBE_RY[l]! * ch) * 0.32);
+        ctx.moveTo(lx + r, ly);
+        ctx.arc(lx, ly, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+
+      // 2. Main Billowing Cumulus Puff Body (overlapping volumetric domes + pixel-art terrace)
+      ctx.fillStyle = bodyColor;
+      ctx.globalAlpha = (isFlashing ? 0.85 : 0.78) * layerAlpha;
+      ctx.beginPath();
+      for (let l = 0; l < LOBES_PER_CLOUD; l++) {
+        const flip = variant === 1 ? -1 : 1;
+        const lx = centerX + CLOUD_LOBE_DX[l]! * cw * flip;
+        const ly = centerY + CLOUD_LOBE_DY[l]! * ch;
+        const r = Math.max(5, (CLOUD_LOBE_RX[l]! * cw + CLOUD_LOBE_RY[l]! * ch) * 0.34);
+        ctx.moveTo(lx + r, ly);
+        ctx.arc(lx, ly, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+
+      // Sculpted volumetric core & flat condensation base
+      const baseTopY = Math.round(centerY - ch * 0.12);
+      const baseH = Math.max(5, Math.round(ch * 0.52));
+      ctx.fillRect(Math.round(cx + cw * 0.14), baseTopY, Math.round(cw * 0.72), baseH);
+      ctx.fillRect(
+        Math.round(cx + cw * 0.24),
+        Math.round(centerY - ch * 0.36),
+        Math.round(cw * 0.48),
+        Math.max(4, Math.round(ch * 0.32)),
+      );
+
+      // 3. Internal Deep Shadow Belly (gives 3D weight & depth to the lower cloud mass)
+      ctx.fillStyle = bellyShadowColor;
+      ctx.globalAlpha = (isFlashing ? 0.65 : 0.56) * layerAlpha;
+      const bellyY = baseTopY + Math.floor(baseH * 0.45);
+      const bellyH = Math.max(3, Math.ceil(baseH * 0.55));
+      ctx.fillRect(Math.round(cx + cw * 0.12), bellyY, Math.round(cw * 0.76), bellyH);
+
+      // 4. Warm / Neon Horizon Under-Glow Rim along the condensation base
+      ctx.fillStyle = underRimColor;
+      ctx.globalAlpha = (isFlashing ? 0.95 : 0.62) * layerAlpha;
+      ctx.fillRect(Math.round(cx + cw * 0.16), bellyY + bellyH - 1, Math.round(cw * 0.68), 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /**
+   * Renders depth-layered angled rain streaks aligned with the dynamic wind vector
+   * and shimmering ground/horizon water splashes.
+   */
+  private renderRainLayers(
+    ctx: CanvasRenderingContext2D,
+    palette: StagePalette,
+    lTheme: LightningTheme,
+    foregroundOnly: boolean,
+  ): void {
+    const isFlashing = this.lightningAlpha > 0.1;
+
+    if (!foregroundOnly) {
+      // Tier 0: Far Fine Mist Streaks (45 drops)
+      ctx.strokeStyle = isFlashing ? lTheme.boltMid : palette.skyHorizon || COLOR_RAIN_FAR;
+      ctx.lineWidth = 0.75;
+      ctx.globalAlpha = 0.28 + this.lightningAlpha * 0.22;
+      ctx.beginPath();
+      for (let i = 0; i < 45; i++) {
         const rx = this.rainX[i]!;
         const ry = this.rainY[i]!;
         const len = this.rainLength[i]!;
+        const dx = (this.currentWindX * 0.65 * len) / this.rainSpeed[i]!;
         ctx.moveTo(rx, ry);
-        ctx.lineTo(rx - 3, ry + len);
+        ctx.lineTo(rx + dx, ry + len);
       }
       ctx.stroke();
+
+      // Tier 1: Mid-Ground Crisp Rain Streaks (45 drops)
+      ctx.strokeStyle = isFlashing ? lTheme.boltCore : COLOR_RAIN_MID;
+      ctx.lineWidth = 1.0;
+      ctx.globalAlpha = 0.48 + this.lightningAlpha * 0.26;
+      ctx.beginPath();
+      for (let i = 45; i < 90; i++) {
+        const rx = this.rainX[i]!;
+        const ry = this.rainY[i]!;
+        const len = this.rainLength[i]!;
+        const dx = (this.currentWindX * len) / this.rainSpeed[i]!;
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx + dx, ry + len);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else {
+      // Tier 2: Near-Camera Specular Rain Streaks (30 fast drops over road & car)
+      ctx.strokeStyle = isFlashing ? lTheme.boltCore : COLOR_RAIN_NEAR;
+      ctx.lineWidth = 1.3;
+      ctx.globalAlpha = 0.62 + this.lightningAlpha * 0.28;
+      ctx.beginPath();
+      for (let i = 90; i < RAIN_COUNT; i++) {
+        const rx = this.rainX[i]!;
+        const ry = this.rainY[i]!;
+        const len = this.rainLength[i]!;
+        const dx = (this.currentWindX * 1.35 * len) / this.rainSpeed[i]!;
+        ctx.moveTo(rx, ry);
+        ctx.lineTo(rx + dx, ry + len);
+      }
+      ctx.stroke();
+
+      // Shimmering Wet Ground / Horizon Micro-Splashes & Ripples
+      ctx.fillStyle = isFlashing ? lTheme.boltCore : COLOR_RAIN_NEAR;
+      for (let s = 0; s < SPLASH_COUNT; s++) {
+        const phase = this.splashPhase[s]!;
+        const sx = Math.round(this.splashX[s]!);
+        const sy = Math.round(this.splashY[s]!);
+        const radius = Math.round(2 + phase * 6);
+        const fade = (1 - phase) * 0.55;
+        ctx.globalAlpha = fade;
+        // Expanding horizontal ripple ring
+        ctx.fillRect(sx - radius, sy, radius * 2, 1);
+        if (phase < 0.38) {
+          // Tiny crown droplets bouncing up on impact
+          ctx.fillRect(sx - 2, sy - 2, 1, 2);
+          ctx.fillRect(sx + 2, sy - 2, 1, 2);
+        }
+      }
       ctx.globalAlpha = 1;
     }
   }

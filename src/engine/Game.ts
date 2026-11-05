@@ -854,6 +854,7 @@ export class Game {
     this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
     this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic);
     drawPlayerCar(ctx, this.car, width, height);
+    this.background.renderForegroundWeather(ctx, width, height, this.palette);
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
 
