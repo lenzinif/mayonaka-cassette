@@ -171,6 +171,16 @@ export function HUD({
           1500,
           'cyan',
         );
+      } else if (event.type === 'autopilotToggled') {
+        showToast(
+          event.enabled
+            ? `AI AUTOPILOT ON // [${event.mode.toUpperCase()}]`
+            : 'MANUAL DRIVING RESTORED',
+          1800,
+          event.enabled ? 'emerald' : 'cyan',
+          1500,
+          'cyan',
+        );
       } else if (event.type === 'sodaSpill') {
         showToast(
           `MELON SODA SPILL! -${Math.round(event.grooveLost)} GROOVE`,
@@ -366,6 +376,11 @@ export function HUD({
               </div>
 
               <div className="flex shrink-0 items-center gap-1">
+                {snap?.autopilotActive && (
+                  <span className="animate-pulse rounded border border-cyan-300/80 bg-cyan-950/90 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300 shadow-[0_0_10px_rgba(5,217,232,0.5)]">
+                    🤖 AUTO [{snap.autopilotMode?.toUpperCase() ?? 'ON'}]
+                  </span>
+                )}
                 {tofuMode && (
                   <span className="rounded border border-emerald-300/80 bg-emerald-950/90 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.35)]">
                     TOFU ×2

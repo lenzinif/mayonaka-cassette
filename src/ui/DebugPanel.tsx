@@ -48,6 +48,8 @@ export interface DebugPanelProps {
   onClose: () => void;
   bridge?: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   onSelectPalette?: (index: number) => void;
+  onToggleAutopilot?: () => void;
+  onSetAutopilotMode?: (mode: 'perfect' | 'relaxed' | 'aggressive') => void;
 }
 
 export const FUTURE_FUNK_THEMES = [
@@ -65,7 +67,14 @@ type DebugTab = 'tuning' | 'profiler';
  * Mutates `tuning` in place so changes are felt on the very next simulation step,
  * and monitors real-time frame time, physics cost, and draw counts with zero runtime overhead.
  */
-export function DebugPanel({ open, onClose, bridge, onSelectPalette }: DebugPanelProps) {
+export function DebugPanel({
+  open,
+  onClose,
+  bridge,
+  onSelectPalette,
+  onToggleAutopilot,
+  onSetAutopilotMode,
+}: DebugPanelProps) {
   const [tab, setTab] = useState<DebugTab>('tuning');
   const [values, setValues] = useState<Tuning>(() => ({ ...tuning }));
   const [copied, setCopied] = useState(false);
@@ -279,6 +288,47 @@ export function DebugPanel({ open, onClose, bridge, onSelectPalette }: DebugPane
       {/* Tab Body */}
       {tab === 'tuning' ? (
         <div className="flex-1 space-y-4 overflow-y-auto p-3">
+          {/* AI Agent / Autopilot Playtesting Deck */}
+          <div className="space-y-2 rounded border border-emerald-400/50 bg-[#090117]/90 p-2.5 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
+            <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.2em] text-emerald-300 uppercase">
+              <span>🤖 AI AGENT / AUTOPILOT</span>
+              <span className="text-[9px] font-normal text-emerald-400/80">HOTKEY: F3</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onToggleAutopilot?.()}
+                className={`flex-1 cursor-pointer rounded border py-1.5 text-center text-[10px] font-black tracking-wider transition ${
+                  snap?.autopilotActive
+                    ? 'border-emerald-400 bg-emerald-950/80 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
+                    : 'border-emerald-500/30 bg-[#160730]/60 text-emerald-300/70 hover:border-emerald-400 hover:text-emerald-200'
+                }`}
+              >
+                {snap?.autopilotActive ? '● AUTOPILOT ENGAGED' : '○ ENGAGE AUTOPILOT [F3]'}
+              </button>
+            </div>
+            {/* Personality Mode Selector */}
+            <div className="grid grid-cols-3 gap-1 text-[9px]">
+              {(['perfect', 'relaxed', 'aggressive'] as const).map((mode) => {
+                const isSelected = snap?.autopilotMode === mode;
+                return (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => onSetAutopilotMode?.(mode)}
+                    className={`cursor-pointer rounded border py-1 font-bold uppercase transition ${
+                      isSelected
+                        ? 'border-cyan-300 bg-cyan-950/80 text-cyan-200 shadow-[0_0_8px_rgba(5,217,232,0.3)]'
+                        : 'border-fuchsia-500/20 bg-[#120329]/50 text-fuchsia-300/60 hover:text-fuchsia-100'
+                    }`}
+                  >
+                    {mode}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Future Funk Atmosphere & Palette Switcher */}
           <div className="space-y-2 rounded border border-cyan-400/40 bg-[#090117]/90 p-2.5">
             <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.2em] text-cyan-300 uppercase">

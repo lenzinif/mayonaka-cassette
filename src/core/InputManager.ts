@@ -11,7 +11,8 @@ export type Action =
   | 'autoShift'
   | 'forkLeft'
   | 'forkRight'
-  | 'pause';
+  | 'pause'
+  | 'toggleAutopilot';
 
 export interface InputPressEvent {
   action: Action;
@@ -50,6 +51,8 @@ const KEY_BINDINGS: Readonly<Record<string, Action>> = {
   Numpad2: 'forkRight',
   KeyP: 'pause',
   Escape: 'pause',
+  F3: 'toggleAutopilot',
+  Digit0: 'toggleAutopilot',
 };
 
 /**
@@ -96,6 +99,7 @@ const ALL_ACTIONS: readonly Action[] = [
   'forkLeft',
   'forkRight',
   'pause',
+  'toggleAutopilot',
 ];
 
 /** Read-only view of input used by the engine; lets tests inject a fake. */
@@ -142,6 +146,7 @@ export class InputManager implements InputSource {
     forkLeft: 0,
     forkRight: 0,
     pause: 0,
+    toggleAutopilot: 0,
   };
   private readonly gamepadActions: Record<Action, boolean> = {
     left: false,
@@ -157,6 +162,7 @@ export class InputManager implements InputSource {
     forkLeft: false,
     forkRight: false,
     pause: false,
+    toggleAutopilot: false,
   };
 
   private readonly prevGamepadButtons: boolean[] = [];
