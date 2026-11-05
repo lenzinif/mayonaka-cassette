@@ -2,6 +2,7 @@ import type { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
 import type { TrackLibrary } from '@src/audio/TrackLibrary';
 import { MAX_FRAME_DT, RENDER_HEIGHT, RENDER_WIDTH, SIM_STEP } from '@src/config/constants';
 import type { AssetPreloader } from '@src/core/AssetPreloader';
+import { AutopilotDriver } from '@src/core/AutopilotDriver';
 import { GameLoop } from '@src/core/GameLoop';
 import { InputManager } from '@src/core/InputManager';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
@@ -38,8 +39,9 @@ export function CanvasStage({
     if (!ctx) return;
     ctx.imageSmoothingEnabled = false;
 
-    const input = new InputManager(window);
-    const game = new Game({ input, bridge, audio, library, preloader });
+    const humanInput = new InputManager(window);
+    const autopilot = new AutopilotDriver({ fallbackInput: humanInput });
+    const game = new Game({ input: autopilot, autopilot, bridge, audio, library, preloader });
     onGameReadyRef.current?.(game);
 
     const loop = new GameLoop({
@@ -77,7 +79,7 @@ export function CanvasStage({
     loop.start();
     return () => {
       loop.stop();
-      input.dispose();
+      humanInput.dispose();
       window.removeEventListener('keydown', unlockOnGesture);
       window.removeEventListener('pointerdown', unlockOnGesture);
       document.removeEventListener('visibilitychange', handleVisibilityChange);

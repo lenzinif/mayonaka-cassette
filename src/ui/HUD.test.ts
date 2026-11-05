@@ -65,6 +65,8 @@ function createMockSnapshot(overrides: Partial<TelemetrySnapshot> = {}): Telemet
     forkRightOption: null,
     isPaused: false,
     gamepadConnected: true,
+    autopilotActive: false,
+    autopilotMode: null,
     simTimeMs: 0.3,
     renderTimeMs: 1.1,
     frameTimeMs: 8.3,

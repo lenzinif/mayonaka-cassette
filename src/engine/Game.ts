@@ -10,6 +10,12 @@ import {
 } from '@src/audio/TrackLibrary';
 import { RENDER_HEIGHT, RENDER_WIDTH, TELEMETRY_HZ } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
+import {
+  AutopilotDriver,
+  type AutopilotForkPerception,
+  type AutopilotMode,
+  type AutopilotPerception,
+} from '@src/core/AutopilotDriver';
 import type { InputSource } from '@src/core/InputManager';
 import type { AssetPreloader } from '@src/core/AssetPreloader';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
@@ -141,6 +147,8 @@ export interface TelemetrySnapshot {
   // M8 Polish & Lifecycle telemetry
   isPaused: boolean;
   gamepadConnected: boolean;
+  autopilotActive: boolean;
+  autopilotMode: AutopilotMode | null;
   // M8 Performance Profiler telemetry
   simTimeMs: number;
   renderTimeMs: number;
@@ -188,7 +196,8 @@ export type GameEvent =
       bestScore: number | null;
       bestGrade: RunGrade | null;
     }
-  | { type: 'runCompleted'; summary: RunSummary };
+  | { type: 'runCompleted'; summary: RunSummary }
+  | { type: 'autopilotToggled'; enabled: boolean; mode: AutopilotMode };
 
 export interface GameOptions {
   input: InputSource;
@@ -198,6 +207,7 @@ export interface GameOptions {
   audio?: FunkAudioEngine;
   library?: TrackLibrary;
   preloader?: AssetPreloader;
+  autopilot?: AutopilotDriver;
 }
 
 /**
@@ -213,6 +223,7 @@ export class Game {
   readonly particles = new ParticleSystem();
   readonly traffic: TrafficManager;
   readonly preloader?: AssetPreloader;
+  readonly autopilot?: AutopilotDriver;
   readonly bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   readonly audio: FunkAudioEngine;
   readonly library: TrackLibrary;
@@ -367,7 +378,102 @@ export class Game {
     this.track = options.track ?? generateSongRoad(this.audio.beatMap);
     this.traffic = new TrafficManager(this.track, this.audio.beatMap.contentHash);
     this.preloader = options.preloader;
+    this.autopilot = options.autopilot;
+    if (this.autopilot) {
+      this.autopilot.setPerception(this.buildAutopilotPerception());
+    }
     this.updateRoadProgressTelemetry();
+  }
+
+  get isAutopilotActive(): boolean {
+    return this.autopilot?.enabled ?? false;
+  }
+
+  toggleAutopilot(): boolean {
+    if (!this.autopilot) return false;
+    const active = this.autopilot.toggle();
+    this.bridge.publish(this.buildSnapshot);
+    this.bridge.emit({
+      type: 'autopilotToggled',
+      enabled: active,
+      mode: this.autopilot.mode,
+    });
+    return active;
+  }
+
+  setAutopilotMode(mode: AutopilotMode): void {
+    if (!this.autopilot) return;
+    this.autopilot.mode = mode;
+    this.bridge.publish(this.buildSnapshot);
+  }
+
+  buildAutopilotPerception(): AutopilotPerception {
+    return {
+      getCarState: () => ({
+        x: this.car.x,
+        speed: this.car.speed,
+        speedRatio: this.car.speedRatio,
+        gear: this.car.gear,
+        rpm: this.car.rpm,
+        isDrifting: this.car.isDrifting,
+        steer: this.car.steer,
+        isLugging: this.car.isLugging,
+        isRedlining: this.car.isRedlining,
+        isOffRoad: this.car.isOffRoad,
+      }),
+      getRoadAhead: (lookaheadDistance: number) => {
+        const cameraDepth = cameraDepthFromFov(tuning.fieldOfView);
+        const playerZ = this.position + tuning.cameraHeight * cameraDepth;
+        const currSeg = findSegment(this.track, playerZ);
+        const aheadSeg = findSegment(this.track, playerZ + lookaheadDistance);
+        return {
+          currentCurve: currSeg.curve,
+          aheadCurve: aheadSeg.curve,
+          slope: (currSeg.p2.worldY - currSeg.p1.worldY) / this.track.segmentLength,
+        };
+      },
+      getUpcomingTraffic: (lookaheadDistance: number) => {
+        const cameraDepth = cameraDepthFromFov(tuning.fieldOfView);
+        const playerZ = this.position + tuning.cameraHeight * cameraDepth;
+        const trucks = this.traffic.trucks;
+        const result = [];
+        const trackLen = this.track.length;
+        for (let i = 0; i < trucks.length; i++) {
+          const t = trucks[i]!;
+          const dz = (t.z - playerZ + trackLen) % trackLen;
+          if (dz > 0 && dz < lookaheadDistance) {
+            result.push({ z: dz, laneOffset: t.laneOffset, speedRatio: t.speedRatio });
+          }
+        }
+        return result;
+      },
+      getForkInfo: (): AutopilotForkPerception | undefined => {
+        if (!this.forkActive) return undefined;
+        const forkZoneStartZ = this.getForkZoneStartZ();
+        let branchCenter = this.forkChoice === 'left' ? -0.5 : 0.5;
+        if (forkZoneStartZ !== undefined && this.track.length > forkZoneStartZ) {
+          const span = Math.max(1, this.track.length - forkZoneStartZ);
+          const t = Math.max(0, Math.min(1, (this.position - forkZoneStartZ) / span));
+          branchCenter = getChosenForkCenter(t, this.forkChoice);
+        }
+        return {
+          active: true,
+          choice: this.forkChoice,
+          branchCenter,
+        };
+      },
+      getAudioBeatState: () => {
+        const now = typeof performance !== 'undefined' ? performance.now() : 0;
+        const judgement = this.audio.judgeInputTimestamp(now);
+        return {
+          beatPhase: this.beatPulse,
+          deltaMsToNearestBeat: judgement.deltaMs,
+          nearestBeatIndex: judgement.beatIndex,
+          isDownbeat: judgement.isDownbeat,
+        };
+      },
+      isTofuModeActive: () => this.melonSoda.active,
+    };
   }
 
   /** Regenerates the road and traffic from `beatMap` and resets run state when switching songs. */
@@ -552,6 +658,8 @@ export class Game {
           this.setForkManualChoice('left');
         } else if (p.action === 'forkRight' && this.forkActive) {
           this.setForkManualChoice('right');
+        } else if (p.action === 'toggleAutopilot') {
+          this.toggleAutopilot();
         }
       }
     }
@@ -1455,6 +1563,8 @@ export class Game {
       forkRightOption: this.buildForkRightOption(),
       isPaused: this.isPaused,
       gamepadConnected: this.input.isGamepadConnected?.() ?? false,
+      autopilotActive: this.isAutopilotActive,
+      autopilotMode: this.autopilot?.mode ?? null,
       // M8 Performance Profiler telemetry
       simTimeMs: Math.round(this.simTimeMs * 100) / 100,
       renderTimeMs: Math.round(this.renderTimeMs * 100) / 100,

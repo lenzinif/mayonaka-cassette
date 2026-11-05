@@ -130,6 +130,40 @@ describe('InputManager (Keyboard + Gamepad API M8)', () => {
     input.dispose();
   });
 
+  it('binds F4 and Digit0 to toggleAutopilot', () => {
+    const target = new MockEventTarget() as unknown as Window;
+    const input = new InputManager(target);
+
+    target.dispatchEvent({
+      type: 'keydown',
+      code: 'F4',
+      timeStamp: 550,
+      preventDefault: () => {},
+    } as unknown as Event);
+
+    expect(input.isDown('toggleAutopilot')).toBe(true);
+    expect(input.consumePresses()).toContainEqual({ action: 'toggleAutopilot', timeStamp: 550 });
+
+    target.dispatchEvent({
+      type: 'keyup',
+      code: 'F4',
+      timeStamp: 560,
+    } as unknown as Event);
+    expect(input.isDown('toggleAutopilot')).toBe(false);
+
+    target.dispatchEvent({
+      type: 'keydown',
+      code: 'Digit0',
+      timeStamp: 570,
+      preventDefault: () => {},
+    } as unknown as Event);
+
+    expect(input.isDown('toggleAutopilot')).toBe(true);
+    expect(input.consumePresses()).toContainEqual({ action: 'toggleAutopilot', timeStamp: 570 });
+
+    input.dispose();
+  });
+
   it('polls Gamepad buttons with rising-edge detection and analog triggers/sticks', () => {
     let mockGp: MockGamepad | null = null;
     const getGamepads = () => [mockGp as unknown as Gamepad];

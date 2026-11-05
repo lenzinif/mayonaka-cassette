@@ -3,6 +3,7 @@ import { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
 import { TrackLibrary, type PlaylistItem } from '@src/audio/TrackLibrary';
 import { TELEMETRY_HZ } from '@src/config/constants';
 import { AssetPreloader, type PreloadProgress } from '@src/core/AssetPreloader';
+import type { AutopilotMode } from '@src/core/AutopilotDriver';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { Game, GameEvent, TelemetrySnapshot } from '@src/engine/Game';
 import { useEffect, useRef, useState } from 'react';
@@ -76,6 +77,9 @@ export function App() {
       } else if (e.code === 'KeyM' && !inspectorOpen) {
         e.preventDefault();
         setTrackLoaderOpen((prev) => !prev);
+      } else if (e.code === 'F4') {
+        e.preventDefault();
+        gameRef.current?.toggleAutopilot();
       } else if (e.code === 'Escape') {
         if (trackLoaderOpen) {
           e.preventDefault();
@@ -144,6 +148,8 @@ export function App() {
           onClose={() => setDebugOpen(false)}
           bridge={bridge}
           onSelectPalette={(idx) => gameRef.current?.setStagePaletteIndex(idx)}
+          onToggleAutopilot={() => gameRef.current?.toggleAutopilot()}
+          onSetAutopilotMode={(mode: AutopilotMode) => gameRef.current?.setAutopilotMode(mode)}
         />
         <TrackLoader
           open={trackLoaderOpen}

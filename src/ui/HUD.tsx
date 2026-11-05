@@ -165,6 +165,14 @@ export function HUD({
         );
       } else if (event.type === 'sodaSkinChanged') {
         showToast(`CUP SKIN // ${SODA_SKIN_LABELS[event.skin]}`, 1500, 'cyan');
+      } else if (event.type === 'autopilotToggled') {
+        showToast(
+          event.enabled
+            ? `AI AUTOPILOT ON // [${event.mode.toUpperCase()}]`
+            : 'MANUAL DRIVING RESTORED',
+          1800,
+          event.enabled ? 'emerald' : 'cyan',
+        );
       } else if (event.type === 'autoShiftToggled') {
         showToast(
           event.enabled ? 'AUTO-SHIFT ASSIST // ON' : 'MANUAL BEAT-SHIFT // ON',
@@ -366,6 +374,11 @@ export function HUD({
               </div>
 
               <div className="flex shrink-0 items-center gap-1">
+                {snap?.autopilotActive && (
+                  <span className="animate-pulse rounded border border-cyan-300/80 bg-cyan-950/90 px-1.5 py-0.2 text-[9px] font-bold text-cyan-300 shadow-[0_0_10px_rgba(5,217,232,0.5)]">
+                    🤖 AUTO [{snap.autopilotMode?.toUpperCase() ?? 'ON'}]
+                  </span>
+                )}
                 {tofuMode && (
                   <span className="rounded border border-emerald-300/80 bg-emerald-950/90 px-1.5 py-0.2 text-[9px] font-bold text-emerald-300 shadow-[0_0_8px_rgba(16,185,129,0.35)]">
                     TOFU ×2
@@ -780,7 +793,8 @@ export function HUD({
                 <div className="col-span-2">
                   <span className="font-bold text-amber-200">V</span> CUP SKIN ·{' '}
                   <span className="font-bold text-cyan-300">H</span> CLEAN HUD ·{' '}
-                  <span className="font-bold text-fuchsia-300">M</span> LOAD MUSIC ·{' '}
+                  <span className="font-bold text-fuchsia-300">M</span> MUSIC ·{' '}
+                  <span className="font-bold text-emerald-300">F4</span> AUTO ·{' '}
                   <span className="font-bold text-pink-300">P</span> PAUSE
                 </div>
               </div>
@@ -1031,6 +1045,8 @@ export function HUD({
         onCycleSodaSkin={() => triggerSyntheticKey('KeyV')}
         onToggleCleanHud={() => setCleanHud((prev) => !prev)}
         onTogglePerfHud={() => setShowPerfHud((prev) => !prev)}
+        autopilotActive={snap?.autopilotActive ?? false}
+        onToggleAutopilot={() => triggerSyntheticKey('F4')}
       />
     </div>
   );

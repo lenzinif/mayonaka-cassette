@@ -20,6 +20,7 @@ export interface PauseMenuProps {
   cleanHud: boolean;
   showPerfHud: boolean;
   autoShift: boolean;
+  autopilotActive?: boolean;
   onResume: () => void;
   onRestartRun?: () => void;
   onOpenTrackLoader: () => void;
@@ -29,6 +30,7 @@ export interface PauseMenuProps {
   onCycleSodaSkin: () => void;
   onToggleCleanHud: () => void;
   onTogglePerfHud: () => void;
+  onToggleAutopilot?: () => void;
 }
 
 function formatLapTime(seconds: number): string {
@@ -68,6 +70,8 @@ export function PauseMenu({
   onCycleSodaSkin,
   onToggleCleanHud,
   onTogglePerfHud,
+  autopilotActive = false,
+  onToggleAutopilot,
 }: PauseMenuProps) {
   if (!open) return null;
 
@@ -218,6 +222,17 @@ export function PauseMenu({
               }`}
             >
               PERF HUD: {showPerfHud ? 'ON' : 'OFF'} [F3]
+            </button>
+            <button
+              type="button"
+              onClick={onToggleAutopilot}
+              className={`col-span-2 cursor-pointer rounded border py-1.5 px-2 font-semibold tracking-wider transition ${
+                autopilotActive
+                  ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
+                  : 'border-cyan-400/40 bg-[#160530]/70 text-cyan-200 hover:border-emerald-400'
+              }`}
+            >
+              🤖 AI AUTOPILOT: {autopilotActive ? 'ACTIVE' : 'OFF'} [F4]
             </button>
           </div>
         </div>
