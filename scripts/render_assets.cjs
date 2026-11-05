@@ -1,20 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const ts = require('typescript');
 
 const outDir = 'C:\\Users\\USER\\.gemini\\antigravity\\brain\\6147b986-1f3f-4350-bf6b-7a42d3f0693f';
 const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const tempHtmlPath = path.join(outDir, 'scratch', 'temp_preview.html');
 
-const roadsidePropsCode = fs.readFileSync('C:\\Users\\USER\\Documents\\Codice\\Game Dev\\mayonaka-cassette\\src\\road\\RoadsideProps.ts', 'utf8')
-  // Strip TypeScript types so it runs in browser JS
-  .replace(/import type .*/g, '')
-  .replace(/export function drawProp/g, 'function drawProp')
-  .replace(/: CanvasRenderingContext2D/g, '')
-  .replace(/: number/g, '')
-  .replace(/: void/g, '')
-  .replace(/: PropKind/g, '')
-  .replace(/ as const/g, '');
+const src = fs.readFileSync('C:\\Users\\USER\\Documents\\Codice\\Game Dev\\mayonaka-cassette\\src\\road\\RoadsideProps.ts', 'utf8');
+const transpiled = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.None, target: ts.ScriptTarget.ES2020 } }).outputText;
 
 const assets = [
   {
@@ -179,7 +173,9 @@ for (const asset of assets) {
   </div>
 
   <script>
-    ${roadsidePropsCode}
+    var exports = {};
+    ${transpiled}
+    var drawProp = exports.drawProp;
 
     const canvas = document.getElementById('stage');
     const ctx = canvas.getContext('2d');
@@ -242,8 +238,8 @@ const combinedHtml = `<!DOCTYPE html>
       background: #080417;
       color: #f8f9fa;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      width: 960,
-      height: 540;
+      width: 960px;
+      height: 540px;
       overflow: hidden;
       position: relative;
     }
@@ -285,7 +281,9 @@ const combinedHtml = `<!DOCTYPE html>
   </div>
   <canvas id="stage" width="960" height="540"></canvas>
   <script>
-    ${roadsidePropsCode}
+    var exports = {};
+    ${transpiled}
+    var drawProp = exports.drawProp;
 
     const canvas = document.getElementById('stage');
     const ctx = canvas.getContext('2d');
