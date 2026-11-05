@@ -22,7 +22,10 @@ export function App() {
   const [preloader] = useState(() => new AssetPreloader());
   const [preloadProgress, setPreloadProgress] = useState<PreloadProgress>(() => preloader.progress);
   const [preloadReady, setPreloadReady] = useState(false);
-  const [gameStarted, setGameStarted] = useState(false);
+  const [gameStarted, setGameStarted] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.has('autostart');
+  });
   const gameRef = useRef<Game | null>(null);
   const wasPausedBeforeModalRef = useRef(false);
 

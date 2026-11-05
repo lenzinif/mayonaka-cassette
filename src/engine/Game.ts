@@ -242,6 +242,7 @@ export class Game {
   private audioBeatIndex = 0;
   private sectionRole: SectionRole = 'intro';
   private barEnergy = 0.5;
+  private barsSinceLastLightning = 99;
 
   private roadBarIndex = 0;
   private totalBars = 64;
@@ -758,6 +759,7 @@ export class Game {
     }
 
     const prevRole = this.sectionRole;
+    const prevBarEnergy = this.barEnergy;
     const clockState = this.audio.update(dt, this.drivingAudioParams);
     this.beatPulse = clockState.beatPulse;
     this.downbeatPulse = clockState.downbeatPulse;
@@ -781,7 +783,29 @@ export class Game {
     // 6. Advance M7 ParticleSystem
     this.particles.update(dt, this.car, RENDER_WIDTH, RENDER_HEIGHT, this.car.grooveTier);
 
-    this.background.update(dt, playerSeg.curve, this.car.speedRatio, this.downbeatPulse);
+    let triggerExtremeLightning = false;
+    if (clockState.justCrossedBar && tuning.bgRain === 1) {
+      this.barsSinceLastLightning++;
+
+      // Extreme Case 1: Entering the Drop section (maximum musical tension release)
+      const isDropEntry = this.sectionRole === 'drop' && prevRole !== 'drop';
+      // Extreme Case 2: Peak spectral energy bar (top 10% highest energy) with refractory period
+      const isExtremeSpectralPeak =
+        this.sectionRole !== 'intro' &&
+        this.barEnergy >= 0.88 &&
+        this.barsSinceLastLightning >= 12;
+      // Extreme Case 3: Sudden massive spectral novelty surge (+0.32 in a single bar)
+      const isSpectralSurge =
+        this.barEnergy - prevBarEnergy >= 0.32 &&
+        this.barsSinceLastLightning >= 8;
+
+      if (isDropEntry || isExtremeSpectralPeak || isSpectralSurge) {
+        triggerExtremeLightning = true;
+        this.barsSinceLastLightning = 0;
+      }
+    }
+
+    this.background.update(dt, playerSeg.curve, this.car.speedRatio, triggerExtremeLightning);
     this.bridge.offer(this.simTime, this.buildSnapshot);
 
     const elapsed = performance.now() - t0;
@@ -852,9 +876,9 @@ export class Game {
     this.view.forkChoice = forkZoneStartZ !== undefined ? this.forkChoice : undefined;
 
     this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
-    this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic);
+    this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic, this.beatPulse);
     drawPlayerCar(ctx, this.car, width, height);
-    this.background.renderForegroundWeather(ctx, width, height, this.palette);
+    this.background.renderForegroundWeather(ctx, width, height);
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
 
@@ -1261,6 +1285,7 @@ export class Game {
             this.handleCarEvent,
           );
           this.audio.triggerFilterBlip(1.0);
+          this.background.triggerLightningStrike();
           this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'PERFECT');
           this.bridge.emit({
             type: 'dropSync',

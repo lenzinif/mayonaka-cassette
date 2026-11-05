@@ -378,12 +378,12 @@ export function DebugPanel({ open, onClose, bridge, onSelectPalette }: DebugPane
                 </span>
               </button>
 
-              {/* Constellations */}
+              {/* Celestial Starfield (Stars & Shooting Stars) */}
               <button
                 type="button"
-                onClick={() => handleChange("bgConstellations", values.bgConstellations ? 0 : 1)}
+                onClick={() => handleChange("bgStars", values.bgStars ? 0 : 1)}
                 className={`flex cursor-pointer items-center justify-between rounded border p-1.5 text-left transition ${
-                  values.bgConstellations
+                  values.bgStars
                     ? "border-cyan-400 bg-cyan-950/70 shadow-[0_0_8px_rgba(5,217,232,0.35)]"
                     : "border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
                 }`}
@@ -392,28 +392,31 @@ export function DebugPanel({ open, onClose, bridge, onSelectPalette }: DebugPane
                   <span className="text-xs">✨</span>
                   <span className="text-[10px] font-bold text-cyan-200">STARS</span>
                 </div>
-                <span className={`text-[9px] font-bold ${values.bgConstellations ? "text-cyan-300" : "text-fuchsia-400/60"}`}>
-                  {values.bgConstellations ? "ON" : "OFF"}
+                <span className={`text-[9px] font-bold ${values.bgStars ? "text-cyan-300" : "text-fuchsia-400/60"}`}>
+                  {values.bgStars ? "ON" : "OFF"}
                 </span>
               </button>
             </div>
 
-            {/* Lightning on Beat */}
+            {/* Lightning on Beat (Requires Rain) */}
             <button
               type="button"
+              disabled={!values.bgRain}
               onClick={() => handleChange("bgLightningOnBeat", values.bgLightningOnBeat ? 0 : 1)}
-              className={`flex w-full cursor-pointer items-center justify-between rounded border p-1.5 text-left transition ${
-                values.bgLightningOnBeat
-                  ? "border-pink-500 bg-pink-950/60 shadow-[0_0_8px_rgba(255,42,109,0.3)]"
-                  : "border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
+              className={`flex w-full items-center justify-between rounded border p-1.5 text-left transition ${
+                !values.bgRain
+                  ? "cursor-not-allowed border-fuchsia-500/20 bg-[#160730]/30 opacity-50"
+                  : values.bgLightningOnBeat
+                    ? "cursor-pointer border-pink-500 bg-pink-950/60 shadow-[0_0_8px_rgba(255,42,109,0.3)]"
+                    : "cursor-pointer border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
               }`}
             >
               <div className="flex items-center gap-1.5">
                 <span className="text-xs">⚡</span>
-                <span className="text-[10px] font-bold text-pink-200">BEAT LIGHTNING FLASH</span>
+                <span className="text-[10px] font-bold text-pink-200">BEAT LIGHTNING</span>
               </div>
-              <span className={`text-[9px] font-bold ${values.bgLightningOnBeat ? "text-pink-300" : "text-fuchsia-400/60"}`}>
-                {values.bgLightningOnBeat ? "ACTIVE ON DROP" : "OFF"}
+              <span className={`text-[9px] font-bold ${!values.bgRain ? "text-fuchsia-400/40" : values.bgLightningOnBeat ? "text-pink-300" : "text-fuchsia-400/60"}`}>
+                {!values.bgRain ? "REQUIRES RAIN" : values.bgLightningOnBeat ? "ACTIVE ON DROP" : "OFF"}
               </span>
             </button>
           </div>

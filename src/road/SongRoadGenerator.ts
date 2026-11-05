@@ -577,9 +577,20 @@ function populateChunkProps(
 
   for (const rule of chunk.props) {
     const stepBeats = Math.max(1, Math.round(rule.everyBeats));
-    const baseOffset = Math.max(
-      1.4,
-      rule.offset ?? (rule.kind === 'billboard' ? 1.85 : rule.kind === 'palm' ? 1.48 : 1.42),
+    const baseOffset = rule.offset ?? (
+      rule.kind === 'building'
+        ? 2.3
+        : rule.kind === 'pylon'
+          ? 2.6
+          : rule.kind === 'billboard' || rule.kind === 'vms'
+            ? 1.85
+            : rule.kind === 'gantry'
+              ? 0
+              : rule.kind === 'chevron' || rule.kind === 'shrub'
+                ? 1.35
+                : rule.kind === 'palm' || rule.kind === 'phonebooth'
+                  ? 1.48
+                  : 1.42
     );
 
     let altToggle = 0;

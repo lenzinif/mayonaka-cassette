@@ -15,7 +15,18 @@ export interface ProjectedPoint {
   screenW: number;
 }
 
-export type PropKind = 'palm' | 'lamp' | 'billboard';
+export type PropKind =
+  | 'palm'
+  | 'lamp'
+  | 'billboard'
+  | 'building'
+  | 'jihanki'
+  | 'phonebooth'
+  | 'gantry'
+  | 'vms'
+  | 'chevron'
+  | 'pylon'
+  | 'shrub';
 
 /** A roadside sprite anchored to a segment. `offset` is in road half-widths (±1 = road edge). */
 export interface RoadSprite {

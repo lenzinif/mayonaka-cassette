@@ -32,6 +32,14 @@ const PROP_DEBRIS_COLORS: Readonly<Record<PropKind, readonly [string, string, st
   palm: ['#14f1d9', '#ff3cac', '#5b2d86'],
   lamp: ['#fff3b0', '#ffd319', '#05d9e8'],
   billboard: ['#ff2a6d', '#05d9e8', '#ffd319'],
+  building: ['#ff2a85', '#00f5d4', '#241938'],
+  jihanki: ['#ff0055', '#00bbf9', '#ffd166'],
+  phonebooth: ['#00f5d4', '#2a9d8f', '#e0fbfc'],
+  gantry: ['#2ec4b6', '#ffffff', '#1a1429'],
+  vms: ['#ff9e00', '#ffd166', '#1a1429'],
+  chevron: ['#ff007f', '#00f5d4', '#ffffff'],
+  pylon: ['#7b2cbf', '#e0aaff', '#ff0055'],
+  shrub: ['#06d6a0', '#0a9396', '#2d6a4f'],
 };
 
 /**

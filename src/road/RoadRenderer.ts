@@ -2,7 +2,7 @@ import { LANES, MAX_DRAW_DISTANCE } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
 import { drawKeiTruck, type TrafficManager } from '@src/entities/TrafficAndProps';
 import type { StagePalette } from './palette';
-import { exponentialFog, interpolate, percentRemaining, project } from './RoadProjection';
+import { interpolate, percentRemaining, project } from './RoadProjection';
 import {
   findSegment,
   getChosenForkCenter,
@@ -67,6 +67,7 @@ export class RoadRenderer {
     view: RoadView,
     palette: StagePalette,
     traffic?: TrafficManager,
+    beatPulse = 0,
   ): void {
     this.stats.drawnSegments = 0;
     this.stats.drawnProps = 0;
@@ -93,11 +94,10 @@ export class RoadRenderer {
     let x = 0;
     let dx = -(base.curve * basePercent);
     let maxy = height;
-    const effectiveFogDensity = view.fogDensity * (palette.fogDensity ?? 1.0);
     for (let n = 0; n < drawDistance; n++) {
       const seg = segments[(base.index + n) % segments.length]!;
       const cameraZ = position - (seg.index < base.index ? trackLength : 0);
-      seg.fog = exponentialFog(n / drawDistance, effectiveFogDensity);
+      seg.fog = 1;
       project(seg.p1, cameraXBase - x, cameraY, cameraZ, cameraDepth, width, height, roadWidth);
       project(
         seg.p2,
@@ -130,12 +130,8 @@ export class RoadRenderer {
       if (p1.cameraZ <= cameraDepth) continue; // behind the projection plane
 
       const segClipY = this.clipY[n]!;
-      // Skip segments occluded behind a hill crest or collapsed onto the same sub-pixel horizon line
-      if (
-        p2.screenY < p1.screenY &&
-        p2.screenY < segClipY &&
-        (n < 90 || Math.floor(p2.screenY) < Math.floor(segClipY))
-      ) {
+      // Skip segments occluded behind a hill crest
+      if (p2.screenY < p1.screenY && p2.screenY < segClipY) {
         this.stats.drawnSegments++;
         this.renderSegment(
           ctx,
@@ -150,7 +146,6 @@ export class RoadRenderer {
         );
       }
 
-      if (seg.fog < 0.035) continue;
       const ppu = (p1.scale * width) / 2;
       const scaledPpu = (ppu * roadWidth) / 2000;
       if (scaledPpu < 0.0055) continue;
@@ -159,13 +154,8 @@ export class RoadRenderer {
       const firstTruckIdx = traffic ? traffic.getFirstTruckOnSegment(seg.index) : -1;
       if (sprites.length === 0 && firstTruckIdx === -1) continue;
 
-      // Skip segment sprites/traffic if even the tallest palm tree crown is occluded behind a hill crest
+      // Skip segment sprites/traffic if occluded behind a hill crest
       if (p1.screenY - 3500 * scaledPpu >= segClipY) continue;
-
-      const targetAlpha = Math.min(1, seg.fog * 1.5);
-      if (targetAlpha < 0.98) {
-        ctx.globalAlpha = targetAlpha;
-      }
 
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       for (let i = 0; i < sprites.length; i++) {
@@ -187,6 +177,7 @@ export class RoadRenderer {
           scaledPpu,
           effectiveOffset < 0 ? -1 : 1,
           s.variant,
+          beatPulse,
         );
         this.stats.drawnProps++;
       }
@@ -235,9 +226,8 @@ export class RoadRenderer {
               }
 
               if (forkBranchAlpha > 0.02) {
-                const combinedAlpha = targetAlpha * forkBranchAlpha;
-                if (combinedAlpha < 0.98) {
-                  ctx.globalAlpha = combinedAlpha;
+                if (forkBranchAlpha < 0.98) {
+                  ctx.globalAlpha = forkBranchAlpha;
                 }
                 const viewParallax = ((width * 0.5 - truckScreenX) / Math.max(1, width * 0.5)) * 1.4;
                 const truckRoadCurve = seg.curve + viewParallax + truck.lateralVel * 1.5;
@@ -251,8 +241,8 @@ export class RoadRenderer {
                   truck.knockedTimer > 0,
                   truckRoadCurve,
                 );
-                if (combinedAlpha < 0.98) {
-                  ctx.globalAlpha = targetAlpha < 0.98 ? targetAlpha : 1;
+                if (forkBranchAlpha < 0.98) {
+                  ctx.globalAlpha = 1;
                 }
                 this.stats.drawnTrucks++;
               }
@@ -262,9 +252,7 @@ export class RoadRenderer {
         }
       }
 
-      if (targetAlpha < 0.98) {
-        ctx.globalAlpha = 1;
-      }
+
     }
   }
 
@@ -504,12 +492,7 @@ export class RoadRenderer {
         }
       }
 
-      if (seg.fog < 0.975) {
-        ctx.globalAlpha = 1 - seg.fog;
-        ctx.fillStyle = palette.fog;
-        ctx.fillRect(0, y2, width, y1 - y2);
-        ctx.globalAlpha = 1;
-      }
+
       return;
     }
 
@@ -535,12 +518,7 @@ export class RoadRenderer {
       }
     }
 
-    if (seg.fog < 0.975) {
-      ctx.globalAlpha = 1 - seg.fog;
-      ctx.fillStyle = palette.fog;
-      ctx.fillRect(0, y2, width, y1 - y2);
-      ctx.globalAlpha = 1;
-    }
+
   }
 }
 

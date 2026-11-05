@@ -311,7 +311,11 @@ export class TrackLibrary {
         };
 
     this.bestScores.set(summary.contentHash, updated);
-    this.saveBestScoresToLocalStorage();
+    if (typeof queueMicrotask === 'function') {
+      queueMicrotask(() => this.saveBestScoresToLocalStorage());
+    } else {
+      this.saveBestScoresToLocalStorage();
+    }
     void this.putBestScoreInIdb(updated);
     this.notify();
 

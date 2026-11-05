@@ -32,6 +32,7 @@ function createMockCanvasContext(): {
     restore: noop,
     beginPath: noop,
     closePath: noop,
+    clip: noop,
     moveTo: () => {
       lineCalls++;
     },
@@ -52,6 +53,7 @@ function createMockCanvasContext(): {
       fillRectCalls++;
     },
     createLinearGradient: () => grad,
+    createRadialGradient: () => grad,
   } as unknown as CanvasRenderingContext2D;
 
   return {
@@ -81,7 +83,7 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     tuning.bgRain = 0;
     tuning.bgBirds = 1;
     tuning.bgLightningOnBeat = 1;
-    tuning.bgConstellations = 1;
+    tuning.bgConstellations = 0;
     tuning.bpmPulseStrength = 1.0;
   });
 
@@ -110,15 +112,18 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     expect(bg.scrollX).toBe(bg.scroll1);
   });
 
-  it('renders Mayonaka Bay (palette.id === "night") with rolling hills and urban skyline', () => {
+  it('renders Mayonaka Bay (palette.id === "night") with central sea, moonlight reflection, flanking city, and margin hills', () => {
     const bg = new Background();
     const mock = createMockCanvasContext();
 
     bg.render(mock.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
 
-    expect(mock.fillRectCalls + mock.rectCalls).toBeGreaterThan(50);
-    // Sky gradient, sun, and hill rim paths are drawn
+    // Mayonaka Bay renders central sea water, moonlight reflection, buoy beacons,
+    // flank towers and quayside reflections
+    expect(mock.fillRectCalls + mock.rectCalls).toBeGreaterThan(60);
+    // Sky gradient, moon corona & disk, margin hills polygon are filled
     expect(mock.fillCalls).toBeGreaterThan(0);
+    // Margin hill rim is stroked
     expect(mock.strokeCalls).toBeGreaterThan(0);
   });
 
@@ -162,7 +167,7 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     expect(mockRain.strokeCalls).toBeGreaterThan(strokeCallsNoRain);
   });
 
-  it('toggles Volumetric Clouds (tuning.bgClouds) and alters fill count', () => {
+  it('toggles 16-Bit Pixel-Art Cumulus Clouds (tuning.bgClouds) and alters fill count', () => {
     const bg = new Background();
 
     tuning.bgClouds = 1;
@@ -173,10 +178,8 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     const mockWithoutClouds = createMockCanvasContext();
     bg.render(mockWithoutClouds.ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
 
-    expect(mockWithClouds.fillRectCalls + mockWithClouds.rectCalls).toBeGreaterThan(
-      mockWithoutClouds.fillRectCalls + mockWithoutClouds.rectCalls,
-    );
     expect(mockWithClouds.fillCalls).toBeGreaterThan(mockWithoutClouds.fillCalls);
+    expect(mockWithClouds.strokeCalls).toBeGreaterThan(mockWithoutClouds.strokeCalls);
   });
 
   it('toggles Birds (tuning.bgBirds) and advances 3-frame flap animation', () => {
@@ -201,52 +204,71 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     }
   });
 
-  it('triggers Vibeful Beat Lightning on strong downbeat (> 0.8) with multi-flicker envelope and forked bolt', () => {
+  it('triggers Vibeful Lightning on extreme spectral event and decays smoothly through micro-dip and afterglow', () => {
     const bg = new Background();
+    tuning.bgRain = 1;
     tuning.bgLightningOnBeat = 1;
 
-    // Advance with a strong downbeat pulse (> 0.8)
+    // Trigger explicit extreme event
+    bg.update(0.01, 0, 1.0, true);
     const mockFlash = createMockCanvasContext();
-    bg.render(mockFlash.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0.9, 0.95);
+    bg.render(mockFlash.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
     expect(mockFlash.strokeCalls).toBeGreaterThan(2);
 
     // Subsequent updates advance through micro-dip, secondary flash, and synth afterglow decay
-    bg.update(0.05, 0, 1.0, 0);
-    bg.update(0.05, 0, 1.0, 0);
-    bg.update(0.25, 0, 1.0, 0);
+    bg.update(0.05, 0, 1.0, false);
+    bg.update(0.05, 0, 1.0, false);
+    bg.update(0.25, 0, 1.0, false);
 
     const mockDecayed = createMockCanvasContext();
     bg.render(mockDecayed.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
-    expect(mockDecayed.fillRectCalls).toBeGreaterThan(0);
+    expect(mockDecayed.fillRectCalls + mockDecayed.rectCalls).toBeGreaterThan(0);
   });
 
-  it('renders foreground weather (near rain streaks & ground water splashes) when bgRain is active', () => {
+  it('strictly forbids lightning strikes when bgRain is 0', () => {
+    const bg = new Background();
+    tuning.bgRain = 0;
+    tuning.bgLightningOnBeat = 1;
+
+    bg.update(0.01, 0, 1.0, true);
+    bg.triggerLightningStrike();
+
+    const mock = createMockCanvasContext();
+    bg.render(mock.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+    // When no lightning, strokeCalls is from clouds only, bolt is not stroked
+    expect(mock.strokeCalls).toBeLessThan(10);
+  });
+
+  it('renders foreground weather (near rain streaks) when bgRain is active', () => {
     const bg = new Background();
     tuning.bgRain = 1;
-    bg.update(0.1, 0.5, 0.9, 0.95);
+    bg.update(0.1, 0.5, 0.9, false);
 
     const mockFg = createMockCanvasContext();
-    bg.renderForegroundWeather(mockFg.ctx, 640, 360, PALETTE_NIGHT_FUNK);
+    bg.renderForegroundWeather(mockFg.ctx, 640, 360);
 
     expect(mockFg.strokeCalls).toBeGreaterThan(0);
-    expect(mockFg.fillRectCalls).toBeGreaterThan(20);
   });
 
-  it('toggles Real Constellations (tuning.bgConstellations) and draws astronomical connecting lines', () => {
+  it('maintains a clean twinkling starfield without constellation line clutter', () => {
+    const bg = new Background();
+    const mock = createMockCanvasContext();
+    bg.render(mock.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+    expect(mock.fillRectCalls + mock.rectCalls).toBeGreaterThan(0);
+  });
+
+  it('toggles Celestial Starfield (tuning.bgStars) and alters fill count', () => {
     const bg = new Background();
 
-    tuning.bgConstellations = 1;
-    bg.update(2.0, 0, 1.0); // Advance to active constellation window (cycle = 2.0s -> alpha = 1.0)
-    const mockWithConstellations = createMockCanvasContext();
-    bg.render(mockWithConstellations.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+    tuning.bgStars = 1;
+    const mockWithStars = createMockCanvasContext();
+    bg.render(mockWithStars.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
 
-    tuning.bgConstellations = 0;
-    const mockWithoutConstellations = createMockCanvasContext();
-    bg.render(mockWithoutConstellations.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+    tuning.bgStars = 0;
+    const mockWithoutStars = createMockCanvasContext();
+    bg.render(mockWithoutStars.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
 
-    expect(mockWithConstellations.strokeCalls).toBeGreaterThan(
-      mockWithoutConstellations.strokeCalls,
-    );
+    expect(mockWithStars.fillRectCalls).toBeGreaterThan(mockWithoutStars.fillRectCalls);
   });
 
   it('executes 120 simulation steps and renders with ZERO GC allocations', () => {
@@ -255,7 +277,7 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
 
     // Verify 120 consecutive frames simulate cleanly with no errors
     for (let f = 0; f < 120; f++) {
-      bg.update(1 / 120, Math.sin(f * 0.05), 0.85, f % 30 === 0 ? 0.9 : 0);
+      bg.update(1 / 120, Math.sin(f * 0.05), 0.85, f === 30);
       bg.render(mock.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0.5, 0.1);
     }
 

@@ -235,6 +235,58 @@ export function synthesizeFutureFunkLoopPcm(
   return { left, right };
 }
 
+/** In-memory cache of synthesized raw PCM channels keyed by `${sampleRate}:${bpm}:${bars}`. */
+const synthPcmCache = new Map<string, { left: Float32Array; right: Float32Array }>();
+
+/** In-memory cache of AudioBuffer instances keyed by `${sampleRate}:${bpm}:${bars}`. */
+const synthAudioBufferCache = new Map<string, AudioBuffer>();
+
+/**
+ * Retrieves a cached synthesized stereo loop or calculates it once deterministically.
+ */
+export function getOrSynthesizeFutureFunkLoopPcm(
+  bpm: number,
+  sampleRate: number,
+  bars = 8,
+): { left: Float32Array; right: Float32Array } {
+  const key = `${sampleRate}:${bpm}:${bars}`;
+  let cached = synthPcmCache.get(key);
+  if (!cached) {
+    cached = synthesizeFutureFunkLoopPcm(bpm, sampleRate, bars);
+    synthPcmCache.set(key, cached);
+  }
+  return cached;
+}
+
+/**
+ * Clears the PCM and AudioBuffer cache (used in tests or resource resets).
+ */
+export function clearSynthLoopCache(): void {
+  synthPcmCache.clear();
+  synthAudioBufferCache.clear();
+}
+
+/**
+ * Retrieves or builds a cached Web Audio `AudioBuffer` for the synthesized procedural fallback.
+ */
+export function getOrBuildSynthFallbackBuffer(
+  ctx: AudioContext,
+  bpm: number,
+  bars = 8,
+): AudioBuffer {
+  const sr = ctx.sampleRate;
+  const key = `${sr}:${bpm}:${bars}`;
+  let buf = synthAudioBufferCache.get(key);
+  if (!buf) {
+    const pcm = getOrSynthesizeFutureFunkLoopPcm(bpm, sr, bars);
+    buf = ctx.createBuffer(2, pcm.left.length, sr);
+    buf.getChannelData(0).set(pcm.left);
+    buf.getChannelData(1).set(pcm.right);
+    synthAudioBufferCache.set(key, buf);
+  }
+  return buf;
+}
+
 export interface DrivingAudioParams {
   /** Current car speed ratio in [0, 1]. */
   speedRatio: number;
@@ -509,7 +561,8 @@ export class FunkAudioEngine {
     this.resetDubState();
     this.beatClock.setBeatMap(beatMap);
     this.updateDubDelayTime();
-    this.currentBuffer = audioBuffer;
+    this.currentBuffer =
+      audioBuffer ?? (this.ctx ? this.buildSynthFallbackBuffer(this.ctx, beatMap.bpm) : null);
     this.isSynthLoopBuffer = audioBuffer === null;
     this.virtualTrackSec = 0;
 
@@ -533,6 +586,27 @@ export class FunkAudioEngine {
     crossfadeBars = 4,
     forceRestart = false,
   ): number {
+    // Seamless single-track synth loop optimization:
+    // If we are looping the exact same procedural synth loop, Web Audio's AudioBufferSourceNode
+    // is already looping seamlessly (8-bar loop cleanly divides into 64-bar track duration).
+    // Avoid tearing down the active source node or introducing clashing phase crossfades:
+    // simply realign the virtual track clock and crossing states smoothly!
+    if (
+      this.isSynthLoopBuffer &&
+      audioBuffer === null &&
+      this.sourceNode &&
+      this.isPlaying &&
+      this.beatClock.map.contentHash === beatMap.contentHash
+    ) {
+      this.virtualTrackSec = 0;
+      this.crossfadeRemainingSec = 0;
+      this.crossfadeTotalSec = 0;
+      this.resetDubState();
+      this.beatClock.resetCrossingState();
+      this.triggerFilterBlip(0.5);
+      return 0;
+    }
+
     // Avoid restarting an identical crossfade if already crossfading into this exact song (unless forceRestart is true)
     if (!forceRestart && this.isCrossfading && this.beatClock.map.contentHash === beatMap.contentHash) {
       return this.crossfadeTotalSec;
@@ -545,7 +619,8 @@ export class FunkAudioEngine {
 
     this.beatClock.setBeatMap(beatMap);
     this.updateDubDelayTime();
-    this.currentBuffer = audioBuffer;
+    this.currentBuffer =
+      audioBuffer ?? (this.ctx ? this.buildSynthFallbackBuffer(this.ctx, beatMap.bpm) : null);
     this.isSynthLoopBuffer = audioBuffer === null;
     this.virtualTrackSec = 0;
 
@@ -1126,12 +1201,7 @@ export class FunkAudioEngine {
   }
 
   private buildSynthFallbackBuffer(ctx: AudioContext, bpm: number): AudioBuffer {
-    const sr = ctx.sampleRate;
-    const { left, right } = synthesizeFutureFunkLoopPcm(bpm, sr, 8);
-    const buf = ctx.createBuffer(2, left.length, sr);
-    buf.getChannelData(0).set(left);
-    buf.getChannelData(1).set(right);
-    return buf;
+    return getOrBuildSynthFallbackBuffer(ctx, bpm, 8);
   }
 }
 

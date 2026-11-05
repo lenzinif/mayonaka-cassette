@@ -331,5 +331,26 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
       );
       expect(effX).toBeGreaterThan(bounds.innerGap);
     });
+
+    it('allows player to drive under overhead gantry and vms without collision', () => {
+      const track = buildTestTrack();
+      const seg = track.segments[12]!;
+      seg.sprites = [
+        { kind: 'gantry', offset: 0, variant: 0 },
+        { kind: 'vms', offset: 0, variant: 0 },
+      ];
+
+      const tm = new TrafficManager();
+      const car = new PlayerCar();
+      car.x = 0; // Exactly centered under the gantry
+      car.speed = tuning.maxSpeed * 0.9;
+
+      const events: CollisionEvent[] = [];
+      const z = 12 * track.segmentLength;
+      tm.update(1 / 120, track, car, z - 100, z + 10, (e) => events.push(e));
+
+      // Overhead structures must produce zero collisions on the roadway
+      expect(events).toHaveLength(0);
+    });
   });
 });

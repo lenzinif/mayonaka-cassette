@@ -95,7 +95,8 @@ export const DEFAULT_TUNING = {
   bgRain: 0,
   bgBirds: 1,
   bgLightningOnBeat: 1,
-  bgConstellations: 1,
+  bgStars: 1,
+  bgConstellations: 0,
 } satisfies Record<string, number>;
 
 export type TuningKey = keyof typeof DEFAULT_TUNING;
@@ -747,9 +748,18 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
   },
   {
     group: 'Weather & Sky',
+    key: 'bgStars',
+    label: 'Stars & shooting stars',
+    hint: 'Stelle scintillanti e stelle cadenti nella volta celeste (1 = ON, 0 = OFF)',
+    min: 0,
+    max: 1,
+    step: 1,
+  },
+  {
+    group: 'Weather & Sky',
     key: 'bgConstellations',
     label: 'Constellations & meteors',
-    hint: 'Costellazioni geometriche pulsanti e stelle cadenti (1 = ON, 0 = OFF)',
+    hint: 'Costellazioni geometriche pulsanti (1 = ON, 0 = OFF)',
     min: 0,
     max: 1,
     step: 1,

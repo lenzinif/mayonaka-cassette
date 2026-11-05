@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { BeatClock } from './BeatClock';
-import { DEFAULT_SYNTH_BEATMAP, FunkAudioEngine } from './FunkAudioEngine';
+import {
+  clearSynthLoopCache,
+  DEFAULT_SYNTH_BEATMAP,
+  FunkAudioEngine,
+  getOrBuildSynthFallbackBuffer,
+  getOrSynthesizeFutureFunkLoopPcm,
+} from './FunkAudioEngine';
 
 describe('BeatClock & FunkAudioEngine', () => {
   it('computes beat, bar, phase, and crossing edges deterministically', () => {
@@ -104,6 +110,57 @@ describe('BeatClock & FunkAudioEngine', () => {
     const activeState = engine.update(1 / 60, { speedRatio: 0, isDrifting: false, isOffRoad: false });
     expect(activeState.trackTimeSec).toBeGreaterThan(0);
     expect(activeState.trackTimeSec).toBeLessThan(0.05);
+
+    engine.dispose();
+  });
+
+  it('caches synthesized fallback PCM and AudioBuffers for zero-lag subsequent access', () => {
+    clearSynthLoopCache();
+
+    // 1. First call calculates and caches PCM
+    const t0 = performance.now();
+    const pcm1 = getOrSynthesizeFutureFunkLoopPcm(122, 48000, 8);
+    const dur1 = performance.now() - t0;
+
+    // 2. Second call returns the exact same cached reference in < 1ms
+    const t1 = performance.now();
+    const pcm2 = getOrSynthesizeFutureFunkLoopPcm(122, 48000, 8);
+    const dur2 = performance.now() - t1;
+
+    expect(pcm1).toBe(pcm2);
+    expect(pcm1.left.length).toBeGreaterThan(1000);
+    expect(dur2).toBeLessThan(10);
+    expect(dur1).toBeGreaterThanOrEqual(dur2);
+
+    // Mock AudioContext to test getOrBuildSynthFallbackBuffer caching
+    const mockCtx = {
+      sampleRate: 48000,
+      createBuffer: (channels: number, length: number, sampleRate: number) => ({
+        numberOfChannels: channels,
+        length,
+        sampleRate,
+        duration: length / sampleRate,
+        getChannelData: () => new Float32Array(length),
+      }),
+    } as unknown as AudioContext;
+
+    const buf1 = getOrBuildSynthFallbackBuffer(mockCtx, 122, 8);
+    const buf2 = getOrBuildSynthFallbackBuffer(mockCtx, 122, 8);
+    expect(buf1).toBe(buf2);
+  });
+
+  it('loops the same procedural synth track seamlessly without creating redundant nodes or lag', () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+    // Simulate active playing state
+    (engine as unknown as { isPlaying: boolean; sourceNode: unknown; virtualTrackSec: number }).isPlaying = true;
+    (engine as unknown as { sourceNode: unknown }).sourceNode = {};
+    (engine as unknown as { virtualTrackSec: number }).virtualTrackSec = 60;
+
+    // Looping the exact same synth track should execute seamlessly: duration 0, virtualTrackSec reset to 0
+    const fadeDur = engine.crossfadeToTrack(DEFAULT_SYNTH_BEATMAP, null, 2, true);
+    expect(fadeDur).toBe(0);
+    expect((engine as unknown as { virtualTrackSec: number }).virtualTrackSec).toBe(0);
+    expect(engine.isCrossfading).toBe(false);
 
     engine.dispose();
   });

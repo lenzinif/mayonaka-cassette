@@ -66,6 +66,22 @@ function propHitHalfWidth(kind: PropKind): number {
       return 0.16;
     case 'lamp':
       return 0.14;
+    case 'building':
+      return 0.8;
+    case 'jihanki':
+      return 0.2;
+    case 'phonebooth':
+      return 0.18;
+    case 'gantry':
+    case 'vms':
+      // Overhead gantry / signs span across the roadway; player drives right under
+      return 0;
+    case 'chevron':
+      return 0.22;
+    case 'pylon':
+      return 0.4;
+    case 'shrub':
+      return 0.16;
   }
 }
 

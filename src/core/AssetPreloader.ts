@@ -7,6 +7,8 @@
  * procedural canvas greybox rendering (Design Pillar Rule 4) on any network or decode failure.
  */
 
+import { BUNDLED_BEATMAPS, getOrSynthesizeFutureFunkLoopPcm } from '@src/audio/FunkAudioEngine';
+
 export type AssetKind = 'image' | 'json' | 'synth';
 
 export interface AssetDescriptor {
@@ -217,7 +219,11 @@ export class AssetPreloader {
   }
 
   private async warmupSynth(): Promise<void> {
-    // Quick micro-yield to allow browser paint frames between loads
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    // Warm up procedural synth loops in advance so in-game track starts and loops are 0ms.
+    for (const bm of BUNDLED_BEATMAPS) {
+      getOrSynthesizeFutureFunkLoopPcm(bm.bpm, 48000, 8);
+      // Yield to the browser paint cycle between tracks
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
   }
 }
