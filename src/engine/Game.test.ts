@@ -213,12 +213,27 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     expect(library.currentIndex).toBe(0);
   });
 
-  it('holds the 8-bar DJ outro loop when the song reaches the end before the player reaches the fork (docs/DESIGN.md §3)', () => {
+  it('holds Dub Tape Delay wash and applies Tape Drag without rewinding 8 bars (docs/OUTRO_EXTENSION_PROPOSALS.md)', () => {
     const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
     const dur = DEFAULT_SYNTH_BEATMAP.durationSec;
 
-    // Advance virtualTrackSec past durationSec while holdOutroLoop is true
-    engine.update(dur + 1, {
+    // Stage 1: Tape Drag when roadBeatsRemaining > audioBeatsRemaining
+    (engine as unknown as { virtualTrackSec: number }).virtualTrackSec = dur - 4; // ~8 beats remaining
+    for (let i = 0; i < 30; i++) {
+      engine.update(1 / 60, {
+        speedRatio: 0.8,
+        isDrifting: false,
+        isOffRoad: false,
+        holdOutroLoop: true,
+        roadBeatsRemaining: 16, // player needs 16 beats to reach fork
+      });
+    }
+    // Playback rate dips smoothly towards outroTapeDragMinRate (0.85)
+    expect(engine.playbackRate).toBeLessThan(0.98);
+    expect(engine.playbackRate).toBeGreaterThanOrEqual(0.85);
+
+    // Stage 2: Advance virtualTrackSec past durationSec while holdOutroLoop is true
+    const clockState = engine.update(dur + 1, {
       speedRatio: 0.4,
       isDrifting: false,
       isOffRoad: false,
@@ -226,8 +241,12 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     });
 
     expect(engine.isOutroLooping).toBe(true);
+    // ZERO REWIND: virtualTrackSec does NOT jump backward by 8 bars!
+    expect((engine as unknown as { virtualTrackSec: number }).virtualTrackSec).toBeGreaterThanOrEqual(dur);
+    // Clock continues sampling valid, monotonic beat values
+    expect(clockState.beatFloat).toBeGreaterThan(0);
 
-    // Releasing holdOutroLoop clears the outro loop flag
+    // Releasing holdOutroLoop clears the outro loop flag and resets dub state
     engine.update(0.1, {
       speedRatio: 0.8,
       isDrifting: false,

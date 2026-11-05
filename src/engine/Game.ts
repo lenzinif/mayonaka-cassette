@@ -734,19 +734,28 @@ export class Game {
     this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
     this.drivingAudioParams.offRoadDepth = this.car.offRoadDepth;
     // If multi-track playlist is active and the player is in the late approach to the stage fork
-    // but hasn't reached the fork split line yet (docs/DESIGN.md §3), instruct the DJ to loop
-    // the last 8 outro bars if the song finishes early.
+    // but hasn't reached the finish line yet (docs/OUTRO_EXTENSION_PROPOSALS.md), instruct the
+    // audio engine to apply progressive Tape Drag and hold the Dub Tape Delay wash if the track concludes.
     // If the player is in early/mid stage (e.g. at the start of a lap or stopped),
     // the song wraps naturally to the intro rather than skipping to the outro.
     const forkApproachWindowBars = Math.max(
       4,
       Math.min(FORK_APPROACH_BARS + 4, Math.floor(this.totalBars * 0.5)),
     );
-    this.drivingAudioParams.holdOutroLoop =
+    const holdOutro =
       this.library.hasMultipleTracks &&
       !this.hasCustomTrack &&
       this.roadBarIndex >= this.totalBars - forkApproachWindowBars &&
-      this.roadBarIndex < Math.max(1, this.totalBars - 2);
+      this.position < this.track.length;
+
+    this.drivingAudioParams.holdOutroLoop = holdOutro;
+    if (holdOutro && isSongTrack(this.track)) {
+      const totalRoadBeats = this.track.totalBars * 4;
+      const currentRoadBeat = worldZToBeat(this.track, this.position);
+      this.drivingAudioParams.roadBeatsRemaining = Math.max(0, totalRoadBeats - currentRoadBeat);
+    } else {
+      this.drivingAudioParams.roadBeatsRemaining = undefined;
+    }
 
     const prevRole = this.sectionRole;
     const clockState = this.audio.update(dt, this.drivingAudioParams);

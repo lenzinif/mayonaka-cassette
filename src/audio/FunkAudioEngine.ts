@@ -245,10 +245,16 @@ export interface DrivingAudioParams {
   /** Continuous off-road penetration depth in [0, 1] for progressive filter/pitch transition. */
   offRoadDepth?: number;
   /**
-   * True when the player has fallen behind the song on a multi-track stage so the DJ
-   * loops the final 8 outro bars until the player reaches the fork (docs/DESIGN.md §3).
+   * True when the player is in the late fork approach zone of a multi-track playlist:
+   * activates preventative Tape Drag and the Dub Tape Delay wash if the track concludes
+   * before crossing the fork (docs/OUTRO_EXTENSION_PROPOSALS.md).
    */
   holdOutroLoop?: boolean;
+  /**
+   * Road beats remaining until the stage finish line (`(track.length - position) / beatLengthWorld`).
+   * Used when `holdOutroLoop === true` to modulate Tape Drag (Stage 1).
+   */
+  roadBeatsRemaining?: number;
 }
 
 /**
@@ -298,6 +304,14 @@ export class FunkAudioEngine {
   private crossfadeRemainingSec = 0;
   private crossfadeTotalSec = 0;
   private outroLoopHolding = false;
+  /** Dub Tape Delay & Reverb Wash circuit for organic outro extensions (docs/OUTRO_EXTENSION_PROPOSALS.md). */
+  private dubSendGain: GainNode | null = null;
+  private dubDelayNode: DelayNode | null = null;
+  private dubFeedbackGain: GainNode | null = null;
+  private dubFilterNode: BiquadFilterNode | null = null;
+  private currentDubSend = 0;
+  private currentDubFeedback = 0;
+  private outroSourceFaded = false;
 
   /** Progressive attack/release envelope for turntable pitch dips (collisions/shocks). */
   private pitchDipTarget = 0;
@@ -438,6 +452,35 @@ export class FunkAudioEngine {
       this.filterNode = filter;
       this.masterGain = gain;
       this.lastAudioTimeSec = ctx.currentTime;
+
+      if (typeof ctx.createDelay === 'function') {
+        const dubSend = ctx.createGain();
+        dubSend.gain.value = 0;
+
+        const dubDelay = ctx.createDelay(2.0);
+        const dottedEighthSec = Math.max(0.08, Math.min(1.5, beatDurationSec(this.beatClock.map) * 0.75));
+        dubDelay.delayTime.value = dottedEighthSec;
+
+        const dubFilter = ctx.createBiquadFilter();
+        dubFilter.type = 'lowpass';
+        dubFilter.frequency.value = tuning.outroDubFilterHz;
+        dubFilter.Q.value = 2.2;
+
+        const dubFeedback = ctx.createGain();
+        dubFeedback.gain.value = 0;
+
+        filter.connect(dubSend);
+        dubSend.connect(dubDelay);
+        dubDelay.connect(dubFilter);
+        dubFilter.connect(dubFeedback);
+        dubFeedback.connect(dubDelay); // Regenerative loop
+        dubFilter.connect(gain);       // Wet output into masterGain
+
+        this.dubSendGain = dubSend;
+        this.dubDelayNode = dubDelay;
+        this.dubFilterNode = dubFilter;
+        this.dubFeedbackGain = dubFeedback;
+      }
     }
 
     if (this.ctx.state === 'suspended') {
@@ -463,8 +506,9 @@ export class FunkAudioEngine {
     this.stopSourceNode();
     this.crossfadeRemainingSec = 0;
     this.crossfadeTotalSec = 0;
-    this.outroLoopHolding = false;
+    this.resetDubState();
     this.beatClock.setBeatMap(beatMap);
+    this.updateDubDelayTime();
     this.currentBuffer = audioBuffer;
     this.isSynthLoopBuffer = audioBuffer === null;
     this.virtualTrackSec = 0;
@@ -497,9 +541,10 @@ export class FunkAudioEngine {
     const fadeDurSec = Math.max(2.0, Math.min(10.0, crossfadeBars * barDurationSec(beatMap)));
     this.crossfadeTotalSec = fadeDurSec;
     this.crossfadeRemainingSec = fadeDurSec;
-    this.outroLoopHolding = false;
+    this.resetDubState();
 
     this.beatClock.setBeatMap(beatMap);
+    this.updateDubDelayTime();
     this.currentBuffer = audioBuffer;
     this.isSynthLoopBuffer = audioBuffer === null;
     this.virtualTrackSec = 0;
@@ -546,6 +591,44 @@ export class FunkAudioEngine {
    */
   updateBeatMap(beatMap: BeatMap): void {
     this.beatClock.setBeatMap(beatMap);
+    this.updateDubDelayTime();
+  }
+
+  private updateDubDelayTime(): void {
+    if (this.dubDelayNode && this.ctx) {
+      const dottedEighthSec = Math.max(0.08, Math.min(1.5, beatDurationSec(this.beatClock.map) * 0.75));
+      try {
+        this.dubDelayNode.delayTime.setValueAtTime(dottedEighthSec, this.ctx.currentTime);
+      } catch {
+        this.dubDelayNode.delayTime.value = dottedEighthSec;
+      }
+    }
+  }
+
+  private resetDubState(): void {
+    this.outroLoopHolding = false;
+    this.outroSourceFaded = false;
+    this.currentDubSend = 0;
+    this.currentDubFeedback = 0;
+    if (this.ctx) {
+      const now = this.ctx.currentTime;
+      if (this.dubSendGain) {
+        try {
+          this.dubSendGain.gain.cancelScheduledValues(now);
+          this.dubSendGain.gain.setValueAtTime(0, now);
+        } catch {
+          this.dubSendGain.gain.value = 0;
+        }
+      }
+      if (this.dubFeedbackGain) {
+        try {
+          this.dubFeedbackGain.gain.cancelScheduledValues(now);
+          this.dubFeedbackGain.gain.setValueAtTime(0, now);
+        } catch {
+          this.dubFeedbackGain.gain.value = 0;
+        }
+      }
+    }
   }
 
   /**
@@ -692,14 +775,81 @@ export class FunkAudioEngine {
 
     this.filterBlipBoost *= Math.exp(-4.5 * dt);
 
-    // 4. Compute target turntable playbackRate (1.0 on asphalt, progressive sag off-road or on bump)
+    // 4. Compute target turntable playbackRate (1.0 on asphalt, progressive sag off-road, on bump, or outro tape drag)
+    const dur = Math.max(1, this.beatClock.map.durationSec);
+    const audioSecRemaining = Math.max(0, dur - this.virtualTrackSec);
+    const beatSec = beatDurationSec(this.beatClock.map);
+    const audioBeatsRemaining = audioSecRemaining / beatSec;
+
+    let outroDragTargetRate = 1.0;
+    if (driving.holdOutroLoop) {
+      if (this.outroLoopHolding) {
+        // Stadio 2 attivo (coda dub): mantieni il nastro al minimo di drag configurato
+        outroDragTargetRate = tuning.outroTapeDragMinRate;
+      } else if (
+        driving.roadBeatsRemaining !== undefined &&
+        driving.roadBeatsRemaining > 0.5 &&
+        audioBeatsRemaining < driving.roadBeatsRemaining
+      ) {
+        // Stadio 1: rallenta dolcemente il nastro se la strada rimasta supera i beat audio rimasti
+        const ratio = audioBeatsRemaining / driving.roadBeatsRemaining;
+        outroDragTargetRate = Math.max(
+          tuning.outroTapeDragMinRate,
+          Math.min(1.0, ratio),
+        );
+      }
+    }
+    const outroDragDip = 1.0 - outroDragTargetRate;
     const offRoadDip = this.offRoadEnvelope * tuning.audioOffRoadPitchDip;
-    const targetRate = Math.max(0.65, 1.0 - offRoadDip - this.pitchDipEnvelope);
+    const targetRate = Math.max(0.65, 1.0 - offRoadDip - this.pitchDipEnvelope - outroDragDip);
     this.currentPlaybackRate +=
       (targetRate - this.currentPlaybackRate) * (1 - Math.exp(-6.5 * dt));
 
+    // Dub Tape Delay & Reverb Wash parameters (Stage 2, docs/OUTRO_EXTENSION_PROPOSALS.md)
+    const twoBarsSec = 2 * barDurationSec(this.beatClock.map);
+    const isPreOutroWindow = driving.holdOutroLoop === true && audioSecRemaining <= twoBarsSec;
+
+    const targetDubSend = this.outroLoopHolding
+      ? (this.isSynthLoopBuffer ? 0.45 : 0.0) // A traccia MP3 finita non immettiamo nuovo segnale dry: risuona la coda!
+      : isPreOutroWindow
+        ? 0.55 * (1 - audioSecRemaining / Math.max(0.1, twoBarsSec))
+        : 0.0;
+
+    const targetDubFeedback = this.outroLoopHolding
+      ? tuning.outroDubDelayFeedback
+      : isPreOutroWindow
+        ? Math.min(0.68, tuning.outroDubDelayFeedback * 0.8)
+        : 0.0;
+
+    this.currentDubSend += (targetDubSend - this.currentDubSend) * (1 - Math.exp(-6.0 * dt));
+    this.currentDubFeedback += (targetDubFeedback - this.currentDubFeedback) * (1 - Math.exp(-6.0 * dt));
+
+    if (this.ctx) {
+      const now = this.ctx.currentTime;
+      if (this.dubSendGain) {
+        try {
+          this.dubSendGain.gain.setValueAtTime(this.currentDubSend, now);
+        } catch {
+          this.dubSendGain.gain.value = this.currentDubSend;
+        }
+      }
+      if (this.dubFeedbackGain) {
+        try {
+          this.dubFeedbackGain.gain.setValueAtTime(this.currentDubFeedback, now);
+        } catch {
+          this.dubFeedbackGain.gain.value = this.currentDubFeedback;
+        }
+      }
+      if (this.dubFilterNode) {
+        try {
+          this.dubFilterNode.frequency.setValueAtTime(tuning.outroDubFilterHz, now);
+        } catch {
+          this.dubFilterNode.frequency.value = tuning.outroDubFilterHz;
+        }
+      }
+    }
+
     // 5. Advance track time from AudioContext clock (with output latency compensation)
-    const dur = Math.max(1, this.beatClock.map.durationSec);
     if (this.ctx && this.isPlaying && this.ctx.state === 'running') {
       const nowAudio = this.ctx.currentTime;
       const rawElapsed = Math.max(0, nowAudio - this.lastAudioTimeSec);
@@ -713,14 +863,14 @@ export class FunkAudioEngine {
       if (this.virtualTrackSec >= dur) {
         this.handleTrackEndWrap(dur, driving.holdOutroLoop === true);
       } else if (!driving.holdOutroLoop) {
-        this.outroLoopHolding = false;
+        this.resetDubState();
       }
     } else {
       this.virtualTrackSec += dt * this.currentPlaybackRate;
       if (this.virtualTrackSec >= dur) {
         this.handleTrackEndWrap(dur, driving.holdOutroLoop === true);
       } else if (!driving.holdOutroLoop) {
-        this.outroLoopHolding = false;
+        this.resetDubState();
       }
     }
 
@@ -748,6 +898,9 @@ export class FunkAudioEngine {
       Math.min(1, speedCurve + driftBoost + offRoadMuffle + impactMuffle + introMuffle + blip),
     );
     let targetCutoff = minHz * Math.pow(maxHz / Math.max(100, minHz), openness);
+    if (this.outroLoopHolding) {
+      targetCutoff = Math.min(targetCutoff, tuning.outroDubFilterHz * 1.35);
+    }
 
     // Apply musical off-road / impact floor cap: ensure the filter remains stylish and never drops into brutal underwater sludge
     if (this.offRoadEnvelope > 0.001 || this.filterMuffleEnvelope > 0.001) {
@@ -807,6 +960,22 @@ export class FunkAudioEngine {
   dispose(): void {
     this.stopOutgoingSource();
     this.stopSourceNode();
+    if (this.dubSendGain) {
+      try { this.dubSendGain.disconnect(); } catch { /* ignore */ }
+      this.dubSendGain = null;
+    }
+    if (this.dubDelayNode) {
+      try { this.dubDelayNode.disconnect(); } catch { /* ignore */ }
+      this.dubDelayNode = null;
+    }
+    if (this.dubFilterNode) {
+      try { this.dubFilterNode.disconnect(); } catch { /* ignore */ }
+      this.dubFilterNode = null;
+    }
+    if (this.dubFeedbackGain) {
+      try { this.dubFeedbackGain.disconnect(); } catch { /* ignore */ }
+      this.dubFeedbackGain = null;
+    }
     if (this.ctx) {
       void this.ctx.close();
       this.ctx = null;
@@ -815,19 +984,35 @@ export class FunkAudioEngine {
 
   private handleTrackEndWrap(dur: number, holdOutroLoop: boolean): void {
     if (holdOutroLoop) {
-      // DJ loops the last 8 outro bars until the player reaches the fork (docs/DESIGN.md §3)
-      const eightBarsSec = Math.min(dur * 0.5, 8 * barDurationSec(this.beatClock.map));
-      const loopStartSec = Math.max(0, dur - eightBarsSec);
-      this.virtualTrackSec = loopStartSec + ((this.virtualTrackSec - loopStartSec) % Math.max(1, eightBarsSec));
+      // NESSUN SALTO INDIETRO DI 8 BATTUTE! (docs/OUTRO_EXTENSION_PROPOSALS.md)
+      // Attiva lo Stadio 2 (Dub Tape Delay Hold): virtualTrackSec continua ad avanzare
+      // linearmente così BeatClock mantiene il battito costante fino al bivio.
       this.outroLoopHolding = true;
-      this.beatClock.resetCrossingState();
-      if (this.ctx && this.ctx.state === 'running' && !this.isSynthLoopBuffer) {
-        this.startSourceNode(this.virtualTrackSec, 0.08);
+      if (
+        !this.outroSourceFaded &&
+        !this.isSynthLoopBuffer &&
+        this.ctx &&
+        this.sourceGainNode &&
+        this.ctx.state === 'running'
+      ) {
+        // Sfuma il buffer dry dell'MP3 per evitare che `src.loop = true` riparta dall'intro
+        const now = this.ctx.currentTime;
+        this.outroSourceFaded = true;
+        try {
+          this.sourceGainNode.gain.cancelScheduledValues(now);
+          this.sourceGainNode.gain.setValueAtTime(
+            Math.max(0.01, this.sourceGainNode.gain.value),
+            now,
+          );
+          this.sourceGainNode.gain.linearRampToValueAtTime(0.0001, now + 0.25);
+        } catch {
+          // Ignore scheduling errors on disposed/mocked nodes
+        }
       }
     } else {
       const wasHoldingOutro = this.outroLoopHolding;
       this.virtualTrackSec %= dur;
-      this.outroLoopHolding = false;
+      this.resetDubState();
       this.beatClock.resetCrossingState();
       if (wasHoldingOutro && this.ctx && this.ctx.state === 'running' && !this.isSynthLoopBuffer) {
         this.startSourceNode(this.virtualTrackSec, 0.08);

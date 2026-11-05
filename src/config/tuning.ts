@@ -38,13 +38,16 @@ export const DEFAULT_TUNING = {
   driftCentrifugalReduce: 0.42,
   driftDecelRate: 0.095,
 
-  // Audio & Beat Pulse (M3)
+  // Audio & Beat Pulse (M3) & Outro Extension
   audioFilterMinHz: 420,
   audioFilterMaxHz: 18000,
   audioFilterDriftQ: 3.2,
   audioOffRoadPitchDip: 0.025,
   audioFilterOffRoadFloorHz: 2200,
   bpmPulseStrength: 1.0,
+  outroTapeDragMinRate: 0.85,
+  outroDubDelayFeedback: 0.82,
+  outroDubFilterHz: 900,
 
   // Song-Driven Road (M4 & Spacetime Sync)
   referenceSpeedRatio: 0.76,
@@ -420,6 +423,35 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0,
     max: 2,
     step: 0.05,
+  },
+  {
+    group: 'Audio',
+    key: 'outroTapeDragMinRate',
+    label: 'Outro tape drag min',
+    hint: 'Rallentamento minimo del nastro (playbackRate) quando indugi prima del bivio',
+    unit: '×',
+    min: 0.7,
+    max: 1.0,
+    step: 0.01,
+  },
+  {
+    group: 'Audio',
+    key: 'outroDubDelayFeedback',
+    label: 'Outro dub feedback',
+    hint: 'Rigenerazione della coda Space Echo quando la canzone finisce prima del bivio',
+    min: 0.4,
+    max: 0.92,
+    step: 0.02,
+  },
+  {
+    group: 'Audio',
+    key: 'outroDubFilterHz',
+    label: 'Outro dub cutoff',
+    hint: 'Frequenza del filtro passa-basso nella coda d’eco dub dell’outro',
+    unit: 'Hz',
+    min: 400,
+    max: 2400,
+    step: 50,
   },
 
   {
