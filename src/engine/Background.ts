@@ -573,12 +573,12 @@ export class Background {
 
       // Golden setting sun reflection column on water surface directly below the sun
       const sunRefW = Math.max(16, sunR * 0.45);
+      ctx.fillStyle = palette.sunBottom;
       for (let dy = 0; dy < seaH; dy++) {
         const y = seaTopY + dy;
         const rip = Math.sin(this.skyTime * 4.2 + dy * 0.75) * 2.2;
         const expand = (dy / seaH) * 22;
         const refAlpha = (1 - (dy / seaH) * 0.40) * (0.45 + pulse * 0.28);
-        ctx.fillStyle = palette.sunBottom;
         ctx.globalAlpha = Math.min(0.85, refAlpha);
         ctx.fillRect(sunX - (sunRefW + expand) * 0.5 + rip, y, sunRefW + expand, 1);
       }

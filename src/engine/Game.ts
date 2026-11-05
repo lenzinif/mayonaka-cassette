@@ -781,7 +781,7 @@ export class Game {
     // 6. Advance M7 ParticleSystem
     this.particles.update(dt, this.car, RENDER_WIDTH, RENDER_HEIGHT, this.car.grooveTier);
 
-    this.background.update(dt, playerSeg.curve, this.car.speedRatio);
+    this.background.update(dt, playerSeg.curve, this.car.speedRatio, this.downbeatPulse);
     this.bridge.offer(this.simTime, this.buildSnapshot);
 
     const elapsed = performance.now() - t0;
