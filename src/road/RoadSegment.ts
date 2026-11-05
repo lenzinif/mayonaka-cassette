@@ -26,7 +26,8 @@ export type PropKind =
   | 'vms'
   | 'chevron'
   | 'pylon'
-  | 'shrub';
+  | 'shrub'
+  | 'sign';
 
 /** A roadside sprite anchored to a segment. `offset` is in road half-widths (±1 = road edge). */
 export interface RoadSprite {

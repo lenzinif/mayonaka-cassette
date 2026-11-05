@@ -588,7 +588,9 @@ function populateChunkProps(
               ? 0
               : rule.kind === 'chevron' || rule.kind === 'shrub'
                 ? 1.35
-                : rule.kind === 'palm' || rule.kind === 'phonebooth'
+                : rule.kind === 'sign'
+                  ? 1.38
+                  : rule.kind === 'palm' || rule.kind === 'phonebooth'
                   ? 1.48
                   : 1.42
     );

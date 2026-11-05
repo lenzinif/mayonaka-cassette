@@ -40,6 +40,7 @@ const PROP_DEBRIS_COLORS: Readonly<Record<PropKind, readonly [string, string, st
   chevron: ['#ff007f', '#00f5d4', '#ffffff'],
   pylon: ['#7b2cbf', '#e0aaff', '#ff0055'],
   shrub: ['#06d6a0', '#0a9396', '#2d6a4f'],
+  sign: ['#e63946', '#ffffff', '#1d3557'],
 };
 
 /**

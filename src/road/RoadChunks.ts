@@ -395,7 +395,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: CURVE.HARD * 0.9, elevation: 0 },
       { bars: 1, curve: -CURVE.EASY, elevation: HILL.LOW * 0.5 },
     ],
-    props: [{ kind: 'billboard', placement: 'alternating', everyBeats: 2, offset: 1.7 }],
+    props: [{ kind: 'sign', placement: 'alternating', everyBeats: 2, offset: 1.38 }],
   }),
 
   defineChunk({

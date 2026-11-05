@@ -12,11 +12,81 @@ const transpiled = ts.transpileModule(src, { compilerOptions: { module: ts.Modul
 
 const assets = [
   {
-    id: 'building',
-    name: 'Akiba High-Rise Facade & Vertical Blade Sign',
+    id: 'building_0',
+    name: 'Palazzo 1: Akiba Megamart & Neon Blade Sign',
     category: 'Canyon Urbano',
-    filename: 'asset_building.png',
+    filename: 'asset_building_0.png',
     drawCode: `drawProp(ctx, 'building', 350, 490, 0.046, -1, 0, 0.8);`
+  },
+  {
+    id: 'building_1',
+    name: 'Palazzo 2: Shinjuku Cyber-Glass Skyscraper',
+    category: 'Canyon Urbano',
+    filename: 'asset_building_1.png',
+    drawCode: `drawProp(ctx, 'building', 350, 500, 0.042, -1, 1, 0.8);`
+  },
+  {
+    id: 'building_2',
+    name: 'Palazzo 3: Showa Block & Rooftop Kanji Billboard',
+    category: 'Canyon Urbano',
+    filename: 'asset_building_2.png',
+    drawCode: `drawProp(ctx, 'building', 350, 480, 0.048, -1, 2, 0.8);`
+  },
+  {
+    id: 'pylon',
+    name: 'Delta Transmission Pylon (Traliccio a Delta con Cavi)',
+    category: 'Infrastruttura',
+    filename: 'asset_pylon.png',
+    drawCode: `drawProp(ctx, 'pylon', 300, 520, 0.042, 1, 0, 0);`
+  },
+  {
+    id: 'vms',
+    name: 'Variable Message Sign (Messaggio di Prova)',
+    category: 'Segnaletica LED',
+    filename: 'asset_vms.png',
+    drawCode: `drawProp(ctx, 'vms', 300, 450, 0.092, 1, 0, 0.9);`
+  },
+  {
+    id: 'shrub_0',
+    name: 'Arbusto 1: Roadside Dome Hedge (Siepe a Cupola)',
+    category: 'Vegetazione',
+    filename: 'asset_shrub_0.png',
+    drawCode: `drawProp(ctx, 'shrub', 300, 440, 0.22, 1, 0, 0);`
+  },
+  {
+    id: 'shrub_1',
+    name: 'Arbusto 2: Sculpted Japanese Niwaki (Arbusto a Palchi)',
+    category: 'Vegetazione',
+    filename: 'asset_shrub_1.png',
+    drawCode: `drawProp(ctx, 'shrub', 300, 450, 0.20, 1, 1, 0);`
+  },
+  {
+    id: 'sign_0',
+    name: 'Cartello Stradale: Limite di Velocità 80',
+    category: 'Segnaletica Normale',
+    filename: 'asset_sign_0.png',
+    drawCode: `drawProp(ctx, 'sign', 300, 460, 0.12, 1, 0, 0);`
+  },
+  {
+    id: 'sign_1',
+    name: 'Cartello Stradale: Shuto Uscita / Direzione C1',
+    category: 'Segnaletica Normale',
+    filename: 'asset_sign_1.png',
+    drawCode: `drawProp(ctx, 'sign', 300, 460, 0.12, 1, 1, 0);`
+  },
+  {
+    id: 'sign_2',
+    name: 'Cartello Stradale: Rombo Pericolo Curva',
+    category: 'Segnaletica Normale',
+    filename: 'asset_sign_2.png',
+    drawCode: `drawProp(ctx, 'sign', 300, 460, 0.12, 1, 2, 0);`
+  },
+  {
+    id: 'gantry',
+    name: 'Overhead Shuto Highway Gantry (Portal)',
+    category: 'Infrastruttura Shuto',
+    filename: 'asset_gantry.png',
+    drawCode: `drawProp(ctx, 'gantry', 300, 460, 0.068, 1, 0, 0);`
   },
   {
     id: 'jihanki',
@@ -33,43 +103,14 @@ const assets = [
     drawCode: `drawProp(ctx, 'phonebooth', 300, 480, 0.145, 1, 0, 0);`
   },
   {
-    id: 'gantry',
-    name: 'Overhead Shuto Highway Gantry (Portal)',
-    category: 'Infrastruttura Shuto',
-    filename: 'asset_gantry.png',
-    drawCode: `drawProp(ctx, 'gantry', 300, 460, 0.068, 1, 0, 0);`
-  },
-  {
-    id: 'vms',
-    name: 'Variable Message Sign (Amber LED Matrix)',
-    category: 'Infrastruttura Shuto',
-    filename: 'asset_vms.png',
-    drawCode: `drawProp(ctx, 'vms', 300, 450, 0.092, 1, 0, 0.9);`
-  },
-  {
     id: 'chevron',
     name: 'Curving Rhythm Chevrons (Pulsing Arrows)',
     category: 'Segnaletica Dinamica',
     filename: 'asset_chevron.png',
     drawCode: `drawProp(ctx, 'chevron', 300, 440, 0.165, 1, 0, 0.85);`
-  },
-  {
-    id: 'pylon',
-    name: 'Japanese Electrical Transmission Pylon',
-    category: 'Paesaggio Suburbano',
-    filename: 'asset_pylon.png',
-    drawCode: `drawProp(ctx, 'pylon', 300, 510, 0.044, 1, 0, 0);`
-  },
-  {
-    id: 'shrub',
-    name: 'Roadside Shrub / Synthwave Foliage',
-    category: 'Vegetazione',
-    filename: 'asset_shrub.png',
-    drawCode: `drawProp(ctx, 'shrub', 300, 440, 0.22, 1, 0, 0);`
   }
 ];
 
-// Ensure scratch dir exists
 if (!fs.existsSync(path.join(outDir, 'scratch'))) {
   fs.mkdirSync(path.join(outDir, 'scratch'), { recursive: true });
 }
@@ -193,7 +234,7 @@ for (const asset of assets) {
     ctx.fillStyle = floorGrad;
     ctx.fillRect(0, groundY - 40, 600, 560 - groundY + 40);
 
-    // Subtle Perspective Studio Floor Grid
+    // Perspective Studio Floor Grid
     ctx.strokeStyle = 'rgba(0, 245, 212, 0.18)';
     ctx.lineWidth = 1;
     for (let gy = groundY - 20; gy <= 550; gy += 15) {
@@ -227,7 +268,7 @@ for (const asset of assets) {
   execSync(`"${chromePath}" --headless=new --disable-gpu --window-size=600,560 --screenshot="${outPngPath}" "${fileUrl}"`);
 }
 
-// Generate the 9th combined scene showcase!
+// Generate the 15th combined scene showcase!
 const combinedHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -238,14 +279,14 @@ const combinedHtml = `<!DOCTYPE html>
       background: #080417;
       color: #f8f9fa;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      width: 960px;
-      height: 540px;
+      width: 1200px;
+      height: 600px;
       overflow: hidden;
       position: relative;
     }
     canvas {
-      width: 960px;
-      height: 540px;
+      width: 1200px;
+      height: 600px;
       image-rendering: pixelated;
     }
     .overlay-title {
@@ -276,10 +317,10 @@ const combinedHtml = `<!DOCTYPE html>
 </head>
 <body>
   <div class="overlay-title">
-    <h1>FASE 4: COMPREHENSIVE ASSET SHOWCASE</h1>
-    <p>Akihabara Night Rush & Shuto Expressway Props Lineup</p>
+    <h1>FASE 4: COMPREHENSIVE ROAD PROPS & SCENOGRAPHY</h1>
+    <p>Akihabara Canyon, Delta Pylon, VMS Test, Shuto Signs & Shrub Variants</p>
   </div>
-  <canvas id="stage" width="960" height="540"></canvas>
+  <canvas id="stage" width="1200" height="600"></canvas>
   <script>
     var exports = {};
     ${transpiled}
@@ -288,36 +329,42 @@ const combinedHtml = `<!DOCTYPE html>
     const canvas = document.getElementById('stage');
     const ctx = canvas.getContext('2d');
 
-    // Synthwave Night Sky Gradient
-    const sky = ctx.createLinearGradient(0, 0, 0, 380);
+    // Sky gradient
+    const sky = ctx.createLinearGradient(0, 0, 0, 420);
     sky.addColorStop(0, '#060312');
     sky.addColorStop(0.65, '#12082b');
     sky.addColorStop(1, '#2c0c4a');
     ctx.fillStyle = sky;
-    ctx.fillRect(0, 0, 960, 540);
+    ctx.fillRect(0, 0, 1200, 600);
 
-    // Road & Pavement ground
-    const roadY = 460;
+    // Road ground
+    const roadY = 510;
     ctx.fillStyle = '#0f1424';
-    ctx.fillRect(0, roadY, 960, 80);
+    ctx.fillRect(0, roadY, 1200, 90);
     ctx.fillStyle = '#1c243a';
-    ctx.fillRect(0, roadY - 10, 960, 10); // Sidewalk curb
+    ctx.fillRect(0, roadY - 10, 1200, 10);
 
-    // Overhead Gantry spanning across center
-    drawProp(ctx, 'gantry', 480, roadY, 0.055, 1, 0, 0.8);
+    // Left Akiba Urban Canyon: 3 Buildings side by side
+    drawProp(ctx, 'building', 130, roadY, 0.046, -1, 0, 0.8); // Akiba Mart
+    drawProp(ctx, 'building', 260, roadY, 0.040, -1, 1, 0.8); // Shinjuku Cyber Glass
+    drawProp(ctx, 'building', 390, roadY, 0.044, -1, 2, 0.8); // Showa Block with Billboard
 
-    // Left Akiba Urban Canyon: High-rise facade
-    drawProp(ctx, 'building', 150, roadY, 0.048, -1, 0, 0.8);
-    // Vending machine beside building
-    drawProp(ctx, 'jihanki', 205, roadY, 0.075, 1, 0, 0);
-    // Curving chevron on left curve
-    drawProp(ctx, 'chevron', 270, roadY, 0.09, -1, 0, 0.9);
+    // Center Roadway: Overhead Gantry & VMS with Test Message
+    drawProp(ctx, 'gantry', 600, roadY, 0.052, 1, 0, 0.8);
+    drawProp(ctx, 'vms', 770, roadY, 0.065, 1, 0, 0.9);
 
-    // Right Highway Shoulder: VMS, Power Pylon, Phonebooth, Shrub
-    drawProp(ctx, 'vms', 700, roadY, 0.065, 1, 0, 0.8);
-    drawProp(ctx, 'phonebooth', 795, roadY, 0.08, 1, 0, 0);
-    drawProp(ctx, 'shrub', 845, roadY, 0.12, 1, 0, 0);
-    drawProp(ctx, 'pylon', 900, roadY, 0.042, 1, 0, 0);
+    // Vending machine & phonebooth on sidewalk
+    drawProp(ctx, 'jihanki', 465, roadY, 0.075, 1, 0, 0);
+    drawProp(ctx, 'phonebooth', 510, roadY, 0.075, 1, 0, 0);
+
+    // Right Shoulder: Road Signs, Shrubs, Chevrons, Delta Pylon
+    drawProp(ctx, 'sign', 860, roadY, 0.09, 1, 0, 0); // Speed 80
+    drawProp(ctx, 'sign', 915, roadY, 0.09, 1, 1, 0); // Highway Exit C1
+    drawProp(ctx, 'sign', 960, roadY, 0.09, 1, 2, 0); // Curve Diamond
+    drawProp(ctx, 'shrub', 1010, roadY, 0.12, 1, 0, 0); // Dome hedge
+    drawProp(ctx, 'shrub', 1055, roadY, 0.12, 1, 1, 0); // Tiered Niwaki
+    drawProp(ctx, 'chevron', 890, roadY, 0.08, -1, 0, 0.9);
+    drawProp(ctx, 'pylon', 1130, roadY, 0.040, 1, 0, 0); // Delta Pylon with cables!
   </script>
 </body>
 </html>`;
@@ -328,6 +375,6 @@ const combinedPngPath = path.join(outDir, 'asset_showcase_all.png');
 const combinedUrl = 'file:///' + combinedHtmlPath.replace(/\\/g, '/');
 
 console.log('Rendering asset_showcase_all.png...');
-execSync(`"${chromePath}" --headless=new --disable-gpu --window-size=960,540 --screenshot="${combinedPngPath}" "${combinedUrl}"`);
+execSync(`"${chromePath}" --headless=new --disable-gpu --window-size=1200,600 --screenshot="${combinedPngPath}" "${combinedUrl}"`);
 
 console.log('All asset preview PNGs successfully generated!');

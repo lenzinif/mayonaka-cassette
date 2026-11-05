@@ -82,6 +82,8 @@ function propHitHalfWidth(kind: PropKind): number {
       return 0.4;
     case 'shrub':
       return 0.16;
+    case 'sign':
+      return 0.18;
   }
 }
 

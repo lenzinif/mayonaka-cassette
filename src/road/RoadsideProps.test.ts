@@ -25,6 +25,7 @@ function createMockCanvas(): {
     closePath: noop,
     moveTo: noop,
     lineTo: noop,
+    quadraticCurveTo: noop,
     arc: noop,
     fill: () => {
       fillCalls++;
@@ -63,9 +64,10 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     'chevron',
     'pylon',
     'shrub',
+    'sign',
   ];
 
-  it('renders all 11 prop kinds cleanly without throwing', () => {
+  it('renders all 12 prop kinds cleanly without throwing', () => {
     const mock = createMockCanvas();
 
     for (const kind of allProps) {
@@ -125,6 +127,55 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
 
     expect(mockCalm.rectCalls).toBeGreaterThan(0);
     expect(mockBeat.rectCalls).toBeGreaterThan(0);
+  });
+
+  it('renders 3 distinct building styles (Akiba Mart, Shinjuku Cyber Glass, Showa Retro Block)', () => {
+    const mock = createMockCanvas();
+    // Variant 0: Akiba Megamart
+    drawProp(mock.ctx, 'building', 180, 260, 0.02, -1, 0, 0);
+    // Variant 1: Shinjuku Cyber Skyscraper
+    drawProp(mock.ctx, 'building', 180, 260, 0.02, -1, 1, 0);
+    // Variant 2: Showa Retro Block with Rooftop Kanji Billboard & Fire Escape
+    drawProp(mock.ctx, 'building', 180, 260, 0.02, -1, 2, 0);
+    expect(mock.rectCalls).toBeGreaterThan(45);
+  });
+
+  it('renders Japanese delta transmission towers with waist, V-basket, and overhead cables', () => {
+    const mock = createMockCanvas();
+    drawProp(mock.ctx, 'pylon', 320, 260, 0.025, 1, 0, 0);
+    expect(mock.rectCalls).toBeGreaterThan(5);
+    expect(mock.fillCalls).toBeGreaterThan(2);
+  });
+
+  it('renders VMS test message (PROVA / TEST) when variant is 0', () => {
+    const mock = createMockCanvas();
+    drawProp(mock.ctx, 'vms', 320, 240, 0.03, 1, 0, 0.8);
+    // Letter matrix generates multiple letter pixel blocks
+    expect(mock.rectCalls).toBeGreaterThan(15);
+  });
+
+  it('renders two distinct roadside shrub silhouettes (dome hedge vs tiered Niwaki)', () => {
+    const mockHedge = createMockCanvas();
+    const mockNiwaki = createMockCanvas();
+
+    drawProp(mockHedge.ctx, 'shrub', 320, 240, 0.03, 1, 0, 0);
+    drawProp(mockNiwaki.ctx, 'shrub', 320, 240, 0.03, 1, 1, 0);
+
+    expect(mockHedge.rectCalls).toBeGreaterThan(3);
+    expect(mockNiwaki.rectCalls).toBeGreaterThan(3);
+  });
+
+  it('renders normal Japanese road signs (Speed Limit 80, Highway Exit, Curve Hazard Diamond)', () => {
+    const mock = createMockCanvas();
+    // Variant 0: Speed 80
+    drawProp(mock.ctx, 'sign', 320, 240, 0.025, 1, 0, 0);
+    // Variant 1: Highway Exit Directional
+    drawProp(mock.ctx, 'sign', 320, 240, 0.025, 1, 1, 0);
+    // Variant 2: Caution Curve Diamond
+    drawProp(mock.ctx, 'sign', 320, 240, 0.025, 1, 2, 0);
+
+    expect(mock.rectCalls).toBeGreaterThan(12);
+    expect(mock.fillCalls).toBeGreaterThan(2);
   });
 
   it('executes 120 consecutive frames across all variants with zero runtime errors', () => {
