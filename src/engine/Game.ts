@@ -302,6 +302,7 @@ export class Game {
   private renderTimeMs = 0;
   private frameTimeMs = 16.67;
   private lastRenderTimestamp = 0;
+  private lastBridgeJointSegment = -1;
   private memoryMb: number | null = null;
   private memoryCheckFrames = 0;
 
@@ -838,6 +839,22 @@ export class Game {
     this.updateForkState();
 
     // 5. Update reactive Web Audio filter/pitch and sample BeatClock
+    const playerWorldZ = this.position + playerZOffset;
+    const currentSeg = findSegment(this.track, playerWorldZ);
+    const isTunnel = currentSeg ? (currentSeg.env === 'tunnel' || currentSeg.env === 'tunnel-entry' || currentSeg.env === 'tunnel-exit') : false;
+    const isBridge = currentSeg ? currentSeg.env === 'bridge' : false;
+
+    this.drivingAudioParams.isTunnel = isTunnel;
+    this.drivingAudioParams.isBridge = isBridge;
+
+    if (isBridge && currentSeg && currentSeg.stripe === 0 && currentSeg.index % 8 === 0 && this.lastBridgeJointSegment !== currentSeg.index) {
+      this.lastBridgeJointSegment = currentSeg.index;
+      this.audio.playBridgeJoint();
+      if (this.melonSoda.active) {
+        this.melonSoda.applyVerticalImpulse(0.04);
+      }
+    }
+
     this.drivingAudioParams.speedRatio = this.car.speedRatio;
     this.drivingAudioParams.isDrifting = this.car.isDrifting;
     this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
@@ -1057,7 +1074,7 @@ export class Game {
         }
 
         const nextChoice: 'left' | 'right' =
-          this.forkManualLock ?? (this.car.x < 0 ? 'left' : 'right');
+          this.forkManualLock ?? (this.forkLastSign > 0 ? (this.car.x < -0.1 ? 'left' : 'right') : this.forkLastSign < 0 ? (this.car.x > 0.1 ? 'right' : 'left') : (this.car.x < 0 ? 'left' : 'right'));
         const nextSign = nextChoice === 'left' ? -1 : 1;
         if (nextSign !== this.forkLastSign) {
           this.forkLastSign = nextSign;

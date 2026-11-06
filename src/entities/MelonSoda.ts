@@ -211,6 +211,14 @@ export class MelonSoda {
   }
 
   /**
+   * Applies a subtle upward vertical impulse to the liquid surface (e.g. on bridge expansion joints).
+   */
+  applyVerticalImpulse(impulse = 0.5): void {
+    if (!this.active || this.graceTimer > 0) return;
+    this.heaveVel -= Math.abs(impulse) * 6;
+  }
+
+  /**
    * Advances multi-mode liquid dynamics by fixed step `dt`.
    * Does nothing when Tofu Mode (`this.active`) is false.
    */

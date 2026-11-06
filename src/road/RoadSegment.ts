@@ -27,7 +27,18 @@ export type PropKind =
   | 'chevron'
   | 'pylon'
   | 'shrub'
-  | 'sign';
+  | 'sign'
+  | 'overpass'
+  | 'suspension-tower'
+  | 'tunnel-portal'
+  | 'tunnel-fan';
+
+export type SegmentEnvironment =
+  | 'standard'
+  | 'bridge'
+  | 'tunnel'
+  | 'tunnel-entry'
+  | 'tunnel-exit';
 
 /** A roadside sprite anchored to a segment. `offset` is in road half-widths (±1 = road edge). */
 export interface RoadSprite {
@@ -49,6 +60,7 @@ export interface RoadSegment {
   sprites: RoadSprite[];
   /** Per-frame: fog factor, 1 = clear (near), → 0 = fully fogged (far). */
   fog: number;
+  env?: SegmentEnvironment;
 }
 
 export interface Track {
@@ -249,6 +261,7 @@ export function getEffectivePropOffset(
   forkZoneStartZ?: number,
   forkChoice: 'left' | 'right' = 'right',
 ): number {
+  if (baseOffset === 0) return 0;
   if (
     forkZoneStartZ === undefined ||
     trackLength <= forkZoneStartZ ||
