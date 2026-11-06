@@ -14,12 +14,14 @@ function createMockCanvasContext(): {
   strokeCalls: number;
   fillCalls: number;
   lineCalls: number;
+  drawImageCalls: number;
 } {
   let fillRectCalls = 0;
   let rectCalls = 0;
   let strokeCalls = 0;
   let fillCalls = 0;
   let lineCalls = 0;
+  let drawImageCalls = 0;
   const noop = () => {};
   const grad = { addColorStop: noop };
   const ctx = {
@@ -33,6 +35,10 @@ function createMockCanvasContext(): {
     beginPath: noop,
     closePath: noop,
     clip: noop,
+    clearRect: noop,
+    drawImage: () => {
+      drawImageCalls++;
+    },
     moveTo: () => {
       lineCalls++;
     },
@@ -72,6 +78,9 @@ function createMockCanvasContext(): {
     },
     get lineCalls() {
       return lineCalls;
+    },
+    get drawImageCalls() {
+      return drawImageCalls;
     },
   };
 }
@@ -180,6 +189,51 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
 
     expect(mockWithClouds.fillCalls).toBeGreaterThan(mockWithoutClouds.fillCalls);
     expect(mockWithClouds.strokeCalls).toBeGreaterThan(mockWithoutClouds.strokeCalls);
+  });
+
+  it('pre-renders 16-bit clouds to offscreen canvas with padding and blits via drawImage', () => {
+    const bg = new Background();
+    tuning.bgClouds = 1;
+
+    // Simulate browser environment with document.createElement
+    const createdCanvases: { width: number; height: number }[] = [];
+    const origDoc = globalThis.document;
+    try {
+      (globalThis as unknown as { document: unknown }).document = {
+        createElement: (tag: string) => {
+          if (tag === 'canvas') {
+            const mock = createMockCanvasContext();
+            const canvasObj = {
+              width: 0,
+              height: 0,
+              getContext: () => mock.ctx,
+            };
+            createdCanvases.push(canvasObj);
+            return canvasObj;
+          }
+          return {};
+        },
+      };
+
+      const mock = createMockCanvasContext();
+      bg.render(mock.ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+
+      // Verify 6 offscreen cloud canvases were allocated with generous padding to prevent dome clipping
+      expect(createdCanvases.length).toBe(6);
+      for (const c of createdCanvases) {
+        expect(c.width).toBeGreaterThan(60);
+        expect(c.height).toBeGreaterThan(25);
+      }
+
+      // Fast path uses drawImage blits for visible clouds
+      expect(mock.drawImageCalls).toBeGreaterThan(0);
+    } finally {
+      if (origDoc !== undefined) {
+        globalThis.document = origDoc;
+      } else {
+        delete (globalThis as unknown as { document?: unknown }).document;
+      }
+    }
   });
 
   it('toggles Birds (tuning.bgBirds) and advances 3-frame flap animation', () => {
