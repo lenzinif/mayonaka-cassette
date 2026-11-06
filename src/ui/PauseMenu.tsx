@@ -20,6 +20,7 @@ export interface PauseMenuProps {
   cleanHud: boolean;
   showPerfHud: boolean;
   autoShift: boolean;
+  autopilotActive?: boolean;
   onResume: () => void;
   onRestartRun?: () => void;
   onOpenTrackLoader: () => void;
@@ -30,12 +31,13 @@ export interface PauseMenuProps {
   onToggleCleanHud: () => void;
   onTogglePerfHud: () => void;
   onToggleAutoShift?: () => void;
+  onToggleAutopilot?: () => void;
 }
 
 function formatLapTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
-  const hundredths = Math.floor((seconds * 100) % 100);
+  const hundredths = Math.round((seconds * 100) % 100);
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
 }
 
@@ -62,6 +64,7 @@ export function PauseMenu({
   cleanHud,
   showPerfHud,
   autoShift,
+  autopilotActive = false,
   onResume,
   onRestartRun,
   onOpenTrackLoader,
@@ -72,6 +75,7 @@ export function PauseMenu({
   onToggleCleanHud,
   onTogglePerfHud,
   onToggleAutoShift,
+  onToggleAutopilot,
 }: PauseMenuProps) {
   if (!open) return null;
 
@@ -228,7 +232,7 @@ export function PauseMenu({
             <button
               type="button"
               onClick={onTogglePerfHud}
-              className={`col-span-2 cursor-pointer rounded border py-1.5 px-2 font-semibold tracking-wider transition ${
+              className={`cursor-pointer rounded border py-1.5 px-2 font-semibold tracking-wider transition ${
                 showPerfHud
                   ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
                   : 'border-cyan-400/40 bg-[#160530]/70 text-cyan-200 hover:border-cyan-300'
@@ -236,6 +240,19 @@ export function PauseMenu({
             >
               PERF PROFILER: {showPerfHud ? 'ON' : 'OFF'} [F3]
             </button>
+            {onToggleAutopilot && (
+              <button
+                type="button"
+                onClick={onToggleAutopilot}
+                className={`col-span-2 cursor-pointer rounded border py-1.5 px-2 font-semibold tracking-wider transition ${
+                  autopilotActive
+                    ? 'border-emerald-400 bg-emerald-950/90 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.4)]'
+                    : 'border-cyan-400/40 bg-[#160530]/70 text-cyan-200 hover:border-emerald-400'
+                }`}
+              >
+                🤖 AI AUTOPILOT: {autopilotActive ? 'ACTIVE' : 'OFF'} [F4]
+              </button>
+            )}
           </div>
         </div>
 

@@ -45,6 +45,7 @@ function triggerSyntheticKey(code: string): void {
  * - Zero in-game clutter: 5x2 grid removed, settings accessible in Pause Menu.
  * - Togglable Cassette Tape Groove Widget [C].
  * - Fullscreen Clean Mode [H].
+ * - Integrated Autonomous Autopilot [F4].
  */
 export function HUD({
   bridge,
@@ -145,6 +146,14 @@ export function HUD({
         );
       } else if (event.type === 'sodaSkinChanged') {
         showToast(`CUP SKIN // ${SODA_SKIN_LABELS[event.skin]}`, 1500, 'cyan');
+      } else if (event.type === 'autopilotToggled') {
+        showToast(
+          event.enabled
+            ? `AI AUTOPILOT ON // [${event.mode.toUpperCase()}]`
+            : 'MANUAL DRIVING RESTORED',
+          1800,
+          event.enabled ? 'emerald' : 'cyan',
+        );
       } else if (event.type === 'autoShiftToggled') {
         showToast(
           event.enabled ? 'AUTO-SHIFT ASSIST // ON' : 'MANUAL BEAT-SHIFT // ON',
@@ -290,6 +299,13 @@ export function HUD({
 
         {/* Right: Minimalist Status Pill (Replaces old 5x2 grid, freeing up the view) */}
         <div className="pointer-events-auto flex items-center gap-1.5 [contain:layout_style_paint]">
+          {/* Autopilot Active Indicator */}
+          {snap?.autopilotActive && (
+            <span className="animate-pulse rounded border border-cyan-300/80 bg-cyan-950/90 px-2 py-1 text-[10px] font-bold text-cyan-300 shadow-[0_0_10px_rgba(5,217,232,0.5)]">
+              🤖 AUTO [{snap.autopilotMode?.toUpperCase() ?? 'ON'}]
+            </span>
+          )}
+
           <div
             className="flex h-7 items-center justify-center gap-1.5 rounded border border-cyan-400/30 bg-[#090217]/90 px-2.5 py-0.5 text-xs font-semibold tabular-nums text-cyan-300"
             title="Fotogrammi al secondo (FPS)"
@@ -467,6 +483,7 @@ export function HUD({
                 </div>
                 <div className="col-span-2">
                   <span className="font-bold text-cyan-300">H</span> CLEAN HUD ·{' '}
+                  <span className="font-bold text-emerald-300">F4</span> AUTO ·{' '}
                   <span className="font-bold text-pink-300">ESC / P</span> PAUSE &amp; OPTIONS
                 </div>
               </div>
@@ -512,6 +529,7 @@ export function HUD({
         cleanHud={cleanHud}
         showPerfHud={showPerfHud}
         autoShift={autoShift}
+        autopilotActive={snap?.autopilotActive ?? false}
         onResume={() => triggerSyntheticKey('KeyP')}
         onRestartRun={onRestartRun}
         onOpenTrackLoader={onOpenTrackLoader}
@@ -522,6 +540,7 @@ export function HUD({
         onToggleCleanHud={() => setCleanHud((prev) => !prev)}
         onTogglePerfHud={() => setShowPerfHud((prev) => !prev)}
         onToggleAutoShift={() => triggerSyntheticKey('KeyG')}
+        onToggleAutopilot={() => triggerSyntheticKey('F4')}
       />
     </div>
   );
