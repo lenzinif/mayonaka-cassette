@@ -169,21 +169,29 @@ const COLOR_RAIN_FAR = '#70b5e8';
 const COLOR_RAIN_NEAR = '#a6e8ff';
 const COLOR_WATER_DEEP = '#030514';
 
+const RGBA_CACHE = new Map<string, string>();
 function hexToRgba(hex: string, alpha: number): string {
-  const clean = hex.startsWith('#') ? hex.slice(1) : hex;
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  if (clean.length === 3) {
-    r = parseInt(clean[0]! + clean[0]!, 16);
-    g = parseInt(clean[1]! + clean[1]!, 16);
-    b = parseInt(clean[2]! + clean[2]!, 16);
-  } else if (clean.length >= 6) {
-    r = parseInt(clean.slice(0, 2), 16);
-    g = parseInt(clean.slice(2, 4), 16);
-    b = parseInt(clean.slice(4, 6), 16);
+  const rounded = Math.round(alpha * 50) / 50;
+  const key = `${hex}_${rounded}`;
+  let cached = RGBA_CACHE.get(key);
+  if (cached === undefined) {
+    const clean = hex.startsWith('#') ? hex.slice(1) : hex;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (clean.length === 3) {
+      r = parseInt(clean[0]! + clean[0]!, 16);
+      g = parseInt(clean[1]! + clean[1]!, 16);
+      b = parseInt(clean[2]! + clean[2]!, 16);
+    } else if (clean.length >= 6) {
+      r = parseInt(clean.slice(0, 2), 16);
+      g = parseInt(clean.slice(2, 4), 16);
+      b = parseInt(clean.slice(4, 6), 16);
+    }
+    cached = `rgba(${r}, ${g}, ${b}, ${rounded})`;
+    if (RGBA_CACHE.size < 512) RGBA_CACHE.set(key, cached);
   }
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  return cached;
 }
 
 /**
@@ -286,6 +294,16 @@ export class Background {
   private cachedWaterHorizonY = -1;
   private cachedWaterPalette: StagePalette | null = null;
   private cachedWaterGrad: CanvasGradient | null = null;
+
+  private cachedCoronaCtx: CanvasRenderingContext2D | null = null;
+  private cachedCoronaPalette: StagePalette | null = null;
+  private cachedCoronaSunX = -1;
+  private cachedCoronaSunY = -1;
+  private cachedCoronaSunR = -1;
+  private cachedCoronaGrad: CanvasGradient | null = null;
+
+  private readonly cloudCanvases: (HTMLCanvasElement | null)[] = [null, null, null, null, null, null];
+  private cachedCloudPalette: StagePalette | null = null;
 
   constructor() {
     // 1. Layer 1: Mountain ridges & Mayonaka rolling hills
@@ -692,14 +710,29 @@ export class Background {
       ? 48 + pulse * 4.0 + downPulse * 2.0
       : 54 + pulse * 4.5 + downPulse * 2.5;
 
-    // Atmospheric Lunar Corona / Halo for Mayonaka Bay (over the open bay waters)
+    // Atmospheric Lunar Corona / Halo for Mayonaka Bay (cached to avoid per-frame gradient allocation)
     if (isMayonakaBay && typeof ctx.createRadialGradient === 'function') {
       const haloR = sunR * 1.85;
-      const glowGrad = ctx.createRadialGradient(sunX, sunY, sunR * 0.5, sunX, sunY, haloR);
-      glowGrad.addColorStop(0, hexToRgba(palette.sunBottom, 0.28));
-      glowGrad.addColorStop(0.5, hexToRgba(palette.mountainRim, 0.10));
-      glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = glowGrad;
+      if (
+        this.cachedCoronaCtx !== ctx ||
+        this.cachedCoronaPalette !== palette ||
+        Math.abs(this.cachedCoronaSunX - sunX) > 1 ||
+        Math.abs(this.cachedCoronaSunY - sunY) > 1 ||
+        Math.abs(this.cachedCoronaSunR - sunR) > 1 ||
+        !this.cachedCoronaGrad
+      ) {
+        const glowGrad = ctx.createRadialGradient(sunX, sunY, sunR * 0.5, sunX, sunY, haloR);
+        glowGrad.addColorStop(0, hexToRgba(palette.sunBottom, 0.28));
+        glowGrad.addColorStop(0.5, hexToRgba(palette.mountainRim, 0.10));
+        glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        this.cachedCoronaCtx = ctx;
+        this.cachedCoronaPalette = palette;
+        this.cachedCoronaSunX = sunX;
+        this.cachedCoronaSunY = sunY;
+        this.cachedCoronaSunR = sunR;
+        this.cachedCoronaGrad = glowGrad;
+      }
+      ctx.fillStyle = this.cachedCoronaGrad;
       ctx.beginPath();
       ctx.arc(sunX, sunY, haloR, 0, Math.PI * 2);
       ctx.fill();
@@ -847,18 +880,25 @@ export class Background {
       ctx.globalAlpha = 1;
 
       // The Moonlight Reflection (La Scia di Luna sul Mare) cascading across the bay water directly below the moon
+      // Batched as smooth outer glow trapezoid and inner silver core (replaces 52 scanline draw calls)
       const moonRefW = Math.max(16, sunR * 0.42);
-      for (let dy = 0; dy < seaH; dy++) {
-        const y = seaTopY + dy;
-        const expand = (dy / seaH) * 22;
-        const refAlpha = (1 - (dy / seaH) * 0.35) * (0.55 + pulse * 0.25);
-        // Outer cyan moonlight glow
-        ctx.fillStyle = hexToRgba(palette.sunBottom, Math.min(0.85, refAlpha));
-        ctx.fillRect(sunX - (moonRefW + expand) * 0.5, y, moonRefW + expand, 1);
-        // Inner crisp silver moonlight core
-        ctx.fillStyle = hexToRgba(palette.sunTop, Math.min(0.95, refAlpha * 1.15));
-        ctx.fillRect(sunX - (moonRefW * 0.38) * 0.5, y, Math.max(2, moonRefW * 0.38), 1);
-      }
+      const outerTopHalfW = moonRefW * 0.5;
+      const outerBotHalfW = (moonRefW + 22) * 0.5;
+      const outerAlpha = Math.min(0.85, 0.55 + pulse * 0.25);
+      ctx.globalAlpha = outerAlpha;
+      ctx.fillStyle = palette.sunBottom;
+      ctx.beginPath();
+      ctx.moveTo(sunX - outerTopHalfW, seaTopY);
+      ctx.lineTo(sunX + outerTopHalfW, seaTopY);
+      ctx.lineTo(sunX + outerBotHalfW, seaTopY + seaH);
+      ctx.lineTo(sunX - outerBotHalfW, seaTopY + seaH);
+      ctx.closePath();
+      ctx.fill();
+
+      const innerHalfW = Math.max(1, moonRefW * 0.19);
+      ctx.globalAlpha = Math.min(0.95, outerAlpha * 1.15);
+      ctx.fillStyle = palette.sunTop;
+      ctx.fillRect(sunX - innerHalfW, seaTopY, innerHalfW * 2, seaH);
       ctx.globalAlpha = 1;
 
       // Channel navigation buoys bobbing in the nocturnal bay waters
@@ -1341,6 +1381,72 @@ export class Background {
    * 2. Clipped underside shadow band along the bottom (conforming strictly to the cloud's outline)
    * 3. Delicate top crest highlight arcs on upper domes where moonlight/sunlight hits
    */
+  private ensureCloudCanvases(palette: StagePalette): void {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
+    if (this.cachedCloudPalette === palette && this.cloudCanvases[0] !== null) return;
+    this.cachedCloudPalette = palette;
+
+    const cPal = CLOUD_PALETTES[palette.id] ?? CLOUD_PALETTES.night!;
+    for (let i = 0; i < CLOUD_COUNT; i++) {
+      const cw = Math.round(this.cloudWidth[i]!);
+      const ch = Math.round(this.cloudHeight[i]!);
+      const variant = this.cloudVariant[i]!;
+
+      let canvas = this.cloudCanvases[i];
+      if (!canvas) {
+        canvas = document.createElement('canvas');
+        this.cloudCanvases[i] = canvas;
+      }
+      canvas.width = cw + 8;
+      canvas.height = ch + 8;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const cx = 4;
+      const cy = 2;
+      const yBase = cy + ch;
+
+      // 1. Base silhouette
+      ctx.fillStyle = cPal.body;
+      this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
+      ctx.fill();
+
+      // 2. Clipped underside shading
+      ctx.save();
+      this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
+      ctx.clip();
+
+      ctx.fillStyle = cPal.shadow;
+      const shadowH = Math.max(4, Math.round(ch * 0.32));
+      ctx.fillRect(cx - 5, yBase - shadowH, cw + 10, shadowH + 2);
+
+      ctx.fillStyle = cPal.baseGlow;
+      const glowH = Math.max(2, Math.round(ch * 0.12));
+      ctx.fillRect(cx - 5, yBase - glowH, cw + 10, glowH + 2);
+      ctx.restore();
+
+      // 3. Top crest highlight arcs
+      ctx.strokeStyle = cPal.rim;
+      ctx.lineWidth = this.cloudLayer[i] === 1 ? 1.6 : 1.2;
+      ctx.beginPath();
+      if (variant === 0) {
+        ctx.arc(cx + cw * 0.18, cy + ch * 0.62, cw * 0.18 - 0.75, 1.15 * Math.PI, 1.45 * Math.PI);
+        ctx.arc(cx + cw * 0.44, cy + ch * 0.40, cw * 0.28 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
+        ctx.arc(cx + cw * 0.72, cy + ch * 0.52, cw * 0.22 - 0.75, 1.30 * Math.PI, 1.85 * Math.PI);
+        ctx.arc(cx + cw * 0.88, cy + ch * 0.68, cw * 0.14 - 0.75, 1.40 * Math.PI, 1.95 * Math.PI);
+      } else if (variant === 1) {
+        ctx.arc(cx + cw * 0.22, cy + ch * 0.58, cw * 0.22 - 0.75, 1.15 * Math.PI, 1.50 * Math.PI);
+        ctx.arc(cx + cw * 0.52, cy + ch * 0.44, cw * 0.26 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
+        ctx.arc(cx + cw * 0.82, cy + ch * 0.60, cw * 0.20 - 0.75, 1.30 * Math.PI, 1.90 * Math.PI);
+      } else {
+        ctx.arc(cx + cw * 0.32, cy + ch * 0.50, cw * 0.26 - 0.75, 1.15 * Math.PI, 1.65 * Math.PI);
+        ctx.arc(cx + cw * 0.68, cy + ch * 0.44, cw * 0.28 - 0.75, 1.25 * Math.PI, 1.85 * Math.PI);
+      }
+      ctx.stroke();
+    }
+  }
+
   private renderPixelArtClouds(
     ctx: CanvasRenderingContext2D,
     width: number,
@@ -1348,6 +1454,8 @@ export class Background {
     lTheme: LightningTheme,
   ): void {
     const isFlashing = this.lightningAlpha > 0.1;
+    this.ensureCloudCanvases(palette);
+
     const cPal = CLOUD_PALETTES[palette.id] ?? CLOUD_PALETTES.night!;
     const bodyColor = isFlashing ? lTheme.cloudRim : cPal.body;
     const shadowColor = isFlashing ? lTheme.cloudBody : cPal.shadow;
@@ -1365,26 +1473,33 @@ export class Background {
       if (cx + cw < -30 || cx > width + 30) continue;
 
       const layerAlpha = isNear ? 0.94 : 0.70;
+      const offscreen = this.cloudCanvases[i];
+
+      // Fast path: single GPU blit per cloud when pre-rendered offscreen canvas is available
+      if (offscreen && !isFlashing) {
+        ctx.globalAlpha = 0.88 * layerAlpha;
+        ctx.drawImage(offscreen, cx - 4, cy - 2);
+        ctx.globalAlpha = 1;
+        continue;
+      }
+
       const yBase = cy + ch;
 
-      // 1. Base Silhouette Fill (luminous, solid presence that blocks background stars)
+      // Fallback path for lightning flashes or headless test environments
       ctx.fillStyle = bodyColor;
       ctx.globalAlpha = (isFlashing ? 0.92 : 0.88) * layerAlpha;
       this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
       ctx.fill();
 
-      // 2. Clipped Underside Shading (soft, warm, harmonious - NO harsh dark blocks!)
       ctx.save();
       this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
       ctx.clip();
 
-      // Soft lower shadow tier (lower 32% of cloud mass, gentle alpha)
       ctx.fillStyle = shadowColor;
       ctx.globalAlpha = (isFlashing ? 0.85 : 0.48) * layerAlpha;
       const shadowH = Math.max(4, Math.round(ch * 0.32));
       ctx.fillRect(cx - 5, yBase - shadowH, cw + 10, shadowH + 2);
 
-      // Warm ambient horizon sunset bounce light along the bottom 12% (reflects the setting sun)
       ctx.fillStyle = glowColor;
       ctx.globalAlpha = (isFlashing ? 0.90 : 0.42) * layerAlpha;
       const glowH = Math.max(2, Math.round(ch * 0.12));
@@ -1392,24 +1507,20 @@ export class Background {
 
       ctx.restore();
 
-      // 3. Volumetric Top Crest Highlight Arcs on all distinct billowing domes (giving true 3D spherical depth)
       ctx.strokeStyle = crownColor;
       ctx.lineWidth = isNear ? 1.6 : 1.2;
       ctx.globalAlpha = (isFlashing ? 1.0 : 0.78) * layerAlpha;
       ctx.beginPath();
       if (variant === 0) {
-        // Grand Cumulus: 4 billowing domes
         ctx.arc(cx + cw * 0.18, cy + ch * 0.62, cw * 0.18 - 0.75, 1.15 * Math.PI, 1.45 * Math.PI);
         ctx.arc(cx + cw * 0.44, cy + ch * 0.40, cw * 0.28 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
         ctx.arc(cx + cw * 0.72, cy + ch * 0.52, cw * 0.22 - 0.75, 1.30 * Math.PI, 1.85 * Math.PI);
         ctx.arc(cx + cw * 0.88, cy + ch * 0.68, cw * 0.14 - 0.75, 1.40 * Math.PI, 1.95 * Math.PI);
       } else if (variant === 1) {
-        // Stratocumulus: 3 wide rolling domes
         ctx.arc(cx + cw * 0.22, cy + ch * 0.58, cw * 0.22 - 0.75, 1.15 * Math.PI, 1.50 * Math.PI);
         ctx.arc(cx + cw * 0.52, cy + ch * 0.44, cw * 0.26 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
         ctx.arc(cx + cw * 0.82, cy + ch * 0.60, cw * 0.20 - 0.75, 1.30 * Math.PI, 1.90 * Math.PI);
       } else {
-        // Double dome puff
         ctx.arc(cx + cw * 0.32, cy + ch * 0.50, cw * 0.26 - 0.75, 1.15 * Math.PI, 1.65 * Math.PI);
         ctx.arc(cx + cw * 0.68, cy + ch * 0.44, cw * 0.28 - 0.75, 1.25 * Math.PI, 1.85 * Math.PI);
       }

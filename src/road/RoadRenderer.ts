@@ -132,18 +132,27 @@ export class RoadRenderer {
       const segClipY = this.clipY[n]!;
       // Skip segments occluded behind a hill crest
       if (p2.screenY < p1.screenY && p2.screenY < segClipY) {
-        this.stats.drawnSegments++;
-        this.renderSegment(
-          ctx,
-          width,
-          seg,
-          palette,
-          view.beatPulse ?? 0,
-          view.forkZoneStartZ,
-          trackLength,
-          view.forkChoice,
-          segClipY,
-        );
+        // Distant LOD: cull degenerate sub-pixel road slices near vanishing point
+        const dy = p1.screenY - p2.screenY;
+        if (
+          dy >= 0.15 ||
+          p1.screenW >= 8 ||
+          seg.sprites.length > 0 ||
+          (traffic && traffic.getFirstTruckOnSegment(seg.index) !== -1)
+        ) {
+          this.stats.drawnSegments++;
+          this.renderSegment(
+            ctx,
+            width,
+            seg,
+            palette,
+            view.beatPulse ?? 0,
+            view.forkZoneStartZ,
+            trackLength,
+            view.forkChoice,
+            segClipY,
+          );
+        }
       }
 
       const ppu = (p1.scale * width) / 2;
@@ -278,8 +287,12 @@ export class RoadRenderer {
     const r1 = (w1 / Math.max(6, 2 * LANES)) * pulseScale;
     const r2 = (w2 / Math.max(6, 2 * LANES)) * pulseScale;
 
-    ctx.fillStyle = palette.grass[stripe];
-    ctx.fillRect(0, y2, width, y1 - y2);
+    // Background already filled the entire ground with palette.grass[1], so below horizon (y2 >= 180) only stripe 0 needs fill!
+    // Above horizon (hill crests), both stripes are drawn to cleanly occlude sky.
+    if (stripe === 0 || y2 < 180) {
+      ctx.fillStyle = palette.grass[stripe];
+      ctx.fillRect(0, y2, width, y1 - y2);
+    }
 
     // OutRun physical Y-fork geometry in the final outro segments when forkZoneStartZ is active
     if (forkZoneStartZ !== undefined && p2.worldZ > forkZoneStartZ && trackLength > forkZoneStartZ) {
@@ -298,10 +311,9 @@ export class RoadRenderer {
         const outerW1 = w1 * (1 + pEase1 * 0.2);
         const outerW2 = w2 * (1 + pEase2 * 0.2);
 
-        // Outer rumble strips
+        // Outer rumble strips (batched pair)
         ctx.fillStyle = palette.rumble[stripe];
-        polygon(ctx, x1 - outerW1 - r1, y1, x1 - outerW1, y1, x2 - outerW2, y2, x2 - outerW2 - r2, y2);
-        polygon(ctx, x1 + outerW1 + r1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + outerW2 + r2, y2);
+        drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
 
         // Asphalt road surface
         ctx.fillStyle = palette.road[stripe];
@@ -344,10 +356,9 @@ export class RoadRenderer {
         const gap1 = w1 * splitEase1 * 0.52;
         const gap2 = w2 * splitEase2 * 0.52;
 
-        // Outer rumble strips
+        // Outer rumble strips (batched pair)
         ctx.fillStyle = palette.rumble[stripe];
-        polygon(ctx, x1 - outerW1 - r1, y1, x1 - outerW1, y1, x2 - outerW2, y2, x2 - outerW2 - r2, y2);
-        polygon(ctx, x1 + outerW1 + r1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + outerW2 + r2, y2);
+        drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
 
         // Left branch asphalt
         ctx.fillStyle =
@@ -403,10 +414,9 @@ export class RoadRenderer {
         const cLeft2 = x2 + cCenter2 - cHalfW2;
         const cRight2 = x2 + cCenter2 + cHalfW2;
 
-        // Chosen branch outer rumble strips
+        // Chosen branch outer rumble strips (batched pair)
         ctx.fillStyle = palette.rumble[stripe];
-        polygon(ctx, cLeft1 - r1, y1, cLeft1, y1, cLeft2, y2, cLeft2 - r2, y2);
-        polygon(ctx, cRight1, y1, cRight1 + r1, y1, cRight2 + r2, y2, cRight2, y2);
+        drawRumblePairSplit(ctx, cLeft1, cRight1, y1, cLeft2, cRight2, y2, r1, r2);
 
         // Chosen branch asphalt
         ctx.fillStyle = stripe === 0 ? '#392858' : '#31214c';
@@ -497,25 +507,14 @@ export class RoadRenderer {
     }
 
     ctx.fillStyle = palette.rumble[stripe];
-    polygon(ctx, x1 - w1 - r1, y1, x1 - w1, y1, x2 - w2, y2, x2 - w2 - r2, y2);
-    polygon(ctx, x1 + w1 + r1, y1, x1 + w1, y1, x2 + w2, y2, x2 + w2 + r2, y2);
+    drawRumblePair(ctx, x1, y1, x2, y2, w1, w2, r1, r2);
 
     ctx.fillStyle = palette.road[stripe];
     polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
 
     if (stripe === 0 && w1 >= 6) {
-      const l1 = w1 / Math.max(32, 8 * LANES);
-      const l2 = w2 / Math.max(32, 8 * LANES);
-      const laneW1 = (w1 * 2) / LANES;
-      const laneW2 = (w2 * 2) / LANES;
-      let lx1 = x1 - w1 + laneW1;
-      let lx2 = x2 - w2 + laneW2;
       ctx.fillStyle = palette.lane;
-      for (let lane = 1; lane < LANES; lane++) {
-        polygon(ctx, lx1 - l1 / 2, y1, lx1 + l1 / 2, y1, x2 !== undefined ? lx2 + l2 / 2 : 0, y2, lx2 - l2 / 2, y2);
-        lx1 += laneW1;
-        lx2 += laneW2;
-      }
+      drawLanes(ctx, x1, y1, x2, y2, w1, w2);
     }
 
 
@@ -539,5 +538,85 @@ function polygon(
   ctx.lineTo(x3, y3);
   ctx.lineTo(x4, y4);
   ctx.closePath();
+  ctx.fill();
+}
+
+
+function drawRumblePair(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  w1: number,
+  w2: number,
+  r1: number,
+  r2: number,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(x1 - w1 - r1, y1);
+  ctx.lineTo(x1 - w1, y1);
+  ctx.lineTo(x2 - w2, y2);
+  ctx.lineTo(x2 - w2 - r2, y2);
+  ctx.closePath();
+  ctx.moveTo(x1 + w1 + r1, y1);
+  ctx.lineTo(x1 + w1, y1);
+  ctx.lineTo(x2 + w2, y2);
+  ctx.lineTo(x2 + w2 + r2, y2);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawRumblePairSplit(
+  ctx: CanvasRenderingContext2D,
+  left1: number,
+  right1: number,
+  y1: number,
+  left2: number,
+  right2: number,
+  y2: number,
+  r1: number,
+  r2: number,
+): void {
+  ctx.beginPath();
+  ctx.moveTo(left1 - r1, y1);
+  ctx.lineTo(left1, y1);
+  ctx.lineTo(left2, y2);
+  ctx.lineTo(left2 - r2, y2);
+  ctx.closePath();
+  ctx.moveTo(right1, y1);
+  ctx.lineTo(right1 + r1, y1);
+  ctx.lineTo(right2 + r2, y2);
+  ctx.lineTo(right2, y2);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawLanes(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  w1: number,
+  w2: number,
+): void {
+  const l1 = w1 / Math.max(32, 8 * LANES);
+  const l2 = w2 / Math.max(32, 8 * LANES);
+  const laneW1 = (w1 * 2) / LANES;
+  const laneW2 = (w2 * 2) / LANES;
+  let lx1 = x1 - w1 + laneW1;
+  let lx2 = x2 - w2 + laneW2;
+
+  ctx.beginPath();
+  for (let lane = 1; lane < LANES; lane++) {
+    ctx.moveTo(lx1 - l1 * 0.5, y1);
+    ctx.lineTo(lx1 + l1 * 0.5, y1);
+    ctx.lineTo(lx2 + l2 * 0.5, y2);
+    ctx.lineTo(lx2 - l2 * 0.5, y2);
+    ctx.closePath();
+    lx1 += laneW1;
+    lx2 += laneW2;
+  }
   ctx.fill();
 }

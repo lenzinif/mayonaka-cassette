@@ -388,7 +388,7 @@ export function HUD({
         {toast && (
           <div
             key={toast.id}
-            className={`flex items-center gap-2.5 rounded border-y border-x-4 px-4 py-1.5 text-sm font-black italic tracking-widest uppercase shadow-lg backdrop-blur-xs ${
+            className={`flex items-center gap-2.5 rounded border-y border-x-4 px-4 py-1.5 text-sm font-black italic tracking-widest uppercase shadow-lg ${
               toast.tone === 'emerald'
                 ? 'border-emerald-300 bg-emerald-950/92 text-emerald-200 shadow-emerald-500/35'
                 : toast.tone === 'amber'
@@ -443,7 +443,7 @@ export function HUD({
           )}
 
           {!cleanHud && (
-            <div className="hidden rounded border border-fuchsia-500/30 bg-[#090217]/85 px-3 py-2 text-[10px] tracking-wider text-fuchsia-200/85 backdrop-blur-xs sm:block">
+            <div className="hidden rounded border border-fuchsia-500/30 bg-[#090217]/85 px-3 py-2 text-[10px] tracking-wider text-fuchsia-200/85 sm:block">
               <div className="mb-1 flex items-center justify-between border-b border-fuchsia-500/20 pb-0.5 text-[9px] font-bold tracking-[0.2em] text-fuchsia-400 uppercase">
                 <span>COCKPIT CONTROLS</span>
                 <span>KEYBOARD / GAMEPAD</span>
