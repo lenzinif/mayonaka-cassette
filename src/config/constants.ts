@@ -23,3 +23,7 @@ export const MAX_DRAW_DISTANCE = 500;
 
 /** Max frequency of continuous telemetry snapshots sent to React (AGENTS.md §2). */
 export const TELEMETRY_HZ = 15;
+
+/** Application release version (aligned with package.json). */
+export const APP_VERSION = 'v0.1.0-alpha';
+

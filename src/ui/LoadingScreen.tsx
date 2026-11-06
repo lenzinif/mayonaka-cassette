@@ -1,3 +1,4 @@
+import { APP_VERSION } from '@src/config/constants';
 import type { PreloadProgress } from '@src/core/AssetPreloader';
 import { useCallback, useEffect, useState } from 'react';
 
@@ -42,9 +43,8 @@ export function LoadingScreen({ progress, ready, onStart }: LoadingScreenProps) 
       <div className="pointer-events-none absolute inset-0 opacity-15 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-fuchsia-600 via-transparent to-transparent" />
 
       {/* Top Header Arcade Strip */}
-      <div className="flex w-full max-w-xl items-center justify-between border-b border-fuchsia-500/40 pb-2 text-[11px] tracking-[0.25em] text-cyan-300 uppercase">
-        <span>SEGA 1986 × FUTURE FUNK 2026</span>
-        <span className="text-pink-400">ARCADE REVISION 8.0</span>
+      <div className="flex w-full max-w-xl items-center justify-center border-b border-fuchsia-500/40 pb-2 text-[11px] tracking-[0.25em] text-pink-400 uppercase">
+        <span>{APP_VERSION}</span>
       </div>
 
       {/* Center Hero: Retro Neon Title & Visuals */}
@@ -54,9 +54,6 @@ export function LoadingScreen({ progress, ready, onStart }: LoadingScreenProps) 
         </div>
         <div className="mt-1 text-base font-bold tracking-[0.45em] text-cyan-200 uppercase sm:text-xl drop-shadow-[0_0_15px_rgba(5,217,232,0.6)]">
           MAYONAKA CASSETTE
-        </div>
-        <div className="mt-2 text-xs tracking-[0.2em] text-fuchsia-300/80 uppercase">
-          MUSIC DRIVES THE ROAD · BEAT-SHIFT GEARBOX · MELON SODA
         </div>
 
         {/* Loading Progress / Start Prompt */}
@@ -96,7 +93,7 @@ export function LoadingScreen({ progress, ready, onStart }: LoadingScreenProps) 
 
       {/* Bottom Footer Info */}
       <div className="w-full max-w-xl border-t border-fuchsia-500/30 pt-2 text-center text-[10px] tracking-wider text-fuchsia-300/60">
-        Entirely vibecoded while listening to future funk
+        Vibecoded while listening to future funk
       </div>
     </div>
   );
