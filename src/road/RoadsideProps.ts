@@ -1132,16 +1132,7 @@ function drawSuspensionTower(
     ctx.fillRect(leftX, topY, cableThick, Math.round(towerH * 0.3));
     ctx.fillRect(rightX + legW - cableThick, topY, cableThick, Math.round(towerH * 0.3));
 
-    // Vertical steel suspenders from lower beam to road deck
-    if (innerSpan >= 30) {
-      const suspenderCount = 6;
-      const sStep = innerSpan / (suspenderCount + 1);
-      const suspenderTopY = Math.round(y - 4400 * ppu);
-      for (let s = 1; s <= suspenderCount; s++) {
-        const sx = Math.round(leftX + legW + s * sStep);
-        ctx.fillRect(sx, suspenderTopY, 1, y - suspenderTopY);
-      }
-    }
+
   }
 
   // 4. Red/White Aviation Warning Beacons at Tower Peaks

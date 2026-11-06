@@ -247,7 +247,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.1, 0.1] },
     ],
     props: [
-      { kind: 'suspension-tower', placement: 'both', everyBeats: 8, offset: 0 },
+      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, offset: 0 },
       { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.18 },
     ],
   }),
@@ -287,8 +287,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'suspension-tower', placement: 'both', everyBeats: 8, offset: 0 },
-      { kind: 'overpass', placement: 'both', everyBeats: 16, offset: 0 },
+      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, offset: 0 },
       { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.18 },
     ],
   }),

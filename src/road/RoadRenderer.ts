@@ -128,6 +128,7 @@ export class RoadRenderer {
     const isCameraInTunnel = cameraSeg
       ? cameraSeg.env === 'tunnel' || cameraSeg.env === 'tunnel-entry' || cameraSeg.env === 'tunnel-exit'
       : false;
+    const isCameraOnBridge = cameraSeg ? cameraSeg.env === 'bridge' : false;
     for (let n = drawDistance - 1; n >= 0; n--) {
       const seg = this.visible[n]!;
       const { p1, p2 } = seg;
