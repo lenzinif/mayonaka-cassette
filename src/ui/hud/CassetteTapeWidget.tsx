@@ -145,7 +145,7 @@ export function CassetteTapeWidget({
 
   return (
     <div
-      className={`pointer-events-auto relative flex w-[310px] sm:w-[340px] flex-col justify-between rounded-md border-2 ${config.shellBorder} ${config.shellBg} p-2 text-white shadow-xl backdrop-blur-md transition-all duration-200 select-none [contain:layout_style_paint] ${config.shellGlow}`}
+      className={`pointer-events-auto relative flex w-[310px] sm:w-[340px] flex-col justify-between rounded-md border-2 ${config.shellBorder} ${config.shellBg} p-2 text-white shadow-xl transition-all duration-200 select-none [contain:layout_style_paint] ${config.shellGlow}`}
     >
       {/* Top Screws & Header Ribbon */}
       <div className="flex items-center justify-between border-b border-white/10 pb-1 text-[9px] tracking-wider uppercase">

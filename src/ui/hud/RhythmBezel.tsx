@@ -24,11 +24,12 @@ export function RhythmBezel({ beatPulse, beatInBar, grooveTier }: RhythmBezelPro
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-0 transition-opacity duration-75 ease-out"
+      className="pointer-events-none absolute inset-0 z-0 transition-opacity duration-75 ease-out will-change-opacity"
       style={{
+        opacity: Math.min(1, pulseOpacity / maxOpacity),
         boxShadow: isSSS
-          ? `inset 0 0 45px rgba(251, 191, 36, ${pulseOpacity * 1.5}), inset 0 0 15px rgba(255, 42, 109, ${pulseOpacity})`
-          : `inset 0 0 35px rgba(5, 217, 232, ${pulseOpacity}), inset 0 0 10px rgba(255, 42, 109, ${pulseOpacity * 0.6})`,
+          ? 'inset 0 0 45px rgba(251, 191, 36, 0.45), inset 0 0 15px rgba(255, 42, 109, 0.35)'
+          : 'inset 0 0 35px rgba(5, 217, 232, 0.30), inset 0 0 10px rgba(255, 42, 109, 0.20)',
       }}
     />
   );
