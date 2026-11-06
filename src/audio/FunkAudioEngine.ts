@@ -307,6 +307,10 @@ export interface DrivingAudioParams {
    * Used when `holdOutroLoop === true` to modulate Tape Drag (Stage 1).
    */
   roadBeatsRemaining?: number;
+  /** True when the car is inside a tunnel (Fase 5: resonant acoustic profile). */
+  isTunnel?: boolean;
+  /** True when the car is on a bridge (Fase 5: expansion joint audio cues). */
+  isBridge?: boolean;
 }
 
 /**
@@ -781,6 +785,29 @@ export class FunkAudioEngine {
   /**
    * Plays a synthesized retro thud and triggers a progressive turntable pitch sag on obstacle/traffic bump.
    */
+    /**
+   * Plays a synthesized low-frequency "clack-clack" thud when crossing a metallic bridge expansion joint (Ponte B).
+   */
+  playBridgeJoint(): void {
+    if (!this.ctx || !this.masterGain || this.ctx.state !== 'running' || this.isPaused) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(80, now);
+    osc.frequency.exponentialRampToValueAtTime(32, now + 0.045);
+
+    const vol = tuning.bridgeJointVolume ?? 0.18;
+    gain.gain.setValueAtTime(vol, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.start(now);
+    osc.stop(now + 0.055);
+  }
+
   triggerCollisionSound(obstacle: 'prop' | 'traffic'): void {
     this.triggerPitchDip(
       obstacle === 'traffic' ? 0.08 : 0.025,
@@ -987,7 +1014,14 @@ export class FunkAudioEngine {
 
     this.currentCutoffHz +=
       (targetCutoff - this.currentCutoffHz) * (1 - Math.exp(-5.5 * dt));
-    const targetQ = driving.isDrifting ? tuning.audioFilterDriftQ : 1.6;
+    const targetQ = driving.isDrifting
+      ? tuning.audioFilterDriftQ
+      : driving.isTunnel
+        ? (tuning.tunnelFilterResonanceQ ?? 3.4)
+        : 1.6;
+    if (driving.isTunnel) {
+      this.currentCutoffHz = Math.min(8500, this.currentCutoffHz);
+    }
     this.currentQ += (targetQ - this.currentQ) * (1 - Math.exp(-8.0 * dt));
 
     // 7. Apply already-smoothed parameters to Web Audio nodes via direct `.value` assignment

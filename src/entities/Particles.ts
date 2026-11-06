@@ -41,6 +41,10 @@ const PROP_DEBRIS_COLORS: Readonly<Record<PropKind, readonly [string, string, st
   pylon: ['#7b2cbf', '#e0aaff', '#ff0055'],
   shrub: ['#06d6a0', '#0a9396', '#2d6a4f'],
   sign: ['#e63946', '#ffffff', '#1d3557'],
+  overpass: ['#5c5478', '#ffd166', '#1f1b2c'],
+  'suspension-tower': ['#ff4800', '#f8f9fa', '#2b2342'],
+  'tunnel-portal': ['#ffd166', '#1a1429', '#635d7a'],
+  'tunnel-fan': ['#120e22', '#ffaa00', '#5c5478'],
 };
 
 /**

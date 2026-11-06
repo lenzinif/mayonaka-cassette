@@ -71,6 +71,10 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     'pylon',
     'shrub',
     'sign',
+    'overpass',
+    'suspension-tower',
+    'tunnel-portal',
+    'tunnel-fan',
   ];
 
   it('renders all 12 prop kinds cleanly without throwing', () => {
@@ -204,6 +208,77 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     expect(mock.fillCalls).toBeGreaterThan(2);
   });
 
+    it('renders Ponte A highway overpass (Ponte A) across all 3 variants with shadow and pillars', () => {
+    const mock = createMockCanvas();
+
+    // Variant 0: Shuto Expressway brutalist concrete overpass with green exit sign & streetlights
+    const rectsBefore0 = mock.rectCalls;
+    drawProp(mock.ctx, 'overpass', 320, 240, 0.022, 1, 0, 0);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore0 + 10);
+    expect(mock.fills).toContain('rgba(10, 6, 20, 0.55)'); // Asphalt roadway shadow
+    expect(mock.fills).toContain('#005f3e'); // Expressway green exit sign
+
+    // Variant 1: Steel truss girder overpass with lattice members & blue route badge
+    const rectsBefore1 = mock.rectCalls;
+    drawProp(mock.ctx, 'overpass', 320, 240, 0.022, 1, 1, 0);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore1 + 10);
+    expect(mock.fills).toContain('#0052cc'); // Japanese Route Blue shield
+    expect(mock.fills).toContain('#262a40'); // Steel blue fascia
+
+    // Variant 2: Elevated Viaduct with neon line and distant crossing cars
+    const rectsBefore2 = mock.rectCalls;
+    drawProp(mock.ctx, 'overpass', 320, 240, 0.022, 1, 2, 0.8);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore2 + 8);
+    expect(mock.fills).toContain('#ff007f'); // Beat-pulsed neon strip
+    expect(mock.fills).toContain('#ff0055'); // Crossing car taillight
+  });
+    it('renders Ponte B monumental suspension towers (Rainbow Bridge) across all 3 variants with safety bands and cables', () => {
+    const mock = createMockCanvas();
+
+    // Variant 0: Rainbow Bridge International Orange & White safety bands
+    const rectsBefore0 = mock.rectCalls;
+    drawProp(mock.ctx, 'suspension-tower', 320, 240, 0.022, 1, 0, 0.8);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore0 + 10);
+    expect(mock.fills).toContain('#ff4800'); // Safety orange band
+    expect(mock.fills).toContain('#f8f9fa'); // White band
+    expect(mock.fills).toContain('#ff0033'); // Aviation warning beacon
+
+    // Variant 1: Titanium Cyber Bay with glowing turquoise cables
+    const rectsBefore1 = mock.rectCalls;
+    drawProp(mock.ctx, 'suspension-tower', 320, 240, 0.022, 1, 1, 0.1);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore1 + 10);
+    expect(mock.fills).toContain('#1e1935'); // Titanium midnight dark leg
+    expect(mock.fills).toContain('#00f5d4'); // Glowing turquoise cables
+
+    // Variant 2: Sunset Shuto Purple/Pink Truss
+    const rectsBefore2 = mock.rectCalls;
+    drawProp(mock.ctx, 'suspension-tower', 320, 240, 0.022, 1, 2, 0);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore2 + 8);
+    expect(mock.fills).toContain('#7b2cbf'); // Violet primary
+  });
+    it('renders Tunnel A monumental portal arch with Keisatsucho hazard chevrons, LED matrix board, and lane indicators', () => {
+    const mock = createMockCanvas();
+
+    const rectsBefore = mock.rectCalls;
+    drawProp(mock.ctx, 'tunnel-portal', 320, 240, 0.022, 1, 0, 0.8);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore + 12);
+    expect(mock.fills).toContain('#3a354b'); // Portal cast concrete
+    expect(mock.fills).toContain('#07050e'); // Deep black subterranean opening
+    expect(mock.fills).toContain('#ffd166'); // Keisatsucho yellow hazard chevron
+    expect(mock.fills).toContain('#ffe066'); // Amber LED advisory board
+    expect(mock.fills).toContain('#00f59b'); // Green lane down-arrow
+  });
+
+  it('renders Tunnel B ceiling-mounted axial jet-fans with mounting brackets and spinner hub', () => {
+    const mock = createMockCanvas();
+
+    const rectsBefore = mock.rectCalls;
+    drawProp(mock.ctx, 'tunnel-fan', 320, 240, 0.022, 1, 0, 0);
+    expect(mock.rectCalls).toBeGreaterThan(rectsBefore + 5);
+    expect(mock.fills).toContain('#1e192c'); // Cylindrical steel housing
+    expect(mock.fills).toContain('#38324f'); // Aerodynamic nose cone
+    expect(mock.fills).toContain('#ffaa00'); // Amber status indicator
+  });
   it('executes 120 consecutive frames across all variants with zero runtime errors', () => {
     const mock = createMockCanvas();
     for (let f = 0; f < 120; f++) {

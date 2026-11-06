@@ -30,7 +30,7 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
 
     expect(text).toContain('STAGE PLAYLIST (3 TRACKS)');
     expect(text).toContain('RESTORE DEFAULTS');
@@ -61,10 +61,34 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
 
     expect(text).toContain('STAGE PLAYLIST (1 TRACK)');
     expect(html).toContain('disabled=""');
     expect(html).toContain("Impossibile rimuovere l&#x27;unica traccia rimasta");
+  });
+
+  it('renders initial soundtrack selection mode with START DRIVE buttons when isInitialSelect is true', () => {
+    const library = new TrackLibrary();
+    const onStartDrive = vi.fn();
+    const html = renderToString(
+      createElement(TrackLoader, {
+        open: true,
+        library,
+        isInitialSelect: true,
+        onStartDrive,
+        onSelectTrack: vi.fn(),
+        onUpdateBeatMap: vi.fn(),
+        onClose: vi.fn(),
+      }),
+    );
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+
+    expect(text).toContain('CASSETTE DECK // SELECT SOUNDTRACK');
+    expect(text).toContain('INSERT TAPE & DRIVE [ENTER] ▷');
+    expect(text).toContain('START DRIVE [ENTER] ▷');
+    expect(text).toContain('Selected Tape:');
+    expect(text).toContain('OutRun FM 88.4 — Neon Horizon (Synth Fallback)');
+    expect(text).toContain('(122.0 BPM)');
   });
 });

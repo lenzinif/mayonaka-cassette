@@ -32,6 +32,32 @@ const GANTRY_STEEL_LIGHT = '#4a3e6b';
 const GANTRY_SIGN_GREEN = '#005f3e';
 const GANTRY_SIGN_BORDER = '#f8f9fa';
 
+// Highway Overpass & Viaduct (Ponte A)
+const OVERPASS_CONCRETE = '#3a344d';
+const OVERPASS_CONCRETE_LIGHT = '#5c5478';
+const OVERPASS_CONCRETE_DARK = '#1f1b2c';
+const OVERPASS_SHADOW = 'rgba(10, 6, 20, 0.55)';
+const OVERPASS_RAILING = '#7c739e';
+const OVERPASS_SIGN_GREEN = '#005f3e';
+const OVERPASS_HAZARD_YELLOW = '#ffd166';
+const OVERPASS_HAZARD_DARK = '#1a1429';
+const OVERPASS_LAMP_GLOW = '#ffe066';
+const OVERPASS_STEEL_BLUE = '#262a40';
+const OVERPASS_STEEL_TRUSS = '#3d4668';
+const OVERPASS_NEON_CYAN = '#00f5d4';
+const OVERPASS_NEON_PINK = '#ff007f';
+
+// Tunnel Entrance & Interior Props (Tunnel A & B)
+const TUNNEL_PORTAL_CONCRETE = '#3a354b';
+const TUNNEL_PORTAL_LIGHT = '#5c5575';
+const TUNNEL_PORTAL_DARK = '#1a1626';
+const TUNNEL_PORTAL_BLACK = '#07050e';
+const TUNNEL_HAZARD_YELLOW = '#ffd166';
+const TUNNEL_HAZARD_BLACK = '#140f21';
+const TUNNEL_LED_GREEN = '#00f59b';
+const TUNNEL_FAN_STEEL = '#1e192c';
+const TUNNEL_FAN_BLADE = '#38324f';
+
 const VMS_FRAME = '#080414';
 const VMS_LED_AMBER = '#ffaa00';
 const VMS_LED_BRIGHT = '#ffe066';
@@ -828,6 +854,440 @@ function drawGantry(
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
+// 7b. HIGHWAY OVERPASS / SCROLLING CAVALCAVIA (Ponte A)
+// ---------------------------------------------------------------------------
+function drawOverpass(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  variant: number,
+  beatPulse: number,
+): void {
+  // Spans across the entire roadway and clearance shoulders
+  const spanW = Math.max(24, Math.round(7400 * ppu));
+  const clearanceH = Math.max(14, Math.round(4400 * ppu));
+  const deckH = Math.max(6, Math.round(1600 * ppu));
+  const pillarW = Math.max(3, Math.round(360 * ppu));
+  const totalH = clearanceH + deckH;
+
+  const topY = Math.round(y - totalH);
+  const deckBottomY = Math.round(y - clearanceH);
+  const leftPillarX = Math.round(x - spanW * 0.5);
+  const rightPillarX = Math.round(x + spanW * 0.5 - pillarW);
+
+  // 1. Asphalt Roadway Shadow underneath the overpass
+  const shadowW = Math.max(16, Math.round(5200 * ppu));
+  const shadowH = Math.max(2, Math.round(600 * ppu));
+  ctx.fillStyle = OVERPASS_SHADOW;
+  ctx.fillRect(Math.round(x - shadowW * 0.5), Math.round(y - shadowH * 0.5), shadowW, shadowH);
+
+  // 2. Concrete Abutment Pillars (Left & Right)
+  const plinthH = Math.max(2, Math.round(clearanceH * 0.14));
+  const plinthW = pillarW + Math.max(2, Math.round(80 * ppu));
+
+  // Left Pillar
+  ctx.fillStyle = OVERPASS_CONCRETE_DARK;
+  ctx.fillRect(leftPillarX, deckBottomY, pillarW, clearanceH);
+  ctx.fillStyle = OVERPASS_CONCRETE;
+  ctx.fillRect(leftPillarX + 1, deckBottomY, Math.max(1, Math.round(pillarW * 0.6)), clearanceH);
+
+  // Left Plinth & Hazard stripes
+  ctx.fillStyle = OVERPASS_HAZARD_DARK;
+  ctx.fillRect(leftPillarX - 1, y - plinthH, plinthW, plinthH);
+  if (plinthW >= 6 && plinthH >= 3) {
+    ctx.fillStyle = OVERPASS_HAZARD_YELLOW;
+    const stripeW = Math.max(2, Math.round(plinthW * 0.28));
+    ctx.fillRect(leftPillarX, y - plinthH + 1, stripeW, plinthH - 2);
+    ctx.fillRect(leftPillarX + stripeW * 2, y - plinthH + 1, stripeW, plinthH - 2);
+  }
+
+  // Right Pillar
+  ctx.fillStyle = OVERPASS_CONCRETE_DARK;
+  ctx.fillRect(rightPillarX, deckBottomY, pillarW, clearanceH);
+  ctx.fillStyle = OVERPASS_CONCRETE;
+  ctx.fillRect(rightPillarX + 1, deckBottomY, Math.max(1, Math.round(pillarW * 0.6)), clearanceH);
+
+  // Right Plinth & Hazard stripes
+  ctx.fillStyle = OVERPASS_HAZARD_DARK;
+  ctx.fillRect(rightPillarX - 1, y - plinthH, plinthW, plinthH);
+  if (plinthW >= 6 && plinthH >= 3) {
+    ctx.fillStyle = OVERPASS_HAZARD_YELLOW;
+    const stripeW = Math.max(2, Math.round(plinthW * 0.28));
+    ctx.fillRect(rightPillarX, y - plinthH + 1, stripeW, plinthH - 2);
+    ctx.fillRect(rightPillarX + stripeW * 2, y - plinthH + 1, stripeW, plinthH - 2);
+  }
+
+  // 3. Underside (Soffit) of the horizontal bridge span
+  const deckSpanW = spanW + Math.max(4, Math.round(400 * ppu));
+  const deckX = Math.round(x - deckSpanW * 0.5);
+  const soffitH = Math.max(1, Math.round(deckH * 0.22));
+
+  ctx.fillStyle = OVERPASS_CONCRETE_DARK;
+  ctx.fillRect(deckX, deckBottomY - soffitH, deckSpanW, soffitH);
+
+  // 4. Horizontal Bridge Deck / Fascia
+  if (variant === 1) {
+    // Variant 1: Steel Truss Girder Overpass
+    ctx.fillStyle = OVERPASS_STEEL_BLUE;
+    ctx.fillRect(deckX, topY, deckSpanW, deckH - soffitH);
+
+    // Diagonal steel lattice truss members
+    if (deckSpanW >= 40 && deckH >= 8) {
+      ctx.fillStyle = OVERPASS_STEEL_TRUSS;
+      const bayCount = 8;
+      const bayW = deckSpanW / bayCount;
+      const trussThick = Math.max(1, Math.round(60 * ppu));
+      for (let b = 0; b < bayCount; b++) {
+        const bx = deckX + b * bayW;
+        ctx.fillRect(Math.round(bx), topY, trussThick, deckH - soffitH);
+        ctx.fillRect(Math.round(bx + bayW * 0.5), topY + Math.round(deckH * 0.25), trussThick, Math.round(deckH * 0.5));
+      }
+    }
+  } else {
+    // Variant 0 & 2: Heavy Reinforced Concrete Box Girder
+    ctx.fillStyle = OVERPASS_CONCRETE;
+    ctx.fillRect(deckX, topY, deckSpanW, deckH - soffitH);
+    ctx.fillStyle = OVERPASS_CONCRETE_LIGHT;
+    ctx.fillRect(deckX, topY, deckSpanW, Math.max(1, Math.round(deckH * 0.2)));
+
+    // Vertical expansion seam lines
+    if (deckSpanW >= 40) {
+      ctx.fillStyle = OVERPASS_CONCRETE_DARK;
+      const seamStep = deckSpanW / 4;
+      for (let s = 1; s < 4; s++) {
+        ctx.fillRect(Math.round(deckX + s * seamStep), topY, 1, deckH - soffitH);
+      }
+    }
+  }
+
+  // 5. Parapet / Guardrail on top of the bridge deck
+  const railingH = Math.max(2, Math.round(450 * ppu));
+  const railingY = topY - railingH;
+  ctx.fillStyle = OVERPASS_RAILING;
+  ctx.fillRect(deckX, railingY, deckSpanW, railingH);
+  ctx.fillStyle = '#b4accf';
+  ctx.fillRect(deckX, railingY, deckSpanW, Math.max(1, Math.round(railingH * 0.25)));
+
+  // 6. Variant Specific Upper Deck Features
+  if (variant === 0) {
+    // Variant 0: Shuto Expressway Exit Sign on the bridge fascia
+    const signH = Math.max(3, Math.round(deckH * 0.55));
+    const signW = Math.max(10, Math.round(spanW * 0.28));
+    const signY = topY + Math.round((deckH - soffitH - signH) * 0.5);
+    const signX = Math.round(x - signW * 0.5);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(signX - 1, signY - 1, signW + 2, signH + 2);
+    ctx.fillStyle = OVERPASS_SIGN_GREEN;
+    ctx.fillRect(signX, signY, signW, signH);
+
+    // Kanji glyphs on sign (出口 芝浦 SHIBAURA)
+    if (signW >= 16 && signH >= 6) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(signX + 2, signY + Math.round(signH * 0.25), Math.max(1, Math.round(signW * 0.12)), Math.max(2, Math.round(signH * 0.5)));
+      ctx.fillRect(signX + Math.round(signW * 0.22), signY + Math.round(signH * 0.3), Math.max(3, Math.round(signW * 0.4)), Math.max(1, Math.round(signH * 0.35)));
+      ctx.fillRect(signX + Math.round(signW * 0.7), signY + Math.round(signH * 0.25), Math.max(2, Math.round(signW * 0.22)), Math.max(2, Math.round(signH * 0.5)));
+    }
+
+    // Streetlights on top of the bridge deck pointing upwards
+    const lampH = Math.max(4, Math.round(900 * ppu));
+    const lampPoleW = Math.max(1, Math.round(50 * ppu));
+    const lampLeftX = Math.round(x - spanW * 0.25);
+    const lampRightX = Math.round(x + spanW * 0.25);
+
+    ctx.fillStyle = '#6e5f94';
+    ctx.fillRect(lampLeftX, railingY - lampH, lampPoleW, lampH);
+    ctx.fillRect(lampRightX, railingY - lampH, lampPoleW, lampH);
+    ctx.fillStyle = OVERPASS_LAMP_GLOW;
+    ctx.fillRect(lampLeftX - 1, railingY - lampH - 1, lampPoleW + 2, Math.max(2, Math.round(lampH * 0.35)));
+    ctx.fillRect(lampRightX - 1, railingY - lampH - 1, lampPoleW + 2, Math.max(2, Math.round(lampH * 0.35)));
+  } else if (variant === 1) {
+    // Variant 1: Route shield badge + yellow reflectors
+    const shieldW = Math.max(6, Math.round(600 * ppu));
+    const shieldH = Math.max(5, Math.round(650 * ppu));
+    const shieldX = Math.round(x - shieldW * 0.5);
+    const shieldY = topY + Math.round((deckH - soffitH - shieldH) * 0.5);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(shieldX - 1, shieldY - 1, shieldW + 2, shieldH + 2);
+    ctx.fillStyle = '#0052cc'; // Japanese National Route Blue
+    ctx.fillRect(shieldX, shieldY, shieldW, shieldH);
+    if (shieldW >= 8 && shieldH >= 6) {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(shieldX + Math.round(shieldW * 0.35), shieldY + 1, Math.max(1, Math.round(shieldW * 0.3)), shieldH - 2);
+    }
+  } else {
+    // Variant 2: Cyber-Glass Viaduct with Pulsing Neon Line
+    const neonH = Math.max(1, Math.round(150 * ppu));
+    const neonCol = beatPulse > 0.4 ? OVERPASS_NEON_PINK : OVERPASS_NEON_CYAN;
+    ctx.fillStyle = neonCol;
+    ctx.fillRect(deckX, railingY, deckSpanW, neonH);
+
+    // Silhouettes of distant upper traffic lights crossing overhead
+    if (deckSpanW >= 30) {
+      const carW = Math.max(3, Math.round(400 * ppu));
+      const carH = Math.max(2, Math.round(200 * ppu));
+      const carY = railingY - carH;
+
+      // Passing car 1 (headlight white)
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(Math.round(x - spanW * 0.18), carY, carW, carH);
+      // Passing car 2 (taillight red)
+      ctx.fillStyle = '#ff0055';
+      ctx.fillRect(Math.round(x + spanW * 0.15), carY, carW, carH);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7c. MONUMENTAL SUSPENSION BRIDGE TOWER (Ponte B: Rainbow Bridge)
+// ---------------------------------------------------------------------------
+function drawSuspensionTower(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  variant: number,
+  beatPulse: number,
+): void {
+  const spanW = Math.max(24, Math.round(7800 * ppu));
+  const towerH = Math.max(22, Math.round(9200 * ppu));
+  const legW = Math.max(3, Math.round(440 * ppu));
+  const topY = Math.round(y - towerH);
+
+  const leftX = Math.round(x - spanW * 0.5);
+  const rightX = Math.round(x + spanW * 0.5 - legW);
+
+  // Colors per variant
+  const isOrangeWhite = variant === 0;
+  const isCyberTitanium = variant === 1;
+
+  const colPrimary = isOrangeWhite ? '#ff4800' : isCyberTitanium ? '#1e1935' : '#7b2cbf';
+  const colSecondary = isOrangeWhite ? '#f8f9fa' : isCyberTitanium ? '#00f5d4' : '#ff007f';
+  const colTruss = isOrangeWhite ? '#cc3700' : isCyberTitanium ? '#2c254d' : '#4a1572';
+
+  // 1. Dual Vertical Tapered Towers (Left & Right legs)
+  // Drawn with 5 alternating horizontal safety/aviation bands
+  const bandCount = 5;
+  const bandH = Math.round(towerH / bandCount);
+
+  for (let b = 0; b < bandCount; b++) {
+    const bandY = topY + b * bandH;
+    const curH = b === bandCount - 1 ? y - bandY : bandH;
+    ctx.fillStyle = b % 2 === 0 ? colPrimary : colSecondary;
+    ctx.fillRect(leftX, bandY, legW, curH);
+    ctx.fillRect(rightX, bandY, legW, curH);
+  }
+
+  // Leg inner bevel / 3D shading
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.fillRect(leftX + Math.round(legW * 0.65), topY, Math.max(1, Math.round(legW * 0.35)), towerH);
+  ctx.fillRect(rightX, topY, Math.max(1, Math.round(legW * 0.35)), towerH);
+
+  // Foundation concrete plinths at water level
+  const plinthH = Math.max(2, Math.round(1000 * ppu));
+  ctx.fillStyle = '#0f0a1c';
+  ctx.fillRect(leftX - 2, y - plinthH, legW + 4, plinthH + 4);
+  ctx.fillRect(rightX - 2, y - plinthH, legW + 4, plinthH + 4);
+
+  // 2. Horizontal Cross-Struts (Lower, Middle, Upper portal beams)
+  const innerSpan = rightX - (leftX + legW);
+  if (innerSpan > 10) {
+    const beamThick = Math.max(2, Math.round(480 * ppu));
+
+    // Lower portal beam (just above traffic clearance ~4400 ppu)
+    const lowerBeamY = Math.round(y - 4400 * ppu);
+    ctx.fillStyle = colPrimary;
+    ctx.fillRect(leftX + legW, lowerBeamY, innerSpan, beamThick);
+
+    // Middle portal cross-beam (~6600 ppu)
+    const midBeamY = Math.round(y - 6600 * ppu);
+    ctx.fillStyle = colSecondary;
+    ctx.fillRect(leftX + legW, midBeamY, innerSpan, beamThick);
+
+    // Upper cross-beam arch at tower crown (~8600 ppu)
+    const upperBeamY = Math.round(y - 8600 * ppu);
+    ctx.fillStyle = colPrimary;
+    ctx.fillRect(leftX + legW, upperBeamY, innerSpan, beamThick);
+
+    // Diagonal X-bracing truss between middle and upper beams
+    if (innerSpan >= 40 && beamThick >= 3) {
+      ctx.fillStyle = colTruss;
+      const trussThick = Math.max(1, Math.round(100 * ppu));
+      const midMidX = Math.round(x);
+      ctx.fillRect(midMidX - Math.round(trussThick * 0.5), upperBeamY + beamThick, trussThick, midBeamY - (upperBeamY + beamThick));
+    }
+  }
+
+  // 3. Sweeping Suspension Cables (Main catenaries & vertical suspenders)
+  if (spanW >= 30) {
+    const cableCol = isCyberTitanium
+      ? (beatPulse > 0.4 ? '#ffffff' : '#00f5d4')
+      : isOrangeWhite ? '#fff2c2' : '#ff9eec';
+    ctx.fillStyle = cableCol;
+    const cableThick = Math.max(1, Math.round(120 * ppu));
+
+    // Main catenary cables
+    ctx.fillRect(leftX, topY, cableThick, Math.round(towerH * 0.3));
+    ctx.fillRect(rightX + legW - cableThick, topY, cableThick, Math.round(towerH * 0.3));
+
+    // Vertical steel suspenders from lower beam to road deck
+    if (innerSpan >= 30) {
+      const suspenderCount = 6;
+      const sStep = innerSpan / (suspenderCount + 1);
+      const suspenderTopY = Math.round(y - 4400 * ppu);
+      for (let s = 1; s <= suspenderCount; s++) {
+        const sx = Math.round(leftX + legW + s * sStep);
+        ctx.fillRect(sx, suspenderTopY, 1, y - suspenderTopY);
+      }
+    }
+  }
+
+  // 4. Red/White Aviation Warning Beacons at Tower Peaks
+  const beaconR = Math.max(2, Math.round(250 * ppu));
+  const beaconCol = beatPulse > 0.3 ? '#ff0033' : '#ffffff';
+  ctx.fillStyle = beaconCol;
+  ctx.fillRect(leftX + Math.round(legW * 0.5 - beaconR * 0.5), topY - beaconR * 2, beaconR, beaconR * 2);
+  ctx.fillRect(rightX + Math.round(legW * 0.5 - beaconR * 0.5), topY - beaconR * 2, beaconR, beaconR * 2);
+}
+
+// ---------------------------------------------------------------------------
+// 7d. MONUMENTAL TUNNEL PORTAL (Tunnel A: Shuto Expressway Mountain Mouth)
+// ---------------------------------------------------------------------------
+function drawTunnelPortal(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  _side: number,
+  _variant: number,
+  beatPulse: number,
+): void {
+  const spanW = Math.max(28, Math.round(8600 * ppu));
+  const portalH = Math.max(20, Math.round(5800 * ppu));
+  const archW = Math.max(16, Math.round(5200 * ppu));
+  const archH = Math.max(14, Math.round(4200 * ppu));
+  const topY = Math.round(y - portalH);
+  const archTopY = Math.round(y - archH);
+
+  const leftX = Math.round(x - spanW * 0.5);
+  const archLeftX = Math.round(x - archW * 0.5);
+  const archRightX = Math.round(x + archW * 0.5);
+
+  // 1. Mountain Wing-Walls & Concrete Retaining Structure (open arch lintel & pillars)
+  ctx.fillStyle = TUNNEL_PORTAL_CONCRETE;
+  const lintelH = Math.max(1, archTopY - topY);
+  ctx.fillRect(leftX, topY, spanW, lintelH);
+  const pillarW = Math.max(1, archLeftX - leftX);
+  ctx.fillRect(leftX, archTopY, pillarW, archH);
+  ctx.fillRect(archRightX, archTopY, pillarW, archH);
+
+  // Top Chamfer / Parapet
+  const chamferH = Math.max(2, Math.round(600 * ppu));
+  ctx.fillStyle = TUNNEL_PORTAL_LIGHT;
+  ctx.fillRect(leftX, topY, spanW, chamferH);
+
+  // Rock-cut side abutments beyond the concrete portal
+  const wingW = Math.max(4, Math.round(1800 * ppu));
+  ctx.fillStyle = TUNNEL_PORTAL_DARK;
+  ctx.fillRect(leftX - wingW, topY + chamferH, wingW, portalH - chamferH);
+  ctx.fillRect(leftX + spanW, topY + chamferH, wingW, portalH - chamferH);
+
+  // 2. Interior Portal Inner Rim Shadow (leaving the roadway open to see into the tunnel)
+  ctx.fillStyle = TUNNEL_PORTAL_BLACK;
+  const shadowH = Math.max(1, Math.round(260 * ppu));
+  ctx.fillRect(archLeftX, archTopY, archW, shadowH);
+
+  // 3. 45° Yellow/Black Safety Chevron Border around Arch Opening
+  const chevronThick = Math.max(2, Math.round(340 * ppu));
+  if (archW >= 24 && archH >= 12) {
+    ctx.fillStyle = TUNNEL_HAZARD_YELLOW;
+    // Top chevron band
+    ctx.fillRect(archLeftX - chevronThick, archTopY - chevronThick, archW + chevronThick * 2, chevronThick);
+    // Left vertical chevron band
+    ctx.fillRect(archLeftX - chevronThick, archTopY, chevronThick, archH);
+    // Right vertical chevron band
+    ctx.fillRect(archRightX, archTopY, chevronThick, archH);
+
+    // Dark alternating diagonal stripes
+    ctx.fillStyle = TUNNEL_HAZARD_BLACK;
+    const stripeCount = 10;
+    const stripeStep = (archW + chevronThick * 2) / stripeCount;
+    for (let s = 0; s < stripeCount; s += 2) {
+      ctx.fillRect(Math.round(archLeftX - chevronThick + s * stripeStep), archTopY - chevronThick, Math.round(stripeStep * 0.5), chevronThick);
+    }
+  }
+
+  // 4. Overhead LED Message Board & Lane Control Indicators
+  const signH = Math.max(3, Math.round(1100 * ppu));
+  const signW = Math.max(14, Math.round(spanW * 0.45));
+  const signX = Math.round(x - signW * 0.5);
+  const signY = topY + chamferH + Math.max(1, Math.round(200 * ppu));
+
+  if (signW >= 20 && signH >= 6) {
+    ctx.fillStyle = '#080512';
+    ctx.fillRect(signX - 1, signY - 1, signW + 2, signH + 2);
+    ctx.fillStyle = '#120d22';
+    ctx.fillRect(signX, signY, signW, signH);
+
+    // Amber LED characters (速度落とせ / SLOW DOWN)
+    ctx.fillStyle = beatPulse > 0.5 ? '#ffe066' : '#ffaa00';
+    const textH = Math.max(2, Math.round(signH * 0.45));
+    ctx.fillRect(signX + 3, signY + 2, Math.max(2, Math.round(signW * 0.2)), textH);
+    ctx.fillRect(signX + Math.round(signW * 0.3), signY + 2, Math.max(3, Math.round(signW * 0.4)), textH);
+    ctx.fillRect(signX + Math.round(signW * 0.75), signY + 2, Math.max(2, Math.round(signW * 0.18)), textH);
+
+    // Lane Green Down-Arrows (⬇ ⬇ ⬇)
+    const arrowY = signY + textH + 2;
+    if (signH >= 8) {
+      ctx.fillStyle = TUNNEL_LED_GREEN;
+      for (let l = 0; l < 3; l++) {
+        const lx = Math.round(signX + signW * (0.2 + l * 0.3));
+        ctx.fillRect(lx, arrowY, 2, 2);
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 7e. CEILING-MOUNTED AXIAL JET-FAN (Tunnel B: Shuto Jet-Ventilator)
+// ---------------------------------------------------------------------------
+function drawTunnelFan(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+): void {
+  const fanW = Math.max(8, Math.round(1600 * ppu));
+  const fanH = Math.max(5, Math.round(800 * ppu));
+  const suspendH = Math.max(14, Math.round(3800 * ppu));
+  const fanY = Math.round(y - suspendH);
+  const fanX = Math.round(x - fanW * 0.5);
+
+  // Ceiling mounting brackets
+  const bracketH = Math.max(2, Math.round(600 * ppu));
+  ctx.fillStyle = '#100c1e';
+  ctx.fillRect(fanX + Math.round(fanW * 0.2), fanY - bracketH, Math.max(1, Math.round(80 * ppu)), bracketH);
+  ctx.fillRect(fanX + Math.round(fanW * 0.8), fanY - bracketH, Math.max(1, Math.round(80 * ppu)), bracketH);
+
+  // Cylindrical Housing
+  ctx.fillStyle = TUNNEL_FAN_STEEL;
+  ctx.fillRect(fanX, fanY, fanW, fanH);
+  ctx.fillStyle = '#2c2540';
+  ctx.fillRect(fanX, fanY, fanW, Math.max(1, Math.round(fanH * 0.25)));
+
+  // Aerodynamic nose cone & grille
+  const hubR = Math.max(2, Math.round(fanH * 0.35));
+  ctx.fillStyle = TUNNEL_FAN_BLADE;
+  ctx.fillRect(Math.round(x - hubR * 0.5), Math.round(fanY + fanH * 0.5 - hubR * 0.5), hubR, hubR);
+
+  // Amber status LED
+  ctx.fillStyle = '#ffaa00';
+  ctx.fillRect(fanX + 1, fanY + 1, 1, 1);
+}
+
+// ---------------------------------------------------------------------------
 // 8. VARIABLE MESSAGE SIGN (Amber LED Matrix with Test Message & Advisories)
 // ---------------------------------------------------------------------------
 function drawVMS(
@@ -1473,6 +1933,18 @@ export function drawProp(
       break;
     case 'gantry':
       drawGantry(ctx, x, y, ppu);
+      break;
+    case 'overpass':
+      drawOverpass(ctx, x, y, ppu, variant, beatPulse);
+      break;
+    case 'suspension-tower':
+      drawSuspensionTower(ctx, x, y, ppu, variant, beatPulse);
+      break;
+    case 'tunnel-portal':
+      drawTunnelPortal(ctx, x, y, ppu, side, variant, beatPulse);
+      break;
+    case 'tunnel-fan':
+      drawTunnelFan(ctx, x, y, ppu);
       break;
     case 'vms':
       drawVMS(ctx, x, y, ppu, variant, beatPulse);

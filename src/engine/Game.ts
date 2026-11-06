@@ -302,6 +302,7 @@ export class Game {
   private renderTimeMs = 0;
   private frameTimeMs = 16.67;
   private lastRenderTimestamp = 0;
+  private lastBridgeJointSegment = -1;
   private memoryMb: number | null = null;
   private memoryCheckFrames = 0;
 
@@ -838,6 +839,22 @@ export class Game {
     this.updateForkState();
 
     // 5. Update reactive Web Audio filter/pitch and sample BeatClock
+    const playerWorldZ = this.position + playerZOffset;
+    const currentSeg = findSegment(this.track, playerWorldZ);
+    const isTunnel = currentSeg ? (currentSeg.env === 'tunnel' || currentSeg.env === 'tunnel-entry' || currentSeg.env === 'tunnel-exit') : false;
+    const isBridge = currentSeg ? currentSeg.env === 'bridge' : false;
+
+    this.drivingAudioParams.isTunnel = isTunnel;
+    this.drivingAudioParams.isBridge = isBridge;
+
+    if (isBridge && currentSeg && currentSeg.stripe === 0 && currentSeg.index % 8 === 0 && this.lastBridgeJointSegment !== currentSeg.index) {
+      this.lastBridgeJointSegment = currentSeg.index;
+      this.audio.playBridgeJoint();
+      if (this.melonSoda.active) {
+        this.melonSoda.applyVerticalImpulse(0.04);
+      }
+    }
+
     this.drivingAudioParams.speedRatio = this.car.speedRatio;
     this.drivingAudioParams.isDrifting = this.car.isDrifting;
     this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
@@ -983,10 +1000,20 @@ export class Game {
     this.view.forkZoneStartZ = forkZoneStartZ;
     this.view.forkChoice = forkZoneStartZ !== undefined ? this.forkChoice : undefined;
 
-    this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
+    const cameraSeg = findSegment(this.track, renderPos);
+    const isCameraInTunnel = cameraSeg ? cameraSeg.env === 'tunnel' : false;
+
+    if (isCameraInTunnel) {
+      ctx.fillStyle = '#080510';
+      ctx.fillRect(0, 0, width, height);
+    } else {
+      this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
+    }
     this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic, this.beatPulse);
     drawPlayerCar(ctx, this.car, width, height);
-    this.background.renderForegroundWeather(ctx, width, height);
+    if (!isCameraInTunnel) {
+      this.background.renderForegroundWeather(ctx, width, height);
+    }
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
 
@@ -1057,7 +1084,7 @@ export class Game {
         }
 
         const nextChoice: 'left' | 'right' =
-          this.forkManualLock ?? (this.car.x < 0 ? 'left' : 'right');
+          this.forkManualLock ?? (this.forkLastSign > 0 ? (this.car.x < -0.1 ? 'left' : 'right') : this.forkLastSign < 0 ? (this.car.x > 0.1 ? 'right' : 'left') : (this.car.x < 0 ? 'left' : 'right'));
         const nextSign = nextChoice === 'left' ? -1 : 1;
         if (nextSign !== this.forkLastSign) {
           this.forkLastSign = nextSign;

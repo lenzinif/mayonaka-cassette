@@ -4,7 +4,7 @@ import { DEFAULT_TUNING, tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
 import { getChunksForRole, ROAD_CHUNKS, type RoadChunk } from './RoadChunks';
 import { easeIn, easeInOut } from './RoadProjection';
-import { createPoint, type RoadSegment, type RoadSprite, type Track } from './RoadSegment';
+import { createPoint, type RoadSegment, type RoadSprite, type SegmentEnvironment, type Track } from './RoadSegment';
 import { HILL } from './TrackBuilder';
 
 export interface CanonicalSegmentData {
@@ -106,7 +106,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     return last ? last.p2.worldY : 0;
   };
 
-  const appendSegment = (curve: number, worldY: number): void => {
+  const appendSegment = (curve: number, worldY: number, env?: SegmentEnvironment): void => {
     const n = segments.length;
     segments.push({
       index: n,
@@ -116,6 +116,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
       stripe: Math.floor(n / RUMBLE_LENGTH) % 2 === 0 ? 0 : 1,
       sprites: [],
       fog: 1,
+      env: env ?? 'standard',
     });
   };
 
@@ -221,7 +222,18 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
               ? easeIn(startY, endY, yProgress)
               : easeInOut(startY, endY, yProgress);
 
-          appendSegment(c, y);
+          let segEnv: SegmentEnvironment = chunk.env ?? 'standard';
+          if (chunk.env === 'tunnel') {
+            const relSeg = segments.length - chunkStartSeg;
+            if (relSeg < 4) {
+              segEnv = 'tunnel-entry';
+            } else if (relSeg >= chunkSegCount - 4) {
+              segEnv = 'tunnel-exit';
+            } else {
+              segEnv = 'tunnel';
+            }
+          }
+          appendSegment(c, y, segEnv);
         }
       }
 
@@ -659,7 +671,7 @@ function populateChunkProps(
           ? 2.6
           : rule.kind === 'billboard' || rule.kind === 'vms'
             ? 1.85
-            : rule.kind === 'gantry'
+            : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'tunnel-portal' || rule.kind === 'suspension-tower' || rule.kind === 'tunnel-fan')
               ? 0
               : rule.kind === 'shrub'
                 ? 1.35
@@ -682,10 +694,14 @@ function populateChunkProps(
 
       switch (rule.placement) {
         case 'both':
-          seg.sprites.push(
-            { kind: rule.kind, offset: -baseOffset, variant },
-            { kind: rule.kind, offset: baseOffset, variant: (variant + 1) % 3 },
-          );
+          if (baseOffset === 0) {
+            seg.sprites.push({ kind: rule.kind, offset: 0, variant });
+          } else {
+            seg.sprites.push(
+              { kind: rule.kind, offset: -baseOffset, variant },
+              { kind: rule.kind, offset: baseOffset, variant: (variant + 1) % 3 },
+            );
+          }
           break;
         case 'left':
           seg.sprites.push({ kind: rule.kind, offset: -baseOffset * mirrorSign, variant });

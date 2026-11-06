@@ -74,7 +74,11 @@ function propHitHalfWidth(kind: PropKind): number {
       return 0.18;
     case 'gantry':
     case 'vms':
-      // Overhead gantry / signs span across the roadway; player drives right under
+    case 'overpass':
+    case 'suspension-tower':
+    case 'tunnel-portal':
+    case 'tunnel-fan':
+      // Overhead structures span across the roadway; player drives right under
       return 0;
     case 'chevron':
       return 0.22;

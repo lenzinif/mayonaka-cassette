@@ -37,6 +37,7 @@ export class TrackBuilder {
       stripe: Math.floor(n / RUMBLE_LENGTH) % 2 === 0 ? 0 : 1,
       sprites: [],
       fog: 1,
+      env: 'standard',
     });
   }
 

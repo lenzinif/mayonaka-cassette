@@ -68,6 +68,11 @@ describe('PauseMenu (UI Layer)', () => {
     expect(text).toContain('HUD: FULL [H]');
     expect(text).toContain('PERF PROFILER: OFF [F3]');
 
+    // Cockpit controls guide
+    expect(text).toContain('COCKPIT CONTROLS');
+    expect(text).toContain('WASD / ARROWS');
+    expect(text).toContain('SPACE / SHIFT');
+
     // Community feedback link
     expect(text).toContain('COMMUNITY &amp; FEEDBACK');
     expect(rawHtml).toContain('https://github.com/lenzinif/mayonaka-cassette/discussions');

@@ -27,6 +27,7 @@ export function App() {
     const params = new URLSearchParams(window.location.search);
     return params.has('autostart');
   });
+  const [isInitialSelect, setIsInitialSelect] = useState(false);
   const gameRef = useRef<Game | null>(null);
   const wasPausedBeforeModalRef = useRef(false);
 
@@ -44,16 +45,37 @@ export function App() {
 
   const [trackLoaderOpen, setTrackLoaderOpen] = useState(false);
 
+  const handleStartFromLoadingScreen = () => {
+    setGameStarted(true);
+    setIsInitialSelect(true);
+    setTrackLoaderOpen(true);
+    void audio.unlock();
+  };
+
+  const handleStartDrive = () => {
+    setIsInitialSelect(false);
+    setTrackLoaderOpen(false);
+    wasPausedBeforeModalRef.current = false;
+    gameRef.current?.setPaused(false);
+  };
+
+  const handleResumeFromTrackLoader = () => {
+    setIsInitialSelect(false);
+    setTrackLoaderOpen(false);
+    wasPausedBeforeModalRef.current = false;
+    gameRef.current?.setPaused(false);
+  };
+
   useEffect(() => {
     if (trackLoaderOpen || inspectorOpen) {
       wasPausedBeforeModalRef.current = gameRef.current?.paused ?? false;
       gameRef.current?.setPaused(true);
-    } else if (preloadReady) {
+    } else if (preloadReady && gameStarted && !isInitialSelect) {
       if (!wasPausedBeforeModalRef.current) {
         gameRef.current?.setPaused(false);
       }
     }
-  }, [trackLoaderOpen, inspectorOpen, preloadReady]);
+  }, [trackLoaderOpen, inspectorOpen, preloadReady, gameStarted, isInitialSelect]);
 
   useEffect(() => {
     void preloader
@@ -77,9 +99,18 @@ export function App() {
       if (e.code === 'F2' || e.code === 'Backquote') {
         e.preventDefault();
         setDebugOpen((prev) => !prev);
-      } else if (e.code === 'KeyM' && !inspectorOpen) {
+      } else if (e.code === 'KeyM' && !inspectorOpen && gameStarted) {
         e.preventDefault();
-        setTrackLoaderOpen((prev) => !prev);
+        if (trackLoaderOpen) {
+          if (isInitialSelect) {
+            handleStartDrive();
+          } else {
+            setTrackLoaderOpen(false);
+          }
+        } else {
+          setIsInitialSelect(false);
+          setTrackLoaderOpen(true);
+        }
       } else if (e.code === 'F4') {
         e.preventDefault();
         gameRef.current?.toggleAutopilot();
@@ -87,7 +118,11 @@ export function App() {
         if (trackLoaderOpen) {
           e.preventDefault();
           e.stopPropagation();
-          setTrackLoaderOpen(false);
+          if (isInitialSelect) {
+            handleStartDrive();
+          } else {
+            setTrackLoaderOpen(false);
+          }
         } else if (inspectorOpen) {
           e.preventDefault();
           e.stopPropagation();
@@ -101,7 +136,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [inspectorOpen, trackLoaderOpen, debugOpen]);
+  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, isInitialSelect]);
 
   const handleSelectTrack = (item: PlaylistItem) => {
     void audio.unlock();
@@ -126,7 +161,7 @@ export function App() {
           preloader={preloader}
           onGameReady={(game) => {
             gameRef.current = game;
-            if (trackLoaderOpen || inspectorOpen) {
+            if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {
               game.setPaused(true);
             }
           }}
@@ -134,8 +169,13 @@ export function App() {
         <HUD
           bridge={bridge}
           debugOpen={debugOpen}
+          trackLoaderOpen={trackLoaderOpen}
+          inspectorOpen={inspectorOpen}
           onToggleDebug={() => setDebugOpen((prev) => !prev)}
-          onOpenTrackLoader={() => setTrackLoaderOpen(true)}
+          onOpenTrackLoader={() => {
+            setIsInitialSelect(false);
+            setTrackLoaderOpen(true);
+          }}
           onOpenInspector={() => setInspectorOpen(true)}
           onRestartRun={() => gameRef.current?.restartPlaylistRun()}
         />
@@ -143,7 +183,10 @@ export function App() {
           bridge={bridge}
           library={library}
           onRestartRun={() => gameRef.current?.restartPlaylistRun()}
-          onOpenTrackLoader={() => setTrackLoaderOpen(true)}
+          onOpenTrackLoader={() => {
+            setIsInitialSelect(false);
+            setTrackLoaderOpen(true);
+          }}
         />
         <CRTOverlay />
         <DebugPanel
@@ -157,19 +200,25 @@ export function App() {
         <TrackLoader
           open={trackLoaderOpen}
           library={library}
+          isInitialSelect={isInitialSelect}
+          onStartDrive={handleStartDrive}
+          onResumeDrive={handleResumeFromTrackLoader}
           onSelectTrack={handleSelectTrack}
           onUpdateBeatMap={handleUpdateBeatMap}
-          onClose={() => setTrackLoaderOpen(false)}
+          onClose={() => {
+            if (isInitialSelect) {
+              handleStartDrive();
+            } else {
+              setTrackLoaderOpen(false);
+            }
+          }}
         />
         {inspectorOpen && <BeatMapInspector onClose={() => setInspectorOpen(false)} />}
         {!gameStarted && !inspectorOpen && (
           <LoadingScreen
             progress={preloadProgress}
             ready={preloadReady}
-            onStart={() => {
-              setGameStarted(true);
-              void audio.unlock();
-            }}
+            onStart={handleStartFromLoadingScreen}
           />
         )}
       </div>

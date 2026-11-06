@@ -48,6 +48,8 @@ export const DEFAULT_TUNING = {
   outroTapeDragMinRate: 0.85,
   outroDubDelayFeedback: 0.82,
   outroDubFilterHz: 900,
+  bridgeJointVolume: 0.18,
+  tunnelFilterResonanceQ: 3.4,
 
   // Song-Driven Road (M4 & Spacetime Sync)
   referenceSpeedRatio: 0.76,
@@ -456,6 +458,24 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 400,
     max: 2400,
     step: 50,
+  },
+  {
+    group: 'Audio',
+    key: 'bridgeJointVolume',
+    label: 'Bridge joint volume',
+    hint: 'Volume del "clack-clack" ritmico sui giunti metallici del ponte (Ponte B)',
+    min: 0.05,
+    max: 0.45,
+    step: 0.01,
+  },
+  {
+    group: 'Audio',
+    key: 'tunnelFilterResonanceQ',
+    label: 'Tunnel resonance Q',
+    hint: 'Risonanza cavernosa del filtro Web Audio in galleria sotterranea (Tunnel B)',
+    min: 1.5,
+    max: 5.5,
+    step: 0.1,
   },
 
   {

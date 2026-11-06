@@ -1,5 +1,5 @@
 import type { SectionRole } from '@src/audio/BeatMap';
-import type { PropKind } from './RoadSegment';
+import type { PropKind, SegmentEnvironment } from './RoadSegment';
 import { CURVE, HILL } from './TrackBuilder';
 
 /**
@@ -62,6 +62,7 @@ export interface RoadChunk {
    * horizon-occluding crest at the exact end of the chunk so the road reveals on the drop.
    */
   crestOnExit?: boolean;
+  env?: SegmentEnvironment;
   /** Ordered sequence of road maneuvers whose `bars` sum to `chunk.bars`. */
   maneuvers: readonly ChunkManeuver[];
   /** Roadside prop rhythm rules for this chunk. */
@@ -238,6 +239,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     role: 'build',
     bars: 8,
     crestOnExit: true,
+    env: 'bridge',
     weight: 1.1,
     maneuvers: [
       { bars: 2, curve: 0, elevation: HILL.MEDIUM * 0.5 },
@@ -245,15 +247,70 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.1, 0.1] },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, offset: 1.18 },
-      { kind: 'palm', placement: 'both', everyBeats: 4, offset: 1.48 },
+      { kind: 'suspension-tower', placement: 'both', everyBeats: 8, offset: 0 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.18 },
+    ],
+  }),
+
+  defineChunk({
+    id: 'build-mountain-tunnel-entry-4',
+    description: 'Salita in cresta che scavalca la montagna e si tuffa nell imbocco monumentale della galleria',
+    role: 'build',
+    bars: 4,
+    crestOnExit: true,
+    env: 'tunnel',
+    weight: 1.1,
+    maneuvers: [
+      { bars: 2, curve: CURVE.EASY * 0.5, elevation: HILL.MEDIUM * 0.7 },
+      { bars: 2, curve: 0, elevation: HILL.HIGH * 0.8, easeRatio: [0.1, 0.1] },
+    ],
+    props: [
+      { kind: 'tunnel-portal', placement: 'both', everyBeats: 16, offset: 0 },
+      { kind: 'tunnel-fan', placement: 'both', everyBeats: 4, offset: 0 },
     ],
   }),
 
   // ============================================================================
   // DROP — Long fast straights, high-speed sweepers, adrenaline flow
   // ============================================================================
+    defineChunk({
+    id: 'drop-rainbow-expressway-8',
+    description: 'Rettilineo ad altissima velocità su ponte sospeso panoramico sul mare con torri monumentali',
+    role: 'drop',
+    bars: 8,
+    env: 'bridge',
+    weight: 1.2,
+    energyRange: [0.45, 1.0],
+    maneuvers: [
+      { bars: 3, curve: 0, elevation: -HILL.LOW * 0.5 },
+      { bars: 3, curve: CURVE.EASY * 0.6, elevation: 0 },
+      { bars: 2, curve: 0, elevation: 0 },
+    ],
+    props: [
+      { kind: 'suspension-tower', placement: 'both', everyBeats: 8, offset: 0 },
+      { kind: 'overpass', placement: 'both', everyBeats: 16, offset: 0 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.18 },
+    ],
+  }),
+
   defineChunk({
+    id: 'drop-subterranean-rush-8',
+    description: 'Rettilineo ad altissima velocità dentro la galleria Wangan con file di neon e jet-fan',
+    role: 'drop',
+    bars: 8,
+    env: 'tunnel',
+    weight: 1.15,
+    energyRange: [0.45, 1.0],
+    maneuvers: [
+      { bars: 3, curve: 0, elevation: -HILL.LOW * 0.5 },
+      { bars: 3, curve: CURVE.EASY * 0.5, elevation: 0 },
+      { bars: 2, curve: 0, elevation: 0 },
+    ],
+    props: [
+      { kind: 'tunnel-fan', placement: 'both', everyBeats: 4, offset: 0 },
+    ],
+  }),
+defineChunk({
     id: 'drop-midnight-plunge',
     description: 'Tuffo giù dal crest ad altissima velocità con curvone da quarta piena',
     role: 'drop',
@@ -386,6 +443,25 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
   }),
 
   defineChunk({
+    id: 'breakdown-tokyo-underground-8',
+    description: 'S-bends sotterranei tecnici tra le pareti piastrellate della galleria Shuto C1',
+    role: 'breakdown',
+    bars: 8,
+    env: 'tunnel',
+    weight: 1.1,
+    energyRange: [0.3, 0.85],
+    maneuvers: [
+      { bars: 2, curve: CURVE.MEDIUM * 0.8, elevation: 0 },
+      { bars: 2, curve: -CURVE.MEDIUM * 0.8, elevation: -HILL.LOW * 0.4 },
+      { bars: 2, curve: CURVE.HARD * 0.75, elevation: 0 },
+      { bars: 2, curve: 0, elevation: HILL.LOW * 0.4 },
+    ],
+    props: [
+      { kind: 'tunnel-fan', placement: 'both', everyBeats: 4, offset: 0 },
+    ],
+  }),
+
+  defineChunk({
     id: 'breakdown-neon-chicane',
     description: 'Avvallamento con doppia piega tecnica tra i cartelloni al neon',
     role: 'breakdown',
@@ -435,6 +511,23 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     props: [
       { kind: 'palm', placement: 'both', everyBeats: 2, offset: 1.35 },
       { kind: 'lamp', placement: 'both', everyBeats: 4, offset: 1.22 },
+    ],
+  }),
+
+  defineChunk({
+    id: 'outro-tunnel-emergence-4',
+    description: 'Uscita dalla galleria sotterranea verso la luce dello skyline e del bivio finale',
+    role: 'outro',
+    bars: 4,
+    env: 'tunnel',
+    weight: 1.1,
+    maneuvers: [
+      { bars: 2, curve: 0, elevation: HILL.LOW * 0.4 },
+      { bars: 2, curve: CURVE.EASY * 0.6, elevation: 0 },
+    ],
+    props: [
+      { kind: 'tunnel-portal', placement: 'both', everyBeats: 16, offset: 0 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
     ],
   }),
 

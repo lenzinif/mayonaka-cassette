@@ -120,6 +120,35 @@ describe('SongRoadGenerator', () => {
     expect(getSectionPaceFactor(road, 20, 'drop')).toBe(1.0);
   });
 
+    it('propagates bridge environment and places suspension towers on bridge chunks', () => {
+    const bridgeChunk = ROAD_CHUNKS.find((c) => c.id === 'build-bay-bridge-ascent-8')!;
+    expect(bridgeChunk.env).toBe('bridge');
+
+    const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { catalog: [bridgeChunk] });
+    const bridgeSegments = road.segments.filter((s) => s.env === 'bridge');
+    expect(bridgeSegments.length).toBeGreaterThan(0);
+
+    const hasTower = bridgeSegments.some((s) => s.sprites.some((sp) => sp.kind === 'suspension-tower'));
+    expect(hasTower).toBe(true);
+  });
+
+    it('propagates tunnel environment and phases through entry, tunnel interior, and exit', () => {
+    const tunnelChunk = ROAD_CHUNKS.find((c) => c.id === 'drop-subterranean-rush-8')!;
+    expect(tunnelChunk.env).toBe('tunnel');
+
+    const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { catalog: [tunnelChunk] });
+    const entrySegments = road.segments.filter((s) => s.env === 'tunnel-entry');
+    const interiorSegments = road.segments.filter((s) => s.env === 'tunnel');
+    const exitSegments = road.segments.filter((s) => s.env === 'tunnel-exit');
+
+    expect(entrySegments.length).toBeGreaterThan(0);
+    expect(interiorSegments.length).toBeGreaterThan(0);
+    expect(exitSegments.length).toBeGreaterThan(0);
+
+    const hasFan = interiorSegments.some((s) => s.sprites.some((sp) => sp.kind === 'tunnel-fan'));
+    expect(hasFan).toBe(true);
+  });
+
   describe('Macro A2 Horizon Stitching & Canonical Restoration', () => {
     it('executes zero-pop-in horizon stitching with quantized rumble steps and C1 continuity', () => {
       const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);

@@ -12,6 +12,8 @@ import { PauseMenu } from './PauseMenu';
 export interface HUDProps {
   bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
   debugOpen: boolean;
+  trackLoaderOpen?: boolean;
+  inspectorOpen?: boolean;
   onToggleDebug: () => void;
   onOpenTrackLoader: () => void;
   onOpenInspector: () => void;
@@ -48,6 +50,8 @@ function triggerSyntheticKey(code: string): void {
  */
 export function HUD({
   bridge,
+  trackLoaderOpen = false,
+  inspectorOpen = false,
   onToggleDebug,
   onOpenTrackLoader,
   onOpenInspector,
@@ -409,9 +413,9 @@ export function HUD({
           BOTTOM BAR: Left Controls/Tofu Deck + Right JDM VFD Digidash
          ===================================================================== */}
       <div className="relative z-1 flex items-end justify-between gap-4">
-        {/* Bottom-Left: Tofu Mode Telemetry Pill & Keycap Controls Legend
-            (Offset upward via `mb-24` when Tofu Mode is active so the 120x80 canvas
-             Melon Soda cup inset at bottom-left remains 100% unobstructed) */}
+        {/* Bottom-Left: Tofu Mode Telemetry Pill (when active)
+            (Offset upward via `mb-24` so the 120x80 canvas Melon Soda cup inset
+             at bottom-left remains 100% unobstructed) */}
         <div
           className={`flex flex-col gap-1.5 transition-all duration-200 [contain:layout_style_paint] ${
             tofuMode ? 'mb-24 sm:mb-26' : ''
@@ -441,43 +445,16 @@ export function HUD({
               </span>
             </div>
           )}
-
-          {!cleanHud && (
-            <div className="hidden rounded border border-fuchsia-500/30 bg-[#090217]/85 px-3 py-2 text-[10px] tracking-wider text-fuchsia-200/85 sm:block">
-              <div className="mb-1 flex items-center justify-between border-b border-fuchsia-500/20 pb-0.5 text-[9px] font-bold tracking-[0.2em] text-fuchsia-400 uppercase">
-                <span>COCKPIT CONTROLS</span>
-                <span>KEYBOARD / GAMEPAD</span>
-              </div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
-                <div>
-                  <span className="font-bold text-cyan-300">WASD / ARROWS</span> STEER &amp; THROTTLE
-                </div>
-                <div>
-                  <span className="font-bold text-pink-400">S + STEER (OR C)</span> DRIFT
-                </div>
-                <div>
-                  <span className="font-bold text-emerald-300">SPACE / SHIFT</span> SHIFT UP / DOWN
-                </div>
-                <div>
-                  <span className="font-bold text-cyan-300">C</span> TOGGLE TAPE ·{' '}
-                  <span className="font-bold text-amber-300">T</span> TOFU (×2)
-                </div>
-                <div className="col-span-2">
-                  <span className="font-bold text-cyan-300">H</span> CLEAN HUD ·{' '}
-                  <span className="font-bold text-emerald-300">F4</span> AUTO ·{' '}
-                  <span className="font-bold text-pink-300">ESC / P</span> PAUSE &amp; OPTIONS
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* Bottom-Right: 1980s JDM VFD Digital Cockpit (Tachometer, Gearbox, Speedometer, Judgements) */}
+        {/* Bottom-Right: 1980s JDM VFD Digital Cockpit Binnacle (Tachometer, Gearbox, Speedometer, Groove Flux) */}
         <VfdDigidash
           speedKmh={speedKmh}
           speedRatio={speedRatio}
           gear={gear}
           rpm={rpm}
+          groove={groove}
+          grooveTier={grooveTier}
           isLugging={isLugging}
           isRedlining={isRedlining}
           isOverdrive={isOverdrive}
@@ -493,7 +470,7 @@ export function HUD({
 
       {/* M8 Centralized Future Funk Pause Menu (Hub for all in-game options & tuning) */}
       <PauseMenu
-        open={isPaused}
+        open={isPaused && !trackLoaderOpen && !inspectorOpen}
         stageNumber={stageNumber}
         stagePaletteName={stagePaletteName}
         stageScore={stageScore}

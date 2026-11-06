@@ -124,6 +124,10 @@ export class RoadRenderer {
     }
 
     // Pass 2: painter's algorithm (back-to-front).
+    const cameraSeg = findSegment(track, view.position);
+    const isCameraInTunnel = cameraSeg
+      ? cameraSeg.env === 'tunnel' || cameraSeg.env === 'tunnel-entry' || cameraSeg.env === 'tunnel-exit'
+      : false;
     for (let n = drawDistance - 1; n >= 0; n--) {
       const seg = this.visible[n]!;
       const { p1, p2 } = seg;
@@ -151,6 +155,7 @@ export class RoadRenderer {
             trackLength,
             view.forkChoice,
             segClipY,
+            isCameraInTunnel,
           );
         }
       }
@@ -275,6 +280,7 @@ export class RoadRenderer {
     trackLength = 1,
     forkChoice?: 'left' | 'right',
     segClipY = Number.POSITIVE_INFINITY,
+    isCameraInTunnel = false,
   ): void {
     const { p1, p2, stripe } = seg;
     const x1 = p1.screenX;
@@ -287,9 +293,19 @@ export class RoadRenderer {
     const r1 = (w1 / Math.max(6, 2 * LANES)) * pulseScale;
     const r2 = (w2 / Math.max(6, 2 * LANES)) * pulseScale;
 
-    // Background already filled the entire ground with palette.grass[1], so below horizon (y2 >= 180) only stripe 0 needs fill!
-    // Above horizon (hill crests), both stripes are drawn to cleanly occlude sky.
-    if (stripe === 0 || y2 < 180) {
+const isBridge = seg.env === 'bridge';
+    const isTunnel = seg.env === 'tunnel' || seg.env === 'tunnel-entry' || seg.env === 'tunnel-exit';
+
+    // Bridge water surface, tunnel subterranean ground, or regular grass ground fill
+    if (isBridge) {
+      // Oceanic bay water surface with deep night reflection
+      ctx.fillStyle = stripe === 0 ? '#060b1e' : '#040714';
+      ctx.fillRect(0, y2, width, y1 - y2);
+    } else if (isTunnel && isCameraInTunnel) {
+      // Subterranean dark rock ground outside the tunnel walls
+      ctx.fillStyle = stripe === 0 ? '#0c0817' : '#080510';
+      ctx.fillRect(0, y2, width, y1 - y2);
+    } else if (stripe === 0 || y2 < 180) {
       ctx.fillStyle = palette.grass[stripe];
       ctx.fillRect(0, y2, width, y1 - y2);
     }
@@ -515,6 +531,133 @@ export class RoadRenderer {
     if (stripe === 0 && w1 >= 6) {
       ctx.fillStyle = palette.lane;
       drawLanes(ctx, x1, y1, x2, y2, w1, w2);
+    }
+
+    if (isBridge && w1 >= 4) {
+      const parH1 = Math.max(2, Math.round(w1 * 0.16));
+      const parH2 = Math.max(1, Math.round(w2 * 0.16));
+
+      // Left continuous steel bridge parapet
+      ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
+      polygon(ctx, x1 - w1 - r1, y1, x1 - w1 - r1, y1 - parH1, x2 - w2 - r2, y2 - parH2, x2 - w2 - r2, y2);
+      // Left top chrome rail
+      ctx.fillStyle = '#9e95be';
+      polygon(ctx, x1 - w1 - r1, y1 - parH1, x1 - w1 - r1 + 1, y1 - parH1, x2 - w2 - r2 + 1, y2 - parH2, x2 - w2 - r2, y2 - parH2);
+
+      // Right continuous steel bridge parapet
+      ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
+      polygon(ctx, x1 + w1 + r1, y1, x1 + w1 + r1, y1 - parH1, x2 + w2 + r2, y2 - parH2, x2 + w2 + r2, y2);
+      // Right top chrome rail
+      ctx.fillStyle = '#9e95be';
+      polygon(ctx, x1 + w1 + r1, y1 - parH1, x1 + w1 + r1 - 1, y1 - parH1, x2 + w2 + r2 - 1, y2 - parH2, x2 + w2 + r2, y2 - parH2);
+
+      // Reflective amber/cyan catadioptres along the bridge parapet
+      if (stripe === 0 && w1 >= 8) {
+        ctx.fillStyle = seg.index % 4 === 0 ? '#00f5d4' : '#ff9e24';
+        const reflSize = Math.max(1, Math.round(parH1 * 0.35));
+        ctx.fillRect(Math.round(x1 - w1 - r1 + 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+        ctx.fillRect(Math.round(x1 + w1 + r1 - reflSize - 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+      }
+
+      // Expansion Joint across the asphalt every 8 segments on stripe 0
+      if (stripe === 0 && seg.index % 8 === 0) {
+        ctx.fillStyle = '#5c5478';
+        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+        ctx.fillStyle = '#1e1a2b';
+        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x1 + w1, y1 - 1, x1 - w1, y1 - 1);
+      }
+    } else if (isTunnel && w1 >= 4) {
+      const wallH1 = Math.max(4, Math.round(w1 * 1.35));
+      const wallH2 = Math.max(3, Math.round(w2 * 1.35));
+      const wallSpread1 = w1 + r1 * 1.2;
+      const wallSpread2 = w2 + r2 * 1.2;
+
+      const leftBaseX1 = x1 - wallSpread1;
+      const leftBaseX2 = x2 - wallSpread2;
+      const rightBaseX1 = x1 + wallSpread1;
+      const rightBaseX2 = x2 + wallSpread2;
+
+      const ceilY1 = y1 - wallH1;
+      const ceilY2 = y2 - wallH2;
+
+      // 1. Vertical Tiled Walls (Left & Right batched in a single path)
+      ctx.fillStyle = stripe === 0 ? '#272038' : '#1e182c';
+      ctx.beginPath();
+      ctx.moveTo(leftBaseX1, y1);
+      ctx.lineTo(leftBaseX1, ceilY1);
+      ctx.lineTo(leftBaseX2, ceilY2);
+      ctx.lineTo(leftBaseX2, y2);
+      ctx.closePath();
+      ctx.moveTo(rightBaseX1, y1);
+      ctx.lineTo(rightBaseX1, ceilY1);
+      ctx.lineTo(rightBaseX2, ceilY2);
+      ctx.lineTo(rightBaseX2, y2);
+      ctx.closePath();
+      ctx.fill();
+
+      // Plinth & Retro Sodium Reflector Line (LOD: closer segments w1 >= 24)
+      if (w1 >= 24) {
+        const plinthH1 = Math.max(1, Math.round(wallH1 * 0.15));
+        const plinthH2 = Math.max(1, Math.round(wallH2 * 0.15));
+        ctx.fillStyle = '#120d1c';
+        ctx.beginPath();
+        ctx.moveTo(leftBaseX1, y1);
+        ctx.lineTo(leftBaseX1, y1 - plinthH1);
+        ctx.lineTo(leftBaseX2, y2 - plinthH2);
+        ctx.lineTo(leftBaseX2, y2);
+        ctx.closePath();
+        ctx.moveTo(rightBaseX1, y1);
+        ctx.lineTo(rightBaseX1, y1 - plinthH1);
+        ctx.lineTo(rightBaseX2, y2 - plinthH2);
+        ctx.lineTo(rightBaseX2, y2);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = '#ffd166'; // Retro sodium yellow reflector line
+        const reflY1 = y1 - Math.round(wallH1 * 0.45);
+        const reflY2 = y2 - Math.round(wallH2 * 0.45);
+        const reflThick1 = Math.max(1, Math.round(wallH1 * 0.05));
+        const reflThick2 = Math.max(1, Math.round(wallH2 * 0.05));
+        ctx.beginPath();
+        ctx.moveTo(leftBaseX1, reflY1);
+        ctx.lineTo(leftBaseX1, reflY1 - reflThick1);
+        ctx.lineTo(leftBaseX2, reflY2 - reflThick2);
+        ctx.lineTo(leftBaseX2, reflY2);
+        ctx.closePath();
+        ctx.moveTo(rightBaseX1, reflY1);
+        ctx.lineTo(rightBaseX1, reflY1 - reflThick1);
+        ctx.lineTo(rightBaseX2, reflY2 - reflThick2);
+        ctx.lineTo(rightBaseX2, reflY2);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // 3. Curved Concrete Ceiling Arch connecting left and right walls
+      ctx.fillStyle = stripe === 0 ? '#151122' : '#100c1a';
+      polygon(ctx, leftBaseX1, ceilY1, rightBaseX1, ceilY1, rightBaseX2, ceilY2, leftBaseX2, ceilY2);
+
+
+
+      // 4. Overhead Perspective Fluorescent Neon Tube Strips
+      if (w1 >= 6) {
+        const neonW1 = Math.max(1, Math.round(w1 / 20));
+        const neonW2 = Math.max(1, Math.round(w2 / 20));
+        const neonY1 = ceilY1 + Math.max(1, Math.round(wallH1 * 0.08));
+        const neonY2 = ceilY2 + Math.max(1, Math.round(wallH2 * 0.08));
+
+        // Center Dual Neon Line
+        const neonCol = beatPulse > 0.6 ? '#ffe875' : '#ff9e24';
+        ctx.fillStyle = neonCol;
+        polygon(ctx, x1 - neonW1, neonY1, x1 + neonW1, neonY1, x2 + neonW2, neonY2, x2 - neonW2, neonY2);
+
+        // Bright white core (LOD: closer segments w1 >= 14)
+        if (w1 >= 14) {
+          ctx.fillStyle = '#ffffff';
+          const coreW1 = Math.max(1, Math.round(neonW1 * 0.4));
+          const coreW2 = Math.max(1, Math.round(neonW2 * 0.4));
+          polygon(ctx, x1 - coreW1, neonY1, x1 + coreW1, neonY1, x2 + coreW2, neonY2, x2 - coreW2, neonY2);
+        }
+      }
     }
 
 
