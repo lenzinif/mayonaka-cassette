@@ -157,6 +157,7 @@ export class RoadRenderer {
             view.forkChoice,
             segClipY,
             isCameraInTunnel,
+            isCameraOnBridge,
           );
         }
       }
@@ -282,6 +283,7 @@ export class RoadRenderer {
     forkChoice?: 'left' | 'right',
     segClipY = Number.POSITIVE_INFINITY,
     isCameraInTunnel = false,
+    isCameraOnBridge = false,
   ): void {
     const { p1, p2, stripe } = seg;
     const x1 = p1.screenX;
@@ -298,17 +300,17 @@ const isBridge = seg.env === 'bridge';
     const isTunnel = seg.env === 'tunnel' || seg.env === 'tunnel-entry' || seg.env === 'tunnel-exit';
 
     // Bridge water surface, tunnel subterranean ground, or regular grass ground fill
-    if (isBridge) {
+    if (isBridge && isCameraOnBridge) {
       // Oceanic bay water surface with deep night reflection
       ctx.fillStyle = stripe === 0 ? '#060b1e' : '#040714';
-      ctx.fillRect(0, y2, width, y1 - y2);
+      if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
     } else if (isTunnel && isCameraInTunnel) {
       // Subterranean dark rock ground outside the tunnel walls
       ctx.fillStyle = stripe === 0 ? '#0c0817' : '#080510';
-      ctx.fillRect(0, y2, width, y1 - y2);
+      if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
     } else if (stripe === 0 || y2 < 180) {
       ctx.fillStyle = palette.grass[stripe];
-      ctx.fillRect(0, y2, width, y1 - y2);
+      if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
     }
 
     // OutRun physical Y-fork geometry in the final outro segments when forkZoneStartZ is active
@@ -534,30 +536,47 @@ const isBridge = seg.env === 'bridge';
       drawLanes(ctx, x1, y1, x2, y2, w1, w2);
     }
 
-    if (isBridge && w1 >= 4) {
+    if (isBridge && w1 >= 14) {
       const parH1 = Math.max(2, Math.round(w1 * 0.16));
       const parH2 = Math.max(1, Math.round(w2 * 0.16));
 
-      // Left continuous steel bridge parapet
+      // Continuous steel bridge parapets (Left & Right batched in 1 path)
       ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
-      polygon(ctx, x1 - w1 - r1, y1, x1 - w1 - r1, y1 - parH1, x2 - w2 - r2, y2 - parH2, x2 - w2 - r2, y2);
-      // Left top chrome rail
-      ctx.fillStyle = '#9e95be';
-      polygon(ctx, x1 - w1 - r1, y1 - parH1, x1 - w1 - r1 + 1, y1 - parH1, x2 - w2 - r2 + 1, y2 - parH2, x2 - w2 - r2, y2 - parH2);
+      ctx.beginPath();
+      ctx.moveTo(x1 - w1 - r1, y1);
+      ctx.lineTo(x1 - w1 - r1, y1 - parH1);
+      ctx.lineTo(x2 - w2 - r2, y2 - parH2);
+      ctx.lineTo(x2 - w2 - r2, y2);
+      ctx.closePath();
+      ctx.moveTo(x1 + w1 + r1, y1);
+      ctx.lineTo(x1 + w1 + r1, y1 - parH1);
+      ctx.lineTo(x2 + w2 + r2, y2 - parH2);
+      ctx.lineTo(x2 + w2 + r2, y2);
+      ctx.closePath();
+      ctx.fill();
 
-      // Right continuous steel bridge parapet
-      ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
-      polygon(ctx, x1 + w1 + r1, y1, x1 + w1 + r1, y1 - parH1, x2 + w2 + r2, y2 - parH2, x2 + w2 + r2, y2);
-      // Right top chrome rail
-      ctx.fillStyle = '#9e95be';
-      polygon(ctx, x1 + w1 + r1, y1 - parH1, x1 + w1 + r1 - 1, y1 - parH1, x2 + w2 + r2 - 1, y2 - parH2, x2 + w2 + r2, y2 - parH2);
+      // Top chrome rails & catadioptres (LOD: closer segments w1 >= 28)
+      if (w1 >= 28) {
+        ctx.fillStyle = '#9e95be';
+        ctx.beginPath();
+        ctx.moveTo(x1 - w1 - r1, y1 - parH1);
+        ctx.lineTo(x1 - w1 - r1 + 1, y1 - parH1);
+        ctx.lineTo(x2 - w2 - r2 + 1, y2 - parH2);
+        ctx.lineTo(x2 - w2 - r2, y2 - parH2);
+        ctx.closePath();
+        ctx.moveTo(x1 + w1 + r1, y1 - parH1);
+        ctx.lineTo(x1 + w1 + r1 - 1, y1 - parH1);
+        ctx.lineTo(x2 + w2 + r2 - 1, y2 - parH2);
+        ctx.lineTo(x2 + w2 + r2, y2 - parH2);
+        ctx.closePath();
+        ctx.fill();
 
-      // Reflective amber/cyan catadioptres along the bridge parapet
-      if (stripe === 0 && w1 >= 8) {
-        ctx.fillStyle = seg.index % 4 === 0 ? '#00f5d4' : '#ff9e24';
-        const reflSize = Math.max(1, Math.round(parH1 * 0.35));
-        ctx.fillRect(Math.round(x1 - w1 - r1 + 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
-        ctx.fillRect(Math.round(x1 + w1 + r1 - reflSize - 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+        if (stripe === 0) {
+          ctx.fillStyle = seg.index % 4 === 0 ? '#00f5d4' : '#ff9e24';
+          const reflSize = Math.max(1, Math.round(parH1 * 0.35));
+          ctx.fillRect(Math.round(x1 - w1 - r1 + 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+          ctx.fillRect(Math.round(x1 + w1 + r1 - reflSize - 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+        }
       }
 
       // Expansion Joint across the asphalt every 8 segments on stripe 0
