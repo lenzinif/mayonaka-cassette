@@ -84,4 +84,18 @@ describe('PauseMenu (UI Layer)', () => {
     const text = rawHtml.replace(/<!--.*?-->/g, '');
     expect(text).toContain('TOFU MODE: ON (×2) [2] [T]');
   });
+
+  it('renders personal best and last lap time when available in session stats', () => {
+    const rawHtml = renderToString(
+      PauseMenu({
+        ...defaultProps,
+        bestSongGrade: 'S',
+        bestSongScore: 54000,
+        lastLapTime: 42.15,
+      }),
+    );
+    const text = rawHtml.replace(/<!--.*?-->/g, '');
+    expect(text).toContain(`BEST S · ${(54000).toLocaleString()}`);
+    expect(text).toContain('LAST 00:42.15');
+  });
 });

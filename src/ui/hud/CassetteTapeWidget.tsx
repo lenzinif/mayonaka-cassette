@@ -16,6 +16,8 @@ export interface CassetteTapeWidgetProps {
   roadBarIndex: number;
   totalBars: number;
   speedRatio: number;
+  playlistIndex?: number;
+  playlistLength?: number;
   isSlack?: boolean;
   visible: boolean;
   onToggleVisible: () => void;
@@ -105,6 +107,8 @@ export function CassetteTapeWidget({
   roadBarIndex,
   totalBars,
   speedRatio,
+  playlistIndex,
+  playlistLength,
   isSlack = false,
   visible,
   onToggleVisible,
@@ -185,6 +189,11 @@ export function CassetteTapeWidget({
         >
           <div className="truncate font-mono">
             A ▷ {trackArtist} — {trackTitle}
+            {playlistLength !== undefined && playlistLength > 1 && (
+              <span className="ml-1.5 opacity-80 font-semibold tracking-tight">
+                [TRK {playlistIndex !== undefined ? playlistIndex + 1 : 1}/{playlistLength}]
+              </span>
+            )}
           </div>
           <span className="shrink-0 text-[8px] font-mono tracking-tighter">
             DOLBY B·NR

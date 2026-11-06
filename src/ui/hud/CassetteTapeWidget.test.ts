@@ -77,4 +77,16 @@ describe('CassetteTapeWidget', () => {
 
     expect(text).toContain('SPECIAL // FUNKY OVERDRIVE');
   });
+
+  it('renders playlist track badge when multiple tracks exist in playlist', () => {
+    const text = renderClean(
+      createElement(CassetteTapeWidget, {
+        ...defaultProps,
+        playlistIndex: 1,
+        playlistLength: 4,
+      }),
+    );
+
+    expect(text).toContain('[TRK 2/4]');
+  });
 });

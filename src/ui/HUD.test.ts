@@ -80,7 +80,7 @@ function createMockSnapshot(overrides: Partial<TelemetrySnapshot> = {}): Telemet
 }
 
 describe('HUD (Overhauled Cockpit Overlay)', () => {
-  it('renders stage chrono, cassette groove deck, tofu strip, and JDM digidash modules', () => {
+  it('renders cassette groove deck, tofu strip, and JDM digidash modules', () => {
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
     const snap = createMockSnapshot();
     bridge.publish(() => snap);
@@ -97,18 +97,9 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    // Stage & Chrono module
-    expect(text).toContain('STAGE 02 // MIDNIGHT BAY');
-    expect(text).toContain('TRK 2/3');
-    expect(text).toContain((48200).toLocaleString());
-    expect(text).toContain(`BEST S · ${(52000).toLocaleString()}`);
-    expect(text).toContain('LAP 2');
-    expect(text).toContain('01:03.45');
-    expect(text).toContain('LAST 00:58.12');
-    expect(text).toContain('ROAD 16/64 · drop-neon-sweeper');
-
-    // Cassette Deck & Groove Tape module
+    // Cassette Deck & Groove Tape module (with clean integrated playlist track)
     expect(text).toContain('Mayonaka FM — Plastic Love Night');
+    expect(text).toContain('TRK 2/3');
     expect(text).toContain('126.0 BPM');
     expect(text).toContain('BAR 016.1');
     expect(text).toContain('FUNKY OVERDRIVE');
@@ -127,5 +118,31 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     expect(text).toContain('72–90% BEAT ZONE');
     expect(text).toContain('214');
     expect(text).toContain('KM/H');
+  });
+
+  it('renders session telemetry and personal best inside PauseMenu when paused', () => {
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const snap = createMockSnapshot({ isPaused: true });
+    bridge.publish(() => snap);
+
+    const rawHtml = renderToString(
+      createElement(HUD, {
+        bridge,
+        debugOpen: false,
+        onToggleDebug: vi.fn(),
+        onOpenTrackLoader: vi.fn(),
+        onOpenInspector: vi.fn(),
+        onRestartRun: vi.fn(),
+      }),
+    );
+    const text = rawHtml.replace(/<!--.*?-->/g, '');
+
+    expect(text).toContain('PAUSED');
+    expect(text).toContain('STAGE');
+    expect(text).toContain((48200).toLocaleString());
+    expect(text).toContain(`BEST S · ${(52000).toLocaleString()}`);
+    expect(text).toContain('LAP 2');
+    expect(text).toContain('01:03.45');
+    expect(text).toContain('LAST 00:58.12');
   });
 });

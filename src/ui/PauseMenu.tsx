@@ -7,8 +7,11 @@ export interface PauseMenuProps {
   stageNumber: number;
   stagePaletteName: string;
   stageScore: number;
+  bestSongGrade?: string | null;
+  bestSongScore?: number | null;
   lap: number;
   lapTime: number;
+  lastLapTime?: number | null;
   trackTitle: string;
   trackArtist: string;
   bpm: number;
@@ -51,8 +54,11 @@ export function PauseMenu({
   stageNumber,
   stagePaletteName,
   stageScore,
+  bestSongGrade,
+  bestSongScore,
   lap,
   lapTime,
+  lastLapTime,
   trackTitle,
   trackArtist,
   bpm,
@@ -119,11 +125,20 @@ export function PauseMenu({
             <div className="text-cyan-300 tracking-wider">STAGE</div>
             <div className="mt-0.5 font-bold text-white">0{stageNumber}</div>
             <div className="text-[9px] tabular-nums text-amber-300/90">{stageScore.toLocaleString()} PTS</div>
+            {bestSongGrade && bestSongScore !== null && bestSongScore !== undefined && (
+              <div className="mt-0.5 text-[8px] tabular-nums text-emerald-300">
+                BEST {bestSongGrade} · {bestSongScore.toLocaleString()}
+              </div>
+            )}
           </div>
           <div>
             <div className="text-pink-300 tracking-wider">LAP {lap}</div>
             <div className="mt-0.5 font-bold tabular-nums text-white">{formatLapTime(lapTime)}</div>
-            <div className="text-[9px] text-fuchsia-300/75">IN PROGRESS</div>
+            <div className="text-[9px] text-fuchsia-300/75">
+              {lastLapTime !== null && lastLapTime !== undefined
+                ? `LAST ${formatLapTime(lastLapTime)}`
+                : 'IN PROGRESS'}
+            </div>
           </div>
           <div>
             <div className="text-amber-300 tracking-wider">GROOVE</div>

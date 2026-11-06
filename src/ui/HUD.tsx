@@ -5,7 +5,6 @@ import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
 import type { GrooveTier } from '@src/entities/PlayerCar';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { CassetteTapeWidget } from './hud/CassetteTapeWidget';
-import { ChronoDeck } from './hud/ChronoDeck';
 import { RhythmBezel } from './hud/RhythmBezel';
 import { VfdDigidash } from './hud/VfdDigidash';
 import { PauseMenu } from './PauseMenu';
@@ -213,7 +212,6 @@ export function HUD({
   const audioUnlocked = snap?.audioUnlocked ?? false;
   const roadBarIndex = snap?.roadBarIndex ?? 0;
   const totalBars = Math.max(1, snap?.totalBars ?? 64);
-  const currentChunkId = snap?.currentChunkId ?? 'intro-boulevard-cruise';
 
   // M5 & M6 Telemetry
   const gear = snap?.gear ?? 1;
@@ -252,30 +250,11 @@ export function HUD({
       />
 
       {/* =====================================================================
-          TOP BAR: Left Instrument Decks + Right Minimalist Pause & Status Pill
+          TOP BAR: Left Cassette Tape Deck + Right Minimalist Pause & Status Pill
          ===================================================================== */}
       <div className="relative z-1 flex items-start justify-between gap-2.5 sm:gap-3">
-        {/* Left: Stage Chrono Deck & Cassette Tape Groove Widget */}
-        <div className="flex min-w-0 flex-wrap items-start gap-2.5 sm:flex-nowrap">
-          {/* 1. Stage, Score & Chrono Telemetry Card */}
-          <ChronoDeck
-            stageNumber={stageNumber}
-            stagePaletteName={stagePaletteName}
-            stageScore={stageScore}
-            bestSongGrade={bestSongGrade}
-            bestSongScore={bestSongScore}
-            lap={lap}
-            lapTime={lapTime}
-            lastLapTime={lastLapTime}
-            roadBarIndex={roadBarIndex}
-            totalBars={totalBars}
-            currentChunkId={currentChunkId}
-            playlistIndex={playlistIndex}
-            playlistLength={playlistLength}
-            cleanHud={cleanHud}
-          />
-
-          {/* 2. Cassette Tape Groove Deck (Togglable via [C] or button) */}
+        {/* Left: Cassette Tape Groove Deck (Togglable via [C] or button) */}
+        <div className="flex min-w-0 items-start">
           <CassetteTapeWidget
             trackArtist={trackArtist}
             trackTitle={trackTitle}
@@ -291,6 +270,8 @@ export function HUD({
             roadBarIndex={roadBarIndex}
             totalBars={totalBars}
             speedRatio={speedRatio}
+            playlistIndex={playlistIndex}
+            playlistLength={playlistLength}
             isSlack={isTapeSlack}
             visible={showCassetteDeck && !cleanHud}
             onToggleVisible={() => setShowCassetteDeck((prev) => !prev)}
@@ -516,8 +497,11 @@ export function HUD({
         stageNumber={stageNumber}
         stagePaletteName={stagePaletteName}
         stageScore={stageScore}
+        bestSongGrade={bestSongGrade}
+        bestSongScore={bestSongScore}
         lap={lap}
         lapTime={lapTime}
+        lastLapTime={lastLapTime}
         trackTitle={trackTitle}
         trackArtist={trackArtist}
         bpm={bpm}
