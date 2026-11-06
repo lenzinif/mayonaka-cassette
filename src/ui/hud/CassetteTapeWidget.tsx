@@ -101,7 +101,6 @@ export function CassetteTapeWidget({
   sectionRole,
   barEnergy,
   filterCutoffHz,
-  groove,
   grooveTier,
   tofuMode,
   roadBarIndex,
@@ -264,19 +263,19 @@ export function CassetteTapeWidget({
                     className="h-1.5 w-full rounded-xs shadow-inner"
                     style={{ backgroundColor: config.tapeColor }}
                   />
-                  {/* Glowing Groove flux bar inside the tape ribbon */}
+                  {/* Magnetic Tape Ribbon representing physical Track & Road Progress */}
                   <div
-                    className="absolute inset-y-0.5 left-0 rounded-xs bg-gradient-to-r from-cyan-400 via-pink-500 to-amber-300 opacity-90 transition-all duration-100"
-                    style={{ width: `${groove}%` }}
+                    className="absolute inset-y-0.5 left-0 rounded-xs bg-gradient-to-r from-amber-600 via-amber-400 to-amber-200 opacity-90 transition-all duration-100"
+                    style={{ width: `${Math.round(songProgress * 100)}%` }}
                   />
                 </div>
               )}
             </div>
 
-            {/* Groove Reading & State */}
+            {/* Track Progress & State */}
             <div className="flex w-full items-center justify-between text-[8px] font-bold">
-              <span className={`tabular-nums ${config.accentColor}`}>
-                {isSlack ? '⚠ TAPE SLACK!' : `GROOVE ${groove}%`}
+              <span className="tabular-nums text-amber-300 font-mono">
+                {isSlack ? '⚠ TAPE SLACK!' : `TRACK ${Math.round(songProgress * 100)}%`}
               </span>
               <span className="font-mono text-zinc-400">
                 {bpm.toFixed(1)} BPM

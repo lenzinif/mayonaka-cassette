@@ -47,4 +47,18 @@ describe('VfdDigidash', () => {
 
     expect(text).toContain('AUTO');
   });
+
+  it('renders Groove Flux VFD meter and tier badge', () => {
+    const text = renderClean(
+      createElement(VfdDigidash, {
+        ...defaultProps,
+        groove: 88,
+        grooveTier: 'HIGH',
+      }),
+    );
+
+    expect(text).toContain('GROOVE FLUX');
+    expect(text).toContain('88%');
+    expect(text).toContain('TIER: HIGH');
+  });
 });

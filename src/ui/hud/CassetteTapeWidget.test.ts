@@ -35,7 +35,7 @@ describe('CassetteTapeWidget', () => {
     expect(text).toContain('DOLBY B·NR');
     expect(text).toContain('真夜中 CASSETTE C-90');
     expect(text).toContain('TYPE IV // FUTURE FUNK FLOW');
-    expect(text).toContain('GROOVE 75%');
+    expect(text).toContain('TRACK 28%');
     expect(text).toContain('124.0 BPM');
     expect(text).toContain('BAR 009.2');
     expect(text).toContain('TOFU ×2');

@@ -265,7 +265,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: HILL.HIGH * 0.8, easeRatio: [0.1, 0.1] },
     ],
     props: [
-      { kind: 'tunnel-portal', placement: 'both', everyBeats: 8, offset: 0 },
+      { kind: 'tunnel-portal', placement: 'both', everyBeats: 16, offset: 0 },
       { kind: 'tunnel-fan', placement: 'both', everyBeats: 4, offset: 0 },
     ],
   }),
@@ -526,7 +526,7 @@ defineChunk({
       { bars: 2, curve: CURVE.EASY * 0.6, elevation: 0 },
     ],
     props: [
-      { kind: 'tunnel-portal', placement: 'both', everyBeats: 8, offset: 0 },
+      { kind: 'tunnel-portal', placement: 'both', everyBeats: 16, offset: 0 },
       { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
     ],
   }),

@@ -111,13 +111,15 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     expect(text).toContain('120 FPS');
     expect(text).toContain('GP');
 
-    // JDM Digidash (Tachometer + Gearbox + Speedometer)
+    // JDM Digidash (Tachometer + Gearbox + Speedometer + Groove Flux)
     expect(text).toContain('DRIFTING 1.4S');
     expect(text).toContain('SHIFT ON BEAT [SPACE]');
     expect(text).toContain('LAST SHIFT: PERFECT (-12MS)');
     expect(text).toContain('72–90% BEAT ZONE');
     expect(text).toContain('214');
     expect(text).toContain('KM/H');
+    expect(text).toContain('GROOVE FLUX');
+    expect(text).toContain('TIER: SSS');
   });
 
   it('renders session telemetry and personal best inside PauseMenu when paused', () => {
@@ -144,5 +146,27 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     expect(text).toContain('LAP 2');
     expect(text).toContain('01:03.45');
     expect(text).toContain('LAST 00:58.12');
+  });
+
+  it('does not render PauseMenu when trackLoaderOpen is true even if isPaused is true', () => {
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const snap = createMockSnapshot({ isPaused: true });
+    bridge.publish(() => snap);
+
+    const rawHtml = renderToString(
+      createElement(HUD, {
+        bridge,
+        debugOpen: false,
+        trackLoaderOpen: true,
+        onToggleDebug: vi.fn(),
+        onOpenTrackLoader: vi.fn(),
+        onOpenInspector: vi.fn(),
+        onRestartRun: vi.fn(),
+      }),
+    );
+    const text = rawHtml.replace(/<!--.*?-->/g, '');
+
+    expect(text).not.toContain('GAME PAUSED');
+    expect(text).not.toContain('RESUME DRIVE [P]');
   });
 });

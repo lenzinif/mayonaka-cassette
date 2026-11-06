@@ -271,6 +271,40 @@ export function PauseMenu({
           </div>
         </div>
 
+        {/* Cockpit Controls Reference Card */}
+        <div className="mt-3 border-t border-fuchsia-500/25 pt-2.5 text-left">
+          <div className="mb-1.5 flex items-center justify-between text-[9px] font-bold tracking-[0.2em] text-fuchsia-400 uppercase">
+            <span>COCKPIT CONTROLS</span>
+            <span>KEYBOARD / GAMEPAD</span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px] text-zinc-300">
+            <div>
+              <span className="font-bold text-cyan-300">WASD / ARROWS</span> Steer &amp; Gas
+            </div>
+            <div>
+              <span className="font-bold text-pink-400">S + STEER (OR C)</span> Drift
+            </div>
+            <div>
+              <span className="font-bold text-emerald-300">SPACE / SHIFT</span> Shift Up / Down
+            </div>
+            <div>
+              <span className="font-bold text-cyan-300">C</span> Toggle Tape Widget
+            </div>
+            <div>
+              <span className="font-bold text-amber-300">T</span> Tofu Mode (×2)
+            </div>
+            <div>
+              <span className="font-bold text-cyan-300">H</span> Minimal HUD Mode
+            </div>
+            <div>
+              <span className="font-bold text-emerald-300">F4</span> AI Autopilot
+            </div>
+            <div>
+              <span className="font-bold text-pink-300">P / ESC</span> Resume / Pause
+            </div>
+          </div>
+        </div>
+
         {/* Community & Feedback Link */}
         <div className="mt-3 border-t border-fuchsia-500/25 pt-2 text-center">
           <a

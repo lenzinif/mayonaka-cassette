@@ -1000,10 +1000,20 @@ export class Game {
     this.view.forkZoneStartZ = forkZoneStartZ;
     this.view.forkChoice = forkZoneStartZ !== undefined ? this.forkChoice : undefined;
 
-    this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
+    const cameraSeg = findSegment(this.track, renderPos);
+    const isCameraInTunnel = cameraSeg ? cameraSeg.env === 'tunnel' : false;
+
+    if (isCameraInTunnel) {
+      ctx.fillStyle = '#080510';
+      ctx.fillRect(0, 0, width, height);
+    } else {
+      this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
+    }
     this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic, this.beatPulse);
     drawPlayerCar(ctx, this.car, width, height);
-    this.background.renderForegroundWeather(ctx, width, height);
+    if (!isCameraInTunnel) {
+      this.background.renderForegroundWeather(ctx, width, height);
+    }
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
 

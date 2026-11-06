@@ -879,26 +879,39 @@ export class Background {
       ctx.fillRect(0, seaTopY, width, 1);
       ctx.globalAlpha = 1;
 
-      // The Moonlight Reflection (La Scia di Luna sul Mare) cascading across the bay water directly below the moon
-      // Batched as smooth outer glow trapezoid and inner silver core (replaces 52 scanline draw calls)
-      const moonRefW = Math.max(16, sunR * 0.42);
-      const outerTopHalfW = moonRefW * 0.5;
-      const outerBotHalfW = (moonRefW + 22) * 0.5;
-      const outerAlpha = Math.min(0.85, 0.55 + pulse * 0.25);
-      ctx.globalAlpha = outerAlpha;
-      ctx.fillStyle = palette.sunBottom;
-      ctx.beginPath();
-      ctx.moveTo(sunX - outerTopHalfW, seaTopY);
-      ctx.lineTo(sunX + outerTopHalfW, seaTopY);
-      ctx.lineTo(sunX + outerBotHalfW, seaTopY + seaH);
-      ctx.lineTo(sunX - outerBotHalfW, seaTopY + seaH);
-      ctx.closePath();
-      ctx.fill();
+      // The Moonlight Reflection (La Scia di Luna sul Mare) cascading across the bay water directly below the moon.
+      // Traced as the mirrored circular chord of the moon disc (matching the exact shape and width of the moon,
+      // never a flat box or narrow vertical column) with aquatic ripples and silver core.
+      const sunRSq = sunR * sunR;
+      const waterDy = seaTopY - sunY;
 
-      const innerHalfW = Math.max(1, moonRefW * 0.19);
-      ctx.globalAlpha = Math.min(0.95, outerAlpha * 1.15);
-      ctx.fillStyle = palette.sunTop;
-      ctx.fillRect(sunX - innerHalfW, seaTopY, innerHalfW * 2, seaH);
+      // 1. Outer cyan moon reflection disc (mirrors the exact circular contour of the moon)
+      ctx.fillStyle = this.lightningAlpha > 0.2 ? lTheme.boltMid : palette.sunBottom;
+      for (let dy = 0; dy < seaH; dy++) {
+        const y = seaTopY + dy;
+        const dyMoon = waterDy - dy;
+        const chordSq = sunRSq - dyMoon * dyMoon;
+        if (chordSq <= 0) continue;
+        const hw = Math.sqrt(chordSq);
+        const rip = Math.sin(this.skyTime * 4.2 + dy * 0.75) * 1.8;
+        const refAlpha = (1 - (dy / seaH) * 0.35) * (0.45 + pulse * 0.22);
+        ctx.globalAlpha = Math.min(0.8, refAlpha);
+        ctx.fillRect(sunX - hw + rip, y, hw * 2, 1);
+      }
+
+      // 2. Inner silver moonlight core (mirrored circular contour matching the luminous moon center)
+      ctx.fillStyle = this.lightningAlpha > 0.2 ? lTheme.boltCore : palette.sunTop;
+      for (let dy = 0; dy < seaH; dy++) {
+        const y = seaTopY + dy;
+        const dyMoon = waterDy - dy;
+        const chordSq = sunRSq - dyMoon * dyMoon;
+        if (chordSq <= 0) continue;
+        const hw = Math.sqrt(chordSq) * 0.52;
+        const rip = Math.sin(this.skyTime * 4.2 + dy * 0.75) * 1.1;
+        const refAlpha = (1 - (dy / seaH) * 0.25) * (0.62 + pulse * 0.25);
+        ctx.globalAlpha = Math.min(0.9, refAlpha);
+        ctx.fillRect(sunX - hw + rip, y, hw * 2, 1);
+      }
       ctx.globalAlpha = 1;
 
       // Channel navigation buoys bobbing in the nocturnal bay waters

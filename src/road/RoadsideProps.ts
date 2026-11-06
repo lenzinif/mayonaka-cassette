@@ -1175,9 +1175,13 @@ function drawTunnelPortal(
   const archLeftX = Math.round(x - archW * 0.5);
   const archRightX = Math.round(x + archW * 0.5);
 
-  // 1. Mountain Wing-Walls & Concrete Retaining Structure
+  // 1. Mountain Wing-Walls & Concrete Retaining Structure (open arch lintel & pillars)
   ctx.fillStyle = TUNNEL_PORTAL_CONCRETE;
-  ctx.fillRect(leftX, topY, spanW, portalH);
+  const lintelH = Math.max(1, archTopY - topY);
+  ctx.fillRect(leftX, topY, spanW, lintelH);
+  const pillarW = Math.max(1, archLeftX - leftX);
+  ctx.fillRect(leftX, archTopY, pillarW, archH);
+  ctx.fillRect(archRightX, archTopY, pillarW, archH);
 
   // Top Chamfer / Parapet
   const chamferH = Math.max(2, Math.round(600 * ppu));
@@ -1190,9 +1194,10 @@ function drawTunnelPortal(
   ctx.fillRect(leftX - wingW, topY + chamferH, wingW, portalH - chamferH);
   ctx.fillRect(leftX + spanW, topY + chamferH, wingW, portalH - chamferH);
 
-  // 2. Interior Portal Mouth (Deep black subterranean opening)
+  // 2. Interior Portal Inner Rim Shadow (leaving the roadway open to see into the tunnel)
   ctx.fillStyle = TUNNEL_PORTAL_BLACK;
-  ctx.fillRect(archLeftX, archTopY, archW, archH);
+  const shadowH = Math.max(1, Math.round(260 * ppu));
+  ctx.fillRect(archLeftX, archTopY, archW, shadowH);
 
   // 3. 45° Yellow/Black Safety Chevron Border around Arch Opening
   const chevronThick = Math.max(2, Math.round(340 * ppu));

@@ -13,6 +13,9 @@ export interface TrackLoaderProps {
   onUpdateBeatMap: (contentHash: string, updated: BeatMap) => void;
   onClose: () => void;
   onRemoveTrack?: (removed: PlaylistItem, newActive: PlaylistItem) => void;
+  isInitialSelect?: boolean;
+  onStartDrive?: () => void;
+  onResumeDrive?: () => void;
 }
 
 /**
@@ -29,6 +32,9 @@ export function TrackLoader({
   onUpdateBeatMap,
   onClose,
   onRemoveTrack,
+  isInitialSelect = false,
+  onStartDrive,
+  onResumeDrive,
 }: TrackLoaderProps) {
   const [, setVersion] = useState(0);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
@@ -39,6 +45,30 @@ export function TrackLoader({
   useEffect(() => {
     return library.subscribe(() => setVersion((v) => v + 1));
   }, [library]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') {
+        e.preventDefault();
+        if (isInitialSelect) {
+          (onStartDrive ?? onClose)();
+        } else if (onResumeDrive) {
+          onResumeDrive();
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, isInitialSelect, onStartDrive, onResumeDrive, onClose]);
 
   if (!open) return null;
 
@@ -106,7 +136,7 @@ export function TrackLoader({
 
   return (
     <div
-      className="pointer-events-auto absolute inset-0 z-20 flex items-center justify-center bg-[#05010d]/85 p-4 font-mono text-xs text-white backdrop-blur-xs"
+      className="pointer-events-auto absolute inset-0 z-50 flex items-center justify-center bg-[#05010d]/90 p-4 font-mono text-xs text-white backdrop-blur-xs select-none"
       style={{ colorScheme: 'dark', scrollbarColor: '#e879f9 #1a0633', scrollbarWidth: 'thin' }}
       onDragOver={(e) => {
         e.preventDefault();
@@ -124,19 +154,33 @@ export function TrackLoader({
         <div className="flex items-center justify-between border-b border-fuchsia-500/40 bg-[#180538] px-4 py-3">
           <div>
             <div className="text-[10px] tracking-[0.25em] text-cyan-300 uppercase">
-              CASSETTE DECK // STAGE SOUNDTRACK
+              {isInitialSelect ? 'CASSETTE DECK // SELECT SOUNDTRACK' : 'CASSETTE DECK // STAGE SOUNDTRACK'}
             </div>
             <h2 className="text-sm font-bold tracking-wider text-white uppercase">
-              Load Music (MP3 / WAV / OGG / FLAC)
+              {isInitialSelect
+                ? 'Choose Your Tape or Load Audio (MP3 / WAV / OGG / FLAC)'
+                : 'Load Music (MP3 / WAV / OGG / FLAC)'}
             </h2>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded border border-pink-500/50 bg-pink-950/70 px-2.5 py-1 text-xs font-bold text-pink-200 hover:border-cyan-400 hover:text-cyan-200"
-          >
-            CLOSE [ESC]
-          </button>
+          <div className="flex items-center gap-2">
+            {isInitialSelect ? (
+              <button
+                type="button"
+                onClick={onStartDrive ?? onClose}
+                className="group relative cursor-pointer rounded border-2 border-pink-400 bg-gradient-to-r from-pink-600 via-fuchsia-600 to-cyan-600 px-3.5 py-1 text-xs font-black tracking-widest text-white uppercase shadow-[0_0_15px_rgba(255,42,109,0.5)] transition hover:scale-[1.02] hover:shadow-[0_0_25px_rgba(5,217,232,0.7)] active:scale-[0.98] animate-pulse"
+              >
+                INSERT TAPE &amp; DRIVE [ENTER] ▷
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onClose}
+                className="cursor-pointer rounded border border-pink-500/50 bg-pink-950/70 px-2.5 py-1 text-xs font-bold text-pink-200 hover:border-cyan-400 hover:text-cyan-200"
+              >
+                CLOSE [ESC]
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Body */}
@@ -300,6 +344,17 @@ export function TrackLoader({
                         library.selectTrack(idx);
                         onSelectTrack(item);
                       }}
+                      onDoubleClick={() => {
+                        library.selectTrack(idx);
+                        onSelectTrack(item);
+                        if (isInitialSelect) {
+                          (onStartDrive ?? onClose)();
+                        } else if (onResumeDrive) {
+                          onResumeDrive();
+                        } else {
+                          onClose();
+                        }
+                      }}
                       className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left focus:outline-hidden"
                     >
                       <span className="text-[10px] font-bold text-pink-400">
@@ -351,6 +406,40 @@ export function TrackLoader({
                 );
               })}
             </div>
+          </div>
+        </div>
+
+        {/* Sticky Footer Action Bar */}
+        <div className="flex items-center justify-between border-t border-fuchsia-500/40 bg-[#14042d] px-4 py-3">
+          <div className="mr-2 truncate text-[11px] text-fuchsia-300/80">
+            {isInitialSelect ? (
+              <span>
+                Selected Tape: <strong className="text-cyan-300">{active.beatMap.artist} — {active.beatMap.title}</strong>{' '}
+                <span className="font-bold text-pink-400">({active.beatMap.bpm.toFixed(1)} BPM)</span>
+              </span>
+            ) : (
+              <span>
+                Press <kbd className="rounded border border-pink-500/40 bg-pink-950/80 px-1.5 py-0.5 font-mono text-pink-300">ESC</kbd> to return to pause menu
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {!isInitialSelect && (
+              <button
+                type="button"
+                onClick={onClose}
+                className="cursor-pointer rounded border border-pink-500/50 bg-pink-950/70 px-3 py-1.5 text-xs font-bold text-pink-200 hover:border-cyan-400 hover:text-cyan-200"
+              >
+                CLOSE [ESC]
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={isInitialSelect ? (onStartDrive ?? onClose) : (onResumeDrive ?? onClose)}
+              className="cursor-pointer rounded border-2 border-pink-400 bg-gradient-to-r from-pink-600 via-fuchsia-600 to-cyan-600 px-4 py-1.5 text-xs font-black tracking-widest text-white uppercase shadow-[0_0_20px_rgba(255,42,109,0.6)] transition hover:scale-[1.02] hover:shadow-[0_0_25px_rgba(5,217,232,0.8)] active:scale-[0.98]"
+            >
+              {isInitialSelect ? 'START DRIVE [ENTER] ▷' : 'RESUME DRIVE [ENTER] ▷'}
+            </button>
           </div>
         </div>
       </div>
