@@ -76,7 +76,74 @@ const CLOUD_PALETTES: Record<string, CloudPalette> = {
     shadow: '#280e38',
     baseGlow: '#00f5d4',
   },
+  vaporwave: {
+    rim: '#fff0f5',
+    body: '#8e76aa',
+    shadow: '#5e4c75',
+    baseGlow: '#e0b1cb',
+  },
+  coastal: {
+    rim: '#ffe885',
+    body: '#b83a7a',
+    shadow: '#7e2462',
+    baseGlow: '#ff9e42',
+  },
 };
+
+interface CloudDomeDef {
+  readonly u: number;
+  readonly v: number;
+  readonly rScale: number;
+  readonly startAngle: number;
+  readonly endAngle: number;
+}
+
+interface CloudVariantDef {
+  readonly domes: readonly CloudDomeDef[];
+  readonly baseLeft: number;
+  readonly baseTop: number;
+  readonly baseWidth: number;
+  readonly baseHeight: number;
+}
+
+const CLOUD_VARIANTS: readonly CloudVariantDef[] = [
+  // Variant 0: Grand Cumulus (4 overlapping billowing domes with prominent central crest)
+  {
+    domes: [
+      { u: 0.20, v: 0.62, rScale: 0.50, startAngle: 1.15 * Math.PI, endAngle: 1.45 * Math.PI },
+      { u: 0.46, v: 0.42, rScale: 0.62, startAngle: 1.15 * Math.PI, endAngle: 1.75 * Math.PI },
+      { u: 0.72, v: 0.52, rScale: 0.52, startAngle: 1.20 * Math.PI, endAngle: 1.82 * Math.PI },
+      { u: 0.88, v: 0.66, rScale: 0.38, startAngle: 1.25 * Math.PI, endAngle: 1.90 * Math.PI },
+    ],
+    baseLeft: 0.08,
+    baseTop: 0.50,
+    baseWidth: 0.84,
+    baseHeight: 0.50,
+  },
+  // Variant 1: Elongated Stratocumulus (3 wide rolling domes)
+  {
+    domes: [
+      { u: 0.22, v: 0.58, rScale: 0.52, startAngle: 1.12 * Math.PI, endAngle: 1.48 * Math.PI },
+      { u: 0.52, v: 0.46, rScale: 0.58, startAngle: 1.15 * Math.PI, endAngle: 1.78 * Math.PI },
+      { u: 0.80, v: 0.56, rScale: 0.50, startAngle: 1.20 * Math.PI, endAngle: 1.85 * Math.PI },
+    ],
+    baseLeft: 0.08,
+    baseTop: 0.52,
+    baseWidth: 0.84,
+    baseHeight: 0.48,
+  },
+  // Variant 2: Compact Double-Dome Cumulus (2 fluffy domes)
+  {
+    domes: [
+      { u: 0.35, v: 0.52, rScale: 0.56, startAngle: 1.12 * Math.PI, endAngle: 1.60 * Math.PI },
+      { u: 0.68, v: 0.46, rScale: 0.60, startAngle: 1.20 * Math.PI, endAngle: 1.82 * Math.PI },
+    ],
+    baseLeft: 0.12,
+    baseTop: 0.48,
+    baseWidth: 0.76,
+    baseHeight: 0.52,
+  },
+];
 
 interface WindowPalette {
   readonly col1: string;
@@ -303,6 +370,8 @@ export class Background {
   private cachedCoronaGrad: CanvasGradient | null = null;
 
   private readonly cloudCanvases: (HTMLCanvasElement | null)[] = [null, null, null, null, null, null];
+  private readonly cloudPadX = new Float32Array(CLOUD_COUNT);
+  private readonly cloudPadTop = new Float32Array(CLOUD_COUNT);
   private cachedCloudPalette: StagePalette | null = null;
 
   constructor() {
@@ -363,12 +432,16 @@ export class Background {
     for (let i = 0; i < CLOUD_COUNT; i++) {
       const isNear = i >= 3 ? 1 : 0;
       this.cloudLayer[i] = isNear;
-      this.cloudVariant[i] = i % 2 === 0 ? 0 : 2;
+      this.cloudVariant[i] = i % 3;
       this.cloudX[i] = (i * 130 + 35) % 760;
       this.cloudY[i] = isNear ? 30 + ((i * 19 + 7) % 36) : 14 + ((i * 23 + 11) % 28);
-      this.cloudWidth[i] = isNear ? 80 + ((i * 19) % 36) : 60 + ((i * 13) % 24);
-      this.cloudHeight[i] = isNear ? 26 + ((i * 7) % 10) : 18 + ((i * 5) % 8);
+      const cw = isNear ? 80 + ((i * 19) % 36) : 60 + ((i * 13) % 24);
+      const ch = isNear ? 26 + ((i * 7) % 10) : 18 + ((i * 5) % 8);
+      this.cloudWidth[i] = cw;
+      this.cloudHeight[i] = ch;
       this.cloudSpeed[i] = isNear ? 6 + ((i * 3) % 5) : 3 + ((i * 2) % 3);
+      this.cloudPadX[i] = Math.ceil(cw * 0.15) + 6;
+      this.cloudPadTop[i] = Math.ceil(ch * 0.40) + 6;
     }
 
     // 5. Clean 2-Tier Rain Particles (40 far, 32 near)
@@ -1350,9 +1423,9 @@ export class Background {
   }
 
   /**
-   * Traces an authentic 16-bit pixel-art cumulus cloud silhouette:
-   * Built from stacked organic circular domes with a grounded flat bottom shelf.
-   * Strictly NO random rectangular slabs or front stripes.
+   * Traces an authentic 16-bit pixel-art cumulus cloud compound silhouette:
+   * Formed by billowing circular domes and a flat condensation base shelf.
+   * Closed circular subpaths and base rectangle ensure zero self-intersection glitches.
    */
   private traceCloudSilhouette(
     ctx: CanvasRenderingContext2D,
@@ -1362,37 +1435,97 @@ export class Background {
     ch: number,
     variant: number,
   ): void {
-    const yBase = cy + ch;
+    const def = CLOUD_VARIANTS[variant % CLOUD_VARIANTS.length] ?? CLOUD_VARIANTS[0]!;
+    const domes = def.domes;
+    const domeCount = domes.length;
+
     ctx.beginPath();
-    ctx.moveTo(cx, yBase);
-
-    if (variant === 0) {
-      // Variant 0: Grand Cumulus (4 overlapping billowing domes)
-      ctx.arc(cx + cw * 0.18, cy + ch * 0.62, cw * 0.18, Math.PI, 1.35 * Math.PI);
-      ctx.arc(cx + cw * 0.44, cy + ch * 0.40, cw * 0.28, 1.2 * Math.PI, 1.85 * Math.PI);
-      ctx.arc(cx + cw * 0.72, cy + ch * 0.52, cw * 0.22, 1.3 * Math.PI, 1.95 * Math.PI);
-      ctx.arc(cx + cw * 0.88, cy + ch * 0.68, cw * 0.14, 1.4 * Math.PI, 0);
-    } else if (variant === 1) {
-      // Variant 1: Elongated Stratocumulus (3 wide rolling domes)
-      ctx.arc(cx + cw * 0.22, cy + ch * 0.58, cw * 0.22, Math.PI, 1.4 * Math.PI);
-      ctx.arc(cx + cw * 0.52, cy + ch * 0.44, cw * 0.26, 1.2 * Math.PI, 1.85 * Math.PI);
-      ctx.arc(cx + cw * 0.82, cy + ch * 0.60, cw * 0.20, 1.35 * Math.PI, 0);
-    } else {
-      // Variant 2: Fluffy Compact Double-Dome
-      ctx.arc(cx + cw * 0.32, cy + ch * 0.50, cw * 0.26, Math.PI, 1.6 * Math.PI);
-      ctx.arc(cx + cw * 0.68, cy + ch * 0.44, cw * 0.28, 1.3 * Math.PI, 0);
+    for (let d = 0; d < domeCount; d++) {
+      const dome = domes[d]!;
+      const dx = cx + cw * dome.u;
+      const dy = cy + ch * dome.v;
+      const dr = ch * dome.rScale;
+      ctx.moveTo(dx + dr, dy);
+      ctx.arc(dx, dy, dr, 0, Math.PI * 2);
     }
-
-    ctx.lineTo(cx + cw, yBase);
-    ctx.lineTo(cx, yBase);
-    ctx.closePath();
+    ctx.rect(
+      cx + cw * def.baseLeft,
+      cy + ch * def.baseTop,
+      cw * def.baseWidth,
+      ch * def.baseHeight,
+    );
   }
 
   /**
-   * Renders 16-bit retro clouds with 3-tone shading:
-   * 1. Base silhouette fill (Soft midtone)
-   * 2. Clipped underside shadow band along the bottom (conforming strictly to the cloud's outline)
-   * 3. Delicate top crest highlight arcs on upper domes where moonlight/sunlight hits
+   * Draws a complete 16-bit cloud with:
+   * 1. Solid billowing cumulus silhouette
+   * 2. Clipped deep underside belly shadow
+   * 3. Warm/neon horizon reflection rim along condensation base
+   * 4. Disconnected crest highlight arcs on top of each dome (zero connecting lines)
+   */
+  private drawCloud(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    cw: number,
+    ch: number,
+    variant: number,
+    isNear: boolean,
+    bodyColor: string,
+    shadowColor: string,
+    glowColor: string,
+    crownColor: string,
+    padX: number,
+    padBottom: number,
+  ): void {
+    const yBase = cy + ch;
+    const def = CLOUD_VARIANTS[variant % CLOUD_VARIANTS.length] ?? CLOUD_VARIANTS[0]!;
+    const domes = def.domes;
+    const domeCount = domes.length;
+
+    // 1. Base luminous cumulus body fill
+    ctx.fillStyle = bodyColor;
+    this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
+    ctx.fill();
+
+    // 2. Clipped underside shading
+    ctx.save();
+    this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
+    ctx.clip();
+
+    // 2a. Soft deep underside belly shadow (lower ~36% of cloud mass)
+    ctx.fillStyle = shadowColor;
+    const shadowH = Math.max(4, Math.round(ch * 0.36));
+    ctx.fillRect(cx - padX, yBase - shadowH, cw + padX * 2, shadowH + padBottom);
+
+    // 2b. Warm ambient horizon bounce rim (bottom ~12% of cloud mass)
+    ctx.fillStyle = glowColor;
+    const glowH = Math.max(2, Math.round(ch * 0.12));
+    ctx.fillRect(cx - padX, yBase - glowH, cw + padX * 2, glowH + padBottom);
+
+    ctx.restore();
+
+    // 3. Delicate crest highlight arcs on top of each dome
+    ctx.strokeStyle = crownColor;
+    ctx.lineWidth = isNear ? 1.6 : 1.2;
+    ctx.beginPath();
+    for (let d = 0; d < domeCount; d++) {
+      const dome = domes[d]!;
+      const dx = cx + cw * dome.u;
+      const dy = cy + ch * dome.v;
+      const dr = Math.max(2, ch * dome.rScale - 0.75);
+      const startAngle = dome.startAngle;
+      const endAngle = dome.endAngle;
+      // CRITICAL: moveTo start of arc so Canvas DOES NOT draw lines connecting adjacent domes
+      ctx.moveTo(dx + dr * Math.cos(startAngle), dy + dr * Math.sin(startAngle));
+      ctx.arc(dx, dy, dr, startAngle, endAngle);
+    }
+    ctx.stroke();
+  }
+
+  /**
+   * Pre-renders pixel-art clouds onto offscreen canvases with generous padding
+   * so domes are never clipped at the top, bottom, or sides.
    */
   private ensureCloudCanvases(palette: StagePalette): void {
     if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
@@ -1404,59 +1537,38 @@ export class Background {
       const cw = Math.round(this.cloudWidth[i]!);
       const ch = Math.round(this.cloudHeight[i]!);
       const variant = this.cloudVariant[i]!;
+      const isNear = this.cloudLayer[i] === 1;
+
+      const padX = this.cloudPadX[i]!;
+      const padTop = this.cloudPadTop[i]!;
+      const padBottom = Math.ceil(ch * 0.20) + 6;
 
       let canvas = this.cloudCanvases[i];
       if (!canvas) {
         canvas = document.createElement('canvas');
         this.cloudCanvases[i] = canvas;
       }
-      canvas.width = cw + 8;
-      canvas.height = ch + 8;
+      canvas.width = Math.ceil(cw + padX * 2);
+      canvas.height = Math.ceil(ch + padTop + padBottom);
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const cx = 4;
-      const cy = 2;
-      const yBase = cy + ch;
-
-      // 1. Base silhouette
-      ctx.fillStyle = cPal.body;
-      this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
-      ctx.fill();
-
-      // 2. Clipped underside shading
-      ctx.save();
-      this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
-      ctx.clip();
-
-      ctx.fillStyle = cPal.shadow;
-      const shadowH = Math.max(4, Math.round(ch * 0.32));
-      ctx.fillRect(cx - 5, yBase - shadowH, cw + 10, shadowH + 2);
-
-      ctx.fillStyle = cPal.baseGlow;
-      const glowH = Math.max(2, Math.round(ch * 0.12));
-      ctx.fillRect(cx - 5, yBase - glowH, cw + 10, glowH + 2);
-      ctx.restore();
-
-      // 3. Top crest highlight arcs
-      ctx.strokeStyle = cPal.rim;
-      ctx.lineWidth = this.cloudLayer[i] === 1 ? 1.6 : 1.2;
-      ctx.beginPath();
-      if (variant === 0) {
-        ctx.arc(cx + cw * 0.18, cy + ch * 0.62, cw * 0.18 - 0.75, 1.15 * Math.PI, 1.45 * Math.PI);
-        ctx.arc(cx + cw * 0.44, cy + ch * 0.40, cw * 0.28 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
-        ctx.arc(cx + cw * 0.72, cy + ch * 0.52, cw * 0.22 - 0.75, 1.30 * Math.PI, 1.85 * Math.PI);
-        ctx.arc(cx + cw * 0.88, cy + ch * 0.68, cw * 0.14 - 0.75, 1.40 * Math.PI, 1.95 * Math.PI);
-      } else if (variant === 1) {
-        ctx.arc(cx + cw * 0.22, cy + ch * 0.58, cw * 0.22 - 0.75, 1.15 * Math.PI, 1.50 * Math.PI);
-        ctx.arc(cx + cw * 0.52, cy + ch * 0.44, cw * 0.26 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
-        ctx.arc(cx + cw * 0.82, cy + ch * 0.60, cw * 0.20 - 0.75, 1.30 * Math.PI, 1.90 * Math.PI);
-      } else {
-        ctx.arc(cx + cw * 0.32, cy + ch * 0.50, cw * 0.26 - 0.75, 1.15 * Math.PI, 1.65 * Math.PI);
-        ctx.arc(cx + cw * 0.68, cy + ch * 0.44, cw * 0.28 - 0.75, 1.25 * Math.PI, 1.85 * Math.PI);
-      }
-      ctx.stroke();
+      this.drawCloud(
+        ctx,
+        padX,
+        padTop,
+        cw,
+        ch,
+        variant,
+        isNear,
+        cPal.body,
+        cPal.shadow,
+        cPal.baseGlow,
+        cPal.rim,
+        padX,
+        padBottom,
+      );
     }
   }
 
@@ -1483,61 +1595,44 @@ export class Background {
       const isNear = this.cloudLayer[i] === 1;
       const variant = this.cloudVariant[i]!;
 
-      if (cx + cw < -30 || cx > width + 30) continue;
+      const padX = this.cloudPadX[i]!;
+      const padTop = this.cloudPadTop[i]!;
+      const drawX = cx - padX;
+      const drawY = cy - padTop;
+      const offscreen = this.cloudCanvases[i];
+      const drawW = offscreen ? offscreen.width : cw + padX * 2;
+
+      // Frustum culling: skip clouds entirely outside the viewport
+      if (drawX + drawW < 0 || drawX > width) continue;
 
       const layerAlpha = isNear ? 0.94 : 0.70;
-      const offscreen = this.cloudCanvases[i];
 
       // Fast path: single GPU blit per cloud when pre-rendered offscreen canvas is available
       if (offscreen && !isFlashing) {
         ctx.globalAlpha = 0.88 * layerAlpha;
-        ctx.drawImage(offscreen, cx - 4, cy - 2);
+        ctx.drawImage(offscreen, drawX, drawY);
         ctx.globalAlpha = 1;
         continue;
       }
 
-      const yBase = cy + ch;
-
       // Fallback path for lightning flashes or headless test environments
-      ctx.fillStyle = bodyColor;
       ctx.globalAlpha = (isFlashing ? 0.92 : 0.88) * layerAlpha;
-      this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
-      ctx.fill();
-
-      ctx.save();
-      this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
-      ctx.clip();
-
-      ctx.fillStyle = shadowColor;
-      ctx.globalAlpha = (isFlashing ? 0.85 : 0.48) * layerAlpha;
-      const shadowH = Math.max(4, Math.round(ch * 0.32));
-      ctx.fillRect(cx - 5, yBase - shadowH, cw + 10, shadowH + 2);
-
-      ctx.fillStyle = glowColor;
-      ctx.globalAlpha = (isFlashing ? 0.90 : 0.42) * layerAlpha;
-      const glowH = Math.max(2, Math.round(ch * 0.12));
-      ctx.fillRect(cx - 5, yBase - glowH, cw + 10, glowH + 2);
-
-      ctx.restore();
-
-      ctx.strokeStyle = crownColor;
-      ctx.lineWidth = isNear ? 1.6 : 1.2;
-      ctx.globalAlpha = (isFlashing ? 1.0 : 0.78) * layerAlpha;
-      ctx.beginPath();
-      if (variant === 0) {
-        ctx.arc(cx + cw * 0.18, cy + ch * 0.62, cw * 0.18 - 0.75, 1.15 * Math.PI, 1.45 * Math.PI);
-        ctx.arc(cx + cw * 0.44, cy + ch * 0.40, cw * 0.28 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
-        ctx.arc(cx + cw * 0.72, cy + ch * 0.52, cw * 0.22 - 0.75, 1.30 * Math.PI, 1.85 * Math.PI);
-        ctx.arc(cx + cw * 0.88, cy + ch * 0.68, cw * 0.14 - 0.75, 1.40 * Math.PI, 1.95 * Math.PI);
-      } else if (variant === 1) {
-        ctx.arc(cx + cw * 0.22, cy + ch * 0.58, cw * 0.22 - 0.75, 1.15 * Math.PI, 1.50 * Math.PI);
-        ctx.arc(cx + cw * 0.52, cy + ch * 0.44, cw * 0.26 - 0.75, 1.20 * Math.PI, 1.80 * Math.PI);
-        ctx.arc(cx + cw * 0.82, cy + ch * 0.60, cw * 0.20 - 0.75, 1.30 * Math.PI, 1.90 * Math.PI);
-      } else {
-        ctx.arc(cx + cw * 0.32, cy + ch * 0.50, cw * 0.26 - 0.75, 1.15 * Math.PI, 1.65 * Math.PI);
-        ctx.arc(cx + cw * 0.68, cy + ch * 0.44, cw * 0.28 - 0.75, 1.25 * Math.PI, 1.85 * Math.PI);
-      }
-      ctx.stroke();
+      const padBottom = Math.ceil(ch * 0.20) + 6;
+      this.drawCloud(
+        ctx,
+        cx,
+        cy,
+        cw,
+        ch,
+        variant,
+        isNear,
+        bodyColor,
+        shadowColor,
+        glowColor,
+        crownColor,
+        padX,
+        padBottom,
+      );
       ctx.globalAlpha = 1;
     }
   }
