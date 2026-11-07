@@ -3,7 +3,7 @@
 > **A retro-futuristic driving flow experience powered by Japanese Future Funk rhythms.**
 
 [![Playable Alpha](https://img.shields.io/badge/status-playable%20alpha-f59e0b?style=for-the-badge&logo=retroarch&logoColor=white)](https://github.com/lenzinif/mayonaka-cassette)
-[![Version](https://img.shields.io/badge/version-v0.1.0--alpha-ff007f?style=for-the-badge)](https://github.com/lenzinif/mayonaka-cassette)
+[![Version](https://img.shields.io/badge/version-v0.2.0--alpha-ff007f?style=for-the-badge)](https://github.com/lenzinif/mayonaka-cassette)
 [![Live Demo](https://img.shields.io/badge/demo-play%20online-00f0ff?style=for-the-badge&logo=googlechrome&logoColor=black)](https://lenzinif.github.io/mayonaka-cassette/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -11,7 +11,7 @@
 
 ---
 
-## 🚦 Project Status: Playable Alpha (v0.1.0-alpha)
+## 🚦 Project Status: Playable Alpha (v0.2.0-alpha)
 
 *Mayonaka Cassette* is currently in **Playable Alpha**:
 - **Arcade core loop:** Custom pseudo-3D canvas rasterizer with 120 Hz fixed-step physics, 4-speed beat-shift gearbox, centrifugal curve pull, and tire-smoking drift handling.

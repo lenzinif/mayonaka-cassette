@@ -1,6 +1,6 @@
 # 真夜中Cassette (Mayonaka Cassette): roadmap e attività
 
-Piano di sviluppo per portare il gioco dalla versione alpha attuale (v0.1.0-alpha) alla beta e al rilascio.
+Piano di sviluppo per portare il gioco dalla versione alpha attuale (v0.2.0-alpha) alla beta e al rilascio.
 
 ---
 

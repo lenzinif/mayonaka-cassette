@@ -25,5 +25,5 @@ export const MAX_DRAW_DISTANCE = 500;
 export const TELEMETRY_HZ = 15;
 
 /** Application release version (aligned with package.json). */
-export const APP_VERSION = 'v0.1.0-alpha';
+export const APP_VERSION = 'v0.2.0-alpha';
 
