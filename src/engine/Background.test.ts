@@ -147,6 +147,74 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     expect(mock.fillCalls).toBeGreaterThan(0);
   });
 
+  it('renders Sunset Boulevard sea reflections strictly BEHIND the skyline buildings', () => {
+    const bg = new Background();
+    const calls: Array<{
+      type: string;
+      fillStyle: string | CanvasGradient | CanvasPattern;
+      y: number;
+      h: number;
+    }> = [];
+    const noop = () => {};
+    const grad = { addColorStop: noop };
+    let currentFillStyle: string | CanvasGradient | CanvasPattern = '#000';
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      get fillStyle() {
+        return currentFillStyle;
+      },
+      set fillStyle(v: string | CanvasGradient | CanvasPattern) {
+        currentFillStyle = v;
+      },
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      clip: noop,
+      clearRect: noop,
+      drawImage: noop,
+      moveTo: noop,
+      lineTo: noop,
+      arc: noop,
+      rect: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: (_x: number, y: number, _w: number, h: number) => {
+        calls.push({ type: 'fillRect', fillStyle: currentFillStyle, y, h });
+      },
+      createLinearGradient: () => grad,
+      createRadialGradient: () => grad,
+    } as unknown as CanvasRenderingContext2D;
+
+    bg.render(ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
+
+    // In Sunset Boulevard, COLOR_NIGHT_SKYLINE (#080417) is used for building silhouettes
+    const buildingIndices: number[] = [];
+    calls.forEach((c, i) => {
+      if (c.fillStyle === '#080417') {
+        buildingIndices.push(i);
+      }
+    });
+    expect(buildingIndices.length).toBeGreaterThan(0);
+    const firstBuildingIdx = buildingIndices[0]!;
+
+    // Water reflections use winPrimary ('#ffd447') or winAccent ('#fff2c2')
+    // with 1px slices (h === 1) in the water horizon region (y >= 190 && y < 202 for 360 height, horizonY ~ 201.6)
+    // All water reflection draw calls must occur BEFORE buildings are rendered!
+    const postBuildingWaterReflections = calls.filter((c, i) => {
+      return (
+        i > firstBuildingIdx &&
+        (c.fillStyle === '#ffd447' || c.fillStyle === '#fff2c2') &&
+        c.h === 1
+      );
+    });
+
+    expect(postBuildingWaterReflections.length).toBe(0);
+  });
+
   it('renders Akiba Night Rush (palette.id === "akiba_night") with dark cobalt ridges and vibrant towers', () => {
     const bg = new Background();
     const mock = createMockCanvasContext();

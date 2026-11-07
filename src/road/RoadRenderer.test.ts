@@ -8,10 +8,13 @@ function createMockCanvas(): {
   rectCalls: number;
   fillCalls: number;
   fills: string[];
+  alphaHistory: number[];
 } {
   let rectCalls = 0;
   let fillCalls = 0;
+  let currentAlpha = 1;
   const fills: string[] = [];
+  const alphaHistory: number[] = [];
   const noop = () => {};
 
   const ctx = {
@@ -19,7 +22,13 @@ function createMockCanvas(): {
     fillStyle: '#000',
     strokeStyle: '#000',
     lineWidth: 1,
-    globalAlpha: 1,
+    get globalAlpha() {
+      return currentAlpha;
+    },
+    set globalAlpha(v: number) {
+      currentAlpha = v;
+      alphaHistory.push(v);
+    },
     save: noop,
     restore: noop,
     beginPath: noop,
@@ -50,6 +59,9 @@ function createMockCanvas(): {
     },
     get fills() {
       return fills;
+    },
+    get alphaHistory() {
+      return alphaHistory;
     },
   };
 }
@@ -119,5 +131,43 @@ describe('RoadRenderer — Rendering Environments', () => {
     expect(mock.fills).toContain('#9e95be');
     // Expansion joint
     expect(mock.fills).toContain('#5c5478');
+  });
+
+  it('renders distant roadside props with a smooth alpha fade-in to eliminate horizon pop-in', () => {
+    const renderer = new RoadRenderer();
+    const mock = createMockCanvas();
+    const track = createTestTrack('standard');
+    // Extend track to 300 segments for distant LOD testing
+    for (let i = 50; i < 300; i++) {
+      track.segments.push({
+        index: i,
+        p1: createPoint(0, i * track.segmentLength),
+        p2: createPoint(0, (i + 1) * track.segmentLength),
+        curve: 0,
+        stripe: i % 2 === 0 ? 0 : 1,
+        sprites: [],
+        fog: 1,
+        env: 'standard',
+      });
+    }
+    track.length = 300 * track.segmentLength;
+
+    // Add a palm tree at segment 250 (in the distant fade-in zone 0.001..0.006 ppu)
+    track.segments[250]!.sprites.push({ kind: 'palm', offset: 1.8, variant: 0 });
+
+    const distantView: RoadView = {
+      ...defaultView,
+      drawDistance: 300,
+    };
+
+    renderer.render(mock.ctx, track, distantView, PALETTE_NIGHT_FUNK);
+
+    expect(renderer.stats.drawnProps).toBe(1);
+    // Verified that globalAlpha was set < 1 during render and restored to 1 afterwards
+    expect(mock.alphaHistory.length).toBeGreaterThanOrEqual(2);
+    const fadeAlpha = mock.alphaHistory[0]!;
+    expect(fadeAlpha).toBeGreaterThan(0);
+    expect(fadeAlpha).toBeLessThan(1);
+    expect(mock.alphaHistory[mock.alphaHistory.length - 1]).toBe(1);
   });
 });

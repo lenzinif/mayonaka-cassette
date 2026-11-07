@@ -207,9 +207,10 @@ describe('SongRoadGenerator', () => {
         role: 'drop',
         bars: 8,
         maneuvers: [
-          { bars: 3, curve: CURVE.MEDIUM, elevation: 0 },
           { bars: 2, curve: 0, elevation: 0 },
-          { bars: 3, curve: -CURVE.MEDIUM, elevation: 0 },
+          { bars: 2, curve: CURVE.MEDIUM, elevation: 0 },
+          { bars: 2, curve: 0, elevation: 0 },
+          { bars: 2, curve: -CURVE.MEDIUM, elevation: 0 },
         ],
         props: [
           { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
@@ -253,30 +254,64 @@ describe('SongRoadGenerator', () => {
 
       expect(chevrons.length).toBeGreaterThan(0);
 
-      // 1. Right turn chevrons (preceding maneuver 0):
-      // Must be on outside (left shoulder: offset < 0), point right (variant: 0)
+      // 1. Right turn chevrons (preceding maneuver 1 which starts at bar 2):
+      // Must be on outside (left shoulder: offset < 0), point right (variant: 0), strictly before bar 2
       const rightTurnChevrons = chevrons.filter((c) => c.barIndex < 2);
       expect(rightTurnChevrons.length).toBeGreaterThanOrEqual(2);
       for (const c of rightTurnChevrons) {
         expect(c.variant).toBe(0); // Right: >>>
         expect(c.offset).toBeLessThan(0); // Left shoulder
+        expect(Math.abs(c.curve)).toBeLessThanOrEqual(0.15); // Must be on straight approach
       }
 
-      // 2. Middle straight section (bars 3 to 4, maneuver 1):
-      // Must contain ZERO chevrons! Chevrons must never appear on straights.
+      // 2. Inside right curve (bars 2 to 4):
+      // Must contain ZERO chevrons! Chevrons must never appear during curves.
+      const insideRightCurveChevrons = chevrons.filter(
+        (c) => c.segIndex >= 2.0 * road.segmentsPerBar && c.segIndex < 4.0 * road.segmentsPerBar,
+      );
+      expect(insideRightCurveChevrons.length).toBe(0);
+
+      // 3. Middle straight section (bars 4.0 to 4.8):
+      // Must contain ZERO chevrons! Chevrons must never appear when not in the immediate approach to a curve.
       const middleStraightChevrons = chevrons.filter(
-        (c) => c.segIndex >= 3.5 * road.segmentsPerBar && c.segIndex < 4.4 * road.segmentsPerBar,
+        (c) => c.segIndex >= 4.0 * road.segmentsPerBar && c.segIndex < 4.8 * road.segmentsPerBar,
       );
       expect(middleStraightChevrons.length).toBe(0);
 
-      // 3. Left turn chevrons (preceding maneuver 2):
-      // Must be on outside (right shoulder: offset > 0), point left (variant: 1)
-      const leftTurnChevrons = chevrons.filter((c) => c.barIndex >= 4.5);
+      // 4. Left turn chevrons (preceding maneuver 3 which starts at bar 6):
+      // Must be on outside (right shoulder: offset > 0), point left (variant: 1), strictly before bar 6
+      const leftTurnChevrons = chevrons.filter((c) => c.barIndex >= 5 && c.barIndex < 6);
       expect(leftTurnChevrons.length).toBeGreaterThanOrEqual(2);
       for (const c of leftTurnChevrons) {
         expect(c.variant).toBe(1); // Left: <<<
         expect(c.offset).toBeGreaterThan(0); // Right shoulder
+        expect(Math.abs(c.curve)).toBeLessThanOrEqual(0.15); // Must be on straight approach
       }
+
+      // 5. Inside left curve (bars 6 to 8):
+      // Must contain ZERO chevrons! Chevrons must never appear during curves.
+      const insideLeftCurveChevrons = chevrons.filter(
+        (c) => c.segIndex >= 6.0 * road.segmentsPerBar && c.segIndex < 8.0 * road.segmentsPerBar,
+      );
+      expect(insideLeftCurveChevrons.length).toBe(0);
+
+      // 6. Absolute invariant: NO chevron anywhere on the road may exist inside an active curve (|curve| > 0.15)
+      const chevronsInsideCurves = chevrons.filter((c) => Math.abs(c.curve) > 0.15);
+      expect(chevronsInsideCurves.length).toBe(0);
+    });
+
+    it('guarantees that DEFAULT_SYNTH_BEATMAP has ZERO chevrons inside curves', () => {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
+      let chevronCount = 0;
+      for (const seg of road.segments) {
+        for (const sprite of seg.sprites) {
+          if (sprite.kind === 'chevron') {
+            chevronCount++;
+            expect(Math.abs(seg.curve)).toBeLessThanOrEqual(0.15);
+          }
+        }
+      }
+      expect(chevronCount).toBeGreaterThan(0);
     });
   });
 });

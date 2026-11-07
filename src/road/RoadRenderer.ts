@@ -160,7 +160,7 @@ export class RoadRenderer {
 
       const ppu = (p1.scale * width) / 2;
       const scaledPpu = (ppu * roadWidth) / 2000;
-      if (scaledPpu < 0.0055) continue;
+      if (scaledPpu < 0.001) continue;
 
       const sprites = seg.sprites;
       const firstTruckIdx = traffic ? traffic.getFirstTruckOnSegment(seg.index) : -1;
@@ -168,6 +168,14 @@ export class RoadRenderer {
 
       // Skip segment sprites/traffic if occluded behind a hill crest
       if (p1.screenY - 12000 * scaledPpu >= segClipY) continue;
+
+      // Smooth distant alpha fade-in (0.001 -> 0.006) to eliminate abrupt pop-in & flickering at the horizon
+      const propAlpha = Math.min(1, Math.max(0, (scaledPpu - 0.001) / 0.005));
+      const needsPropAlpha = propAlpha < 0.98;
+
+      if (needsPropAlpha && sprites.length > 0) {
+        ctx.globalAlpha = propAlpha;
+      }
 
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       for (let i = 0; i < sprites.length; i++) {
@@ -192,6 +200,10 @@ export class RoadRenderer {
           beatPulse,
         );
         this.stats.drawnProps++;
+      }
+
+      if (needsPropAlpha && sprites.length > 0) {
+        ctx.globalAlpha = 1;
       }
 
       // AI Kei Trucks on this segment (diverging onto the left/right Y-fork branch)
@@ -237,9 +249,10 @@ export class RoadRenderer {
                 }
               }
 
-              if (forkBranchAlpha > 0.02) {
-                if (forkBranchAlpha < 0.98) {
-                  ctx.globalAlpha = forkBranchAlpha;
+              const truckAlpha = Math.min(propAlpha, forkBranchAlpha);
+              if (truckAlpha > 0.02) {
+                if (truckAlpha < 0.98) {
+                  ctx.globalAlpha = truckAlpha;
                 }
                 const viewParallax = ((width * 0.5 - truckScreenX) / Math.max(1, width * 0.5)) * 1.4;
                 const truckRoadCurve = seg.curve + viewParallax + truck.lateralVel * 1.5;
@@ -253,7 +266,7 @@ export class RoadRenderer {
                   truck.knockedTimer > 0,
                   truckRoadCurve,
                 );
-                if (forkBranchAlpha < 0.98) {
+                if (truckAlpha < 0.98) {
                   ctx.globalAlpha = 1;
                 }
                 this.stats.drawnTrucks++;

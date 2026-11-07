@@ -264,8 +264,8 @@ function hexToRgba(hex: string, alpha: number): string {
 /**
  * 3-Tier Parallax Synthwave Skybox & Atmospheric Weather System:
  * - Layer 1: Lontanissimo (~0.10x) — calm deep water sea / majestic mountain ridges & chord-clipped sun/moon
- * - Layer 2: Intermedio (~0.45x) — dense pixel-art skyline with radio antennas & breathing window matrices
- * - Layer 3: Transizione (~0.85x) — shimmering vertical water reflections (Mayonaka Bay) & seamless horizon wash
+ * - Layer 2: Intermedio (~0.45x) — distant illuminated skyline with radio antennas (occluding distant water reflections)
+ * - Layer 3: Transizione (~0.85x) — atmospheric breakwater horizon wash & seamless blending
  * - Weather & Celestial — authentic 16-bit pixel-art cumulus clouds with organic curved domes,
  *   vibeful sudden forked lightning (triggered on extreme spectral events and drops),
  *   clean 2-tier diagonal rain, twinkling stars & shooting stars.
@@ -1108,6 +1108,38 @@ export class Background {
 
     const skylineBaseY = isSunsetBoulevard ? horizonY - 10 : horizonY - 4;
 
+    // 7a. Shimmering Sea Reflections (Sunset Boulevard) — rendered BEHIND the skyline buildings
+    if (isSunsetBoulevard) {
+      const waterTopY = skylineBaseY;
+      const waterH = horizonY - waterTopY;
+
+      for (let pass = -1; pass <= Math.ceil(width / CITY_SPAN); pass++) {
+        const baseOffset = pass * CITY_SPAN - this.scroll3;
+        for (let t = 0; t < CITY_TOWERS; t++) {
+          const tx = Math.round(baseOffset + t * towerSpacing);
+          const tw = this.towerWidths[t]!;
+          if (tx + tw < -5 || tx > width + 5) continue;
+
+          const th = this.towerHeights[t]!;
+          if (th < 12) continue;
+
+          const colColor = t % 2 === 0 ? winPrimary : winAccent;
+          ctx.fillStyle = colColor;
+          const refW = Math.max(3, tw - 4);
+
+          for (let dy = 0; dy < waterH; dy++) {
+            const y = waterTopY + dy;
+            const rip = Math.round(Math.sin(this.skyTime * 5.5 + dy * 0.9 + t * 1.3) * 1.8);
+            const fade = (1 - dy / waterH) * (0.32 + pulse * 0.28);
+            ctx.globalAlpha = Math.max(0, Math.min(1, fade));
+            ctx.fillRect(tx + 2 + rip, y, refW, 1);
+          }
+        }
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    // 7b. Skyline buildings & window matrices (rendered in front of water reflections)
     for (let pass = -1; pass <= Math.ceil(width / CITY_SPAN); pass++) {
       const baseOffset = pass * CITY_SPAN - this.scroll2;
       for (let t = 0; t < CITY_TOWERS; t++) {
@@ -1249,40 +1281,7 @@ export class Background {
     }
 
     // -------------------------------------------------------------------------
-    // 8. LAYER 3: TRANSIZIONE (Scroll ~0.85x)
-    // -------------------------------------------------------------------------
-    if (isSunsetBoulevard) {
-      const waterTopY = skylineBaseY;
-      const waterH = horizonY - waterTopY;
-
-      for (let pass = -1; pass <= Math.ceil(width / CITY_SPAN); pass++) {
-        const baseOffset = pass * CITY_SPAN - this.scroll3;
-        for (let t = 0; t < CITY_TOWERS; t++) {
-          const tx = Math.round(baseOffset + t * towerSpacing);
-          const tw = this.towerWidths[t]!;
-          if (tx + tw < -5 || tx > width + 5) continue;
-
-          const th = this.towerHeights[t]!;
-          if (th < 12) continue;
-
-          const colColor = t % 2 === 0 ? winPrimary : winAccent;
-          ctx.fillStyle = colColor;
-          const refW = Math.max(3, tw - 4);
-
-          for (let dy = 0; dy < waterH; dy++) {
-            const y = waterTopY + dy;
-            const rip = Math.round(Math.sin(this.skyTime * 5.5 + dy * 0.9 + t * 1.3) * 1.8);
-            const fade = (1 - dy / waterH) * (0.32 + pulse * 0.28);
-            ctx.globalAlpha = Math.max(0, Math.min(1, fade));
-            ctx.fillRect(tx + 2 + rip, y, refW, 1);
-          }
-        }
-      }
-      ctx.globalAlpha = 1;
-    }
-
-    // -------------------------------------------------------------------------
-    // 9. ATMOSPHERIC BREAKWATER HORIZON WASH
+    // 8. LAYER 3: TRANSIZIONE (Scroll ~0.85x) — Breakwater Horizon Wash
     // -------------------------------------------------------------------------
     const glowH = 24;
     const glowColor = palette.horizonGlow ?? palette.skyHorizon;
@@ -1312,7 +1311,7 @@ export class Background {
     ctx.globalAlpha = 1;
 
     // -------------------------------------------------------------------------
-    // 10. RONDINI & GABBIANI (3-frame flap animation)
+    // 9. RONDINI & GABBIANI (3-frame flap animation)
     // -------------------------------------------------------------------------
     if (tuning.bgBirds === 1) {
       ctx.fillStyle = COLOR_NIGHT_SKYLINE;
@@ -1342,7 +1341,7 @@ export class Background {
     }
 
     // -------------------------------------------------------------------------
-    // 11. BACKGROUND SKY RAIN (Far fine mist streaks)
+    // 10. BACKGROUND SKY RAIN (Far fine mist streaks)
     // -------------------------------------------------------------------------
     if (tuning.bgRain === 1) {
       this.renderFarRain(ctx, lTheme);

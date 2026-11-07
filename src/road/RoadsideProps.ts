@@ -1545,10 +1545,8 @@ function drawShrub(
     ctx.fillRect(left + Math.round(w * 0.55), topY + Math.round(h * 0.25), Math.round(w * 0.45), Math.round(h * 0.5));
 
     // Top highlight rim
-    ctx.fillStyle = '#ffffff';
-    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
     ctx.fillRect(left + Math.round(w * 0.25), topY, Math.round(w * 0.5), 1);
-    ctx.globalAlpha = 1;
   } else {
     // --- Silhouette B: Sculpted Japanese Tiered Niwaki / Cloud Shrub ---
     const w = Math.max(3, Math.round(1200 * ppu));

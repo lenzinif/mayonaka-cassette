@@ -573,7 +573,8 @@ function selectChunk(
  * and signal the correct direction:
  * - Right curve (targetCurve > 0): arrows point RIGHT (>>>), placed on outside (left shoulder, offset < 0).
  * - Left curve (targetCurve < 0): arrows point LEFT (<<<), placed on outside (right shoulder, offset > 0).
- * Chevrons never appear on straight road sections or during the middle/exit of curves.
+ * Chevrons never appear on straight road sections when not approaching a curve,
+ * and NEVER appear during the middle or exit of curves.
  */
 function populateChunkChevrons(
   segments: RoadSegment[],
@@ -607,18 +608,20 @@ function populateChunkChevrons(
       // Outside shoulder: left shoulder (-baseOffset) for right turn, right shoulder (+baseOffset) for left turn
       const offset = isRight ? -baseOffset : baseOffset;
 
-      // Place 4 warning chevrons in the approach leading into the curve
-      const beatOffsets = [-1.5, -0.5, 0.5, 1.5];
+      // Place warning chevrons strictly in the approach leading into the curve
+      const beatOffsets = [-3.5, -2.5, -1.5, -0.5];
       for (const bo of beatOffsets) {
         const segIdx = mCursorSeg + Math.round(bo * segmentsPerBeat);
-        if (segIdx < 0 || segIdx >= segments.length) continue;
+        // Must be strictly before the curve begins and within valid segment range
+        if (segIdx < 0 || segIdx >= mCursorSeg || segIdx >= segments.length) continue;
         const seg = segments[segIdx];
         if (!seg) continue;
 
+        // Chevrons must only go before a curve on straight road (never inside another curve)
+        if (Math.abs(seg.curve) > 0.15) continue;
+
         // Prevent duplicate chevrons on the same segment
-        const hasChevron = seg.sprites.some(
-          (s) => s.kind === 'chevron' && Math.sign(s.offset) === Math.sign(offset),
-        );
+        const hasChevron = seg.sprites.some((s) => s.kind === 'chevron');
         if (!hasChevron) {
           seg.sprites.push({ kind: 'chevron', offset, variant });
         }
