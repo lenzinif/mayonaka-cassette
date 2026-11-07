@@ -132,6 +132,20 @@ describe('SongRoadGenerator', () => {
     expect(hasTower).toBe(true);
   });
 
+  it('guarantees straight-ramp build chunks have zero curvature (zero lateral displacement)', () => {
+    const straightBuildChunkIds = ['build-skyward-crest-4', 'build-bay-bridge-ascent-8'] as const;
+    for (const chunkId of straightBuildChunkIds) {
+      const chunk = ROAD_CHUNKS.find((c) => c.id === chunkId)!;
+      expect(chunk).toBeDefined();
+      expect(chunk.maneuvers.every((m) => m.curve === 0)).toBe(true);
+
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { catalog: [chunk] });
+      expect(road.segments.every((s) => s.curve === 0)).toBe(true);
+      const maxY = Math.max(...road.segments.map((s) => s.p2.worldY));
+      expect(maxY).toBeGreaterThan(0);
+    }
+  });
+
   describe('Macro A2 Horizon Stitching & Canonical Restoration', () => {
     it('executes zero-pop-in horizon stitching with quantized rumble steps and C1 continuity', () => {
       const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
