@@ -6,13 +6,14 @@ import { AssetPreloader, type PreloadProgress } from '@src/core/AssetPreloader';
 import type { AutopilotMode } from '@src/core/AutopilotDriver';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { Game, GameEvent, TelemetrySnapshot } from '@src/engine/Game';
-import { useEffect, useRef, useState } from 'react';
+import type { SodaSkin } from '@src/entities/MelonSoda';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { BeatMapInspector } from './ui/BeatMapInspector';
 import { CanvasStage } from './ui/CanvasStage';
 import { CRTOverlay } from './ui/CRTOverlay';
 import { DebugPanel, loadSavedTuning } from './ui/DebugPanel';
 import { HUD } from './ui/HUD';
-import { LoadingScreen } from './ui/LoadingScreen';
+import { MainMenu } from './ui/MainMenu';
 import { RadioSelector } from './ui/RadioSelector';
 import { TrackLoader } from './ui/TrackLoader';
 
@@ -23,6 +24,7 @@ export function App() {
   const [preloader] = useState(() => new AssetPreloader());
   const [preloadProgress, setPreloadProgress] = useState<PreloadProgress>(() => preloader.progress);
   const [preloadReady, setPreloadReady] = useState(false);
+  const [audioUnlocked, setAudioUnlocked] = useState(() => audio.unlocked);
   const [gameStarted, setGameStarted] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.has('autostart');
@@ -30,6 +32,13 @@ export function App() {
   const [isInitialSelect, setIsInitialSelect] = useState(false);
   const gameRef = useRef<Game | null>(null);
   const wasPausedBeforeModalRef = useRef(false);
+
+  // Quick settings state
+  const [crtEnabled, setCrtEnabled] = useState(true);
+  const [autoShift, setAutoShift] = useState(false);
+  const [tofuMode, setTofuMode] = useState(false);
+  const [sodaSkin, setSodaSkin] = useState<SodaSkin>('melon-soda');
+  const [cleanHud, setCleanHud] = useState(false);
 
   const [debugOpen, setDebugOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -45,18 +54,51 @@ export function App() {
 
   const [trackLoaderOpen, setTrackLoaderOpen] = useState(false);
 
-  const handleStartFromLoadingScreen = () => {
-    setGameStarted(true);
-    setIsInitialSelect(true);
-    setTrackLoaderOpen(true);
-    void audio.unlock();
-  };
+  // Sync telemetric quick options
+  useEffect(() => {
+    return bridge.onEvent((event) => {
+      if (event.type === 'autoShiftToggled') {
+        setAutoShift(event.enabled);
+      } else if (event.type === 'tofuModeToggled') {
+        setTofuMode(event.active);
+      } else if (event.type === 'sodaSkinChanged') {
+        setSodaSkin(event.skin);
+      }
+    });
+  }, [bridge]);
 
-  const handleStartDrive = () => {
+  // Audio unlock listener on first user gesture
+  useEffect(() => {
+    const onGesture = () => {
+      if (!audio.unlocked) {
+        void audio.unlock().then(() => setAudioUnlocked(true));
+      }
+    };
+    window.addEventListener('keydown', onGesture, { passive: true });
+    window.addEventListener('pointerdown', onGesture, { passive: true });
+    return () => {
+      window.removeEventListener('keydown', onGesture);
+      window.removeEventListener('pointerdown', onGesture);
+    };
+  }, [audio]);
+
+  const handleStartDrive = useCallback(() => {
+    setGameStarted(true);
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
     wasPausedBeforeModalRef.current = false;
+    void audio.unlock().then(() => setAudioUnlocked(true));
     gameRef.current?.setPaused(false);
+  }, [audio]);
+
+  const handleReturnToMainMenu = () => {
+    setGameStarted(false);
+    setIsInitialSelect(false);
+    setTrackLoaderOpen(false);
+    wasPausedBeforeModalRef.current = true;
+    void audio.pause();
+    gameRef.current?.restartPlaylistRun();
+    gameRef.current?.setPaused(true);
   };
 
   const handleResumeFromTrackLoader = () => {
@@ -136,10 +178,10 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, isInitialSelect]);
+  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, isInitialSelect, handleStartDrive]);
 
   const handleSelectTrack = (item: PlaylistItem) => {
-    void audio.unlock();
+    void audio.unlock().then(() => setAudioUnlocked(true));
     audio.loadTrack(item.beatMap, item.audioBuffer);
     gameRef.current?.loadBeatMapRoad(item.beatMap, true);
   };
@@ -153,7 +195,7 @@ export function App() {
 
   return (
     <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[#060112]">
-      <div className="relative aspect-video max-h-full max-w-full w-full">
+      <div className="relative aspect-video max-h-full max-w-full w-full overflow-hidden">
         <CanvasStage
           bridge={bridge}
           audio={audio}
@@ -169,6 +211,7 @@ export function App() {
         <HUD
           bridge={bridge}
           debugOpen={debugOpen}
+          gameStarted={gameStarted}
           trackLoaderOpen={trackLoaderOpen}
           inspectorOpen={inspectorOpen}
           onToggleDebug={() => setDebugOpen((prev) => !prev)}
@@ -178,6 +221,7 @@ export function App() {
           }}
           onOpenInspector={() => setInspectorOpen(true)}
           onRestartRun={() => gameRef.current?.restartPlaylistRun()}
+          onReturnToMainMenu={handleReturnToMainMenu}
         />
         <RadioSelector
           bridge={bridge}
@@ -188,7 +232,7 @@ export function App() {
             setTrackLoaderOpen(true);
           }}
         />
-        <CRTOverlay />
+        <CRTOverlay enabled={crtEnabled} />
         <DebugPanel
           open={debugOpen}
           onClose={() => setDebugOpen(false)}
@@ -215,10 +259,41 @@ export function App() {
         />
         {inspectorOpen && <BeatMapInspector onClose={() => setInspectorOpen(false)} />}
         {!gameStarted && !inspectorOpen && (
-          <LoadingScreen
+          <MainMenu
             progress={preloadProgress}
             ready={preloadReady}
-            onStart={handleStartFromLoadingScreen}
+            audioUnlocked={audioUnlocked}
+            currentTrackTitle={audio.beatMap.title}
+            currentTrackBpm={audio.beatMap.bpm}
+            onStartDrive={handleStartDrive}
+            onOpenCassetteDeck={() => {
+              void audio.unlock().then(() => setAudioUnlocked(true));
+              setIsInitialSelect(false);
+              setTrackLoaderOpen(true);
+            }}
+            onOpenInspector={() => setInspectorOpen(true)}
+            onUnlockAudio={() => {
+              void audio.unlock().then(() => setAudioUnlocked(true));
+            }}
+            autoShift={autoShift}
+            onToggleAutoShift={() => {
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyG', bubbles: true }));
+              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyG', bubbles: true }));
+            }}
+            tofuMode={tofuMode}
+            onToggleTofuMode={() => {
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyT', bubbles: true }));
+              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyT', bubbles: true }));
+            }}
+            sodaSkin={sodaSkin}
+            onCycleSodaSkin={() => {
+              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV', bubbles: true }));
+              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyV', bubbles: true }));
+            }}
+            cleanHud={cleanHud}
+            onToggleCleanHud={() => setCleanHud((prev) => !prev)}
+            crtEnabled={crtEnabled}
+            onToggleCrt={() => setCrtEnabled((prev) => !prev)}
           />
         )}
       </div>

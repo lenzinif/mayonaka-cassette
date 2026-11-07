@@ -1678,4 +1678,62 @@ export class Background {
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
+
+  /**
+   * Renders the subterranean atmospheric tunnel vault (Wangan Yamate Tunnel / Shuto Expressway C1).
+   * High performance: single linear gradient fill + perspective arched ceiling guides and ambient sodium glow.
+   */
+  public renderTunnelVault(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    beatPulse = 0,
+  ): void {
+    const horizonY = height * 0.56;
+
+    // 1. Subterranean Cavern Gradient Vault
+    // Deep obsidian/slate ceiling down to atmospheric violet-sodium horizon glow
+    const pulseStrength = beatPulse * 0.25;
+    const grad = ctx.createLinearGradient(0, 0, 0, horizonY);
+    grad.addColorStop(0, '#06040c');
+    grad.addColorStop(0.45, '#120c22');
+    grad.addColorStop(0.85, '#1e1028');
+    grad.addColorStop(1, pulseStrength > 0.1 ? '#2c1435' : '#230f2c');
+
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    // 2. Distant Vanishing Point Horizon Ambient Glow (Subterranean sodium haze)
+    const centerX = width * 0.5;
+    const glowH = Math.max(12, Math.round(height * 0.18));
+    const glowGrad = ctx.createLinearGradient(0, horizonY - glowH, 0, horizonY + glowH * 0.5);
+    const glowAlpha = 0.18 + beatPulse * 0.12;
+    glowGrad.addColorStop(0, 'rgba(255, 158, 36, 0)');
+    glowGrad.addColorStop(0.65, `rgba(255, 158, 36, ${glowAlpha.toFixed(3)})`);
+    glowGrad.addColorStop(1, 'rgba(20, 10, 32, 0)');
+    ctx.fillStyle = glowGrad;
+    ctx.fillRect(0, horizonY - glowH, width, glowH * 1.5);
+
+    // 3. Perspective Arched Ceiling Guide Ribs (High-speed Yamaha / Shuto tunnel illusion)
+    // 6 faint perspective radial lines converging at (centerX, horizonY)
+    ctx.strokeStyle = `rgba(255, 170, 0, ${(0.14 + beatPulse * 0.1).toFixed(3)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const offsets = [-0.38, -0.22, -0.08, 0.08, 0.22, 0.38];
+    for (let i = 0; i < offsets.length; i++) {
+      const topX = centerX + width * offsets[i]!;
+      ctx.moveTo(topX, 0);
+      ctx.lineTo(centerX + (topX - centerX) * 0.08, horizonY);
+    }
+    ctx.stroke();
+
+    // 4. Distant Light Halos along the upper arch at regular depth
+    const haloAlpha = 0.22 + beatPulse * 0.15;
+    ctx.fillStyle = `rgba(255, 220, 120, ${haloAlpha.toFixed(3)})`;
+    for (let r = 1; r <= 3; r++) {
+      const hy = horizonY - r * 14;
+      const hw = r * 8;
+      ctx.fillRect(centerX - hw * 0.5, hy, hw, 1);
+    }
+  }
 }

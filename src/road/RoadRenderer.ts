@@ -125,9 +125,6 @@ export class RoadRenderer {
 
     // Pass 2: painter's algorithm (back-to-front).
     const cameraSeg = findSegment(track, view.position);
-    const isCameraInTunnel = cameraSeg
-      ? cameraSeg.env === 'tunnel' || cameraSeg.env === 'tunnel-entry' || cameraSeg.env === 'tunnel-exit'
-      : false;
     const isCameraOnBridge = cameraSeg ? cameraSeg.env === 'bridge' : false;
     for (let n = drawDistance - 1; n >= 0; n--) {
       const seg = this.visible[n]!;
@@ -156,7 +153,6 @@ export class RoadRenderer {
             trackLength,
             view.forkChoice,
             segClipY,
-            isCameraInTunnel,
             isCameraOnBridge,
           );
         }
@@ -282,7 +278,6 @@ export class RoadRenderer {
     trackLength = 1,
     forkChoice?: 'left' | 'right',
     segClipY = Number.POSITIVE_INFINITY,
-    isCameraInTunnel = false,
     isCameraOnBridge = false,
   ): void {
     const { p1, p2, stripe } = seg;
@@ -304,7 +299,7 @@ const isBridge = seg.env === 'bridge';
       // Oceanic bay water surface with deep night reflection
       ctx.fillStyle = stripe === 0 ? '#060b1e' : '#040714';
       if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
-    } else if (isTunnel && isCameraInTunnel) {
+    } else if (isTunnel) {
       // Subterranean dark rock ground outside the tunnel walls
       ctx.fillStyle = stripe === 0 ? '#0c0817' : '#080510';
       if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
@@ -587,10 +582,10 @@ const isBridge = seg.env === 'bridge';
         polygon(ctx, x1 - w1, y1, x1 + w1, y1, x1 + w1, y1 - 1, x1 - w1, y1 - 1);
       }
     } else if (isTunnel && w1 >= 4) {
-      const wallH1 = Math.max(4, Math.round(w1 * 1.35));
-      const wallH2 = Math.max(3, Math.round(w2 * 1.35));
-      const wallSpread1 = w1 + r1 * 1.2;
-      const wallSpread2 = w2 + r2 * 1.2;
+      const wallH1 = Math.max(3, Math.round(w1 * 1.25));
+      const wallH2 = Math.max(2, Math.round(w2 * 1.25));
+      const wallSpread1 = w1 + r1 * 1.15;
+      const wallSpread2 = w2 + r2 * 1.15;
 
       const leftBaseX1 = x1 - wallSpread1;
       const leftBaseX2 = x2 - wallSpread2;
@@ -615,38 +610,23 @@ const isBridge = seg.env === 'bridge';
       ctx.closePath();
       ctx.fill();
 
-      // Plinth & Retro Sodium Reflector Line (LOD: closer segments w1 >= 24)
-      if (w1 >= 24) {
-        const plinthH1 = Math.max(1, Math.round(wallH1 * 0.15));
-        const plinthH2 = Math.max(1, Math.round(wallH2 * 0.15));
-        ctx.fillStyle = '#120d1c';
-        ctx.beginPath();
-        ctx.moveTo(leftBaseX1, y1);
-        ctx.lineTo(leftBaseX1, y1 - plinthH1);
-        ctx.lineTo(leftBaseX2, y2 - plinthH2);
-        ctx.lineTo(leftBaseX2, y2);
-        ctx.closePath();
-        ctx.moveTo(rightBaseX1, y1);
-        ctx.lineTo(rightBaseX1, y1 - plinthH1);
-        ctx.lineTo(rightBaseX2, y2 - plinthH2);
-        ctx.lineTo(rightBaseX2, y2);
-        ctx.closePath();
-        ctx.fill();
+      // 2. Continuous Retro Sodium Reflector Line (LOD: closer segments w1 >= 14)
+      if (w1 >= 14) {
+        const reflY1 = y1 - Math.round(wallH1 * 0.42);
+        const reflY2 = y2 - Math.round(wallH2 * 0.42);
+        const reflH1 = Math.max(1, Math.round(wallH1 * 0.06));
+        const reflH2 = Math.max(1, Math.round(wallH2 * 0.06));
 
-        ctx.fillStyle = '#ffd166'; // Retro sodium yellow reflector line
-        const reflY1 = y1 - Math.round(wallH1 * 0.45);
-        const reflY2 = y2 - Math.round(wallH2 * 0.45);
-        const reflThick1 = Math.max(1, Math.round(wallH1 * 0.05));
-        const reflThick2 = Math.max(1, Math.round(wallH2 * 0.05));
+        ctx.fillStyle = '#ffd166';
         ctx.beginPath();
         ctx.moveTo(leftBaseX1, reflY1);
-        ctx.lineTo(leftBaseX1, reflY1 - reflThick1);
-        ctx.lineTo(leftBaseX2, reflY2 - reflThick2);
+        ctx.lineTo(leftBaseX1, reflY1 - reflH1);
+        ctx.lineTo(leftBaseX2, reflY2 - reflH2);
         ctx.lineTo(leftBaseX2, reflY2);
         ctx.closePath();
         ctx.moveTo(rightBaseX1, reflY1);
-        ctx.lineTo(rightBaseX1, reflY1 - reflThick1);
-        ctx.lineTo(rightBaseX2, reflY2 - reflThick2);
+        ctx.lineTo(rightBaseX1, reflY1 - reflH1);
+        ctx.lineTo(rightBaseX2, reflY2 - reflH2);
         ctx.lineTo(rightBaseX2, reflY2);
         ctx.closePath();
         ctx.fill();
@@ -656,12 +636,10 @@ const isBridge = seg.env === 'bridge';
       ctx.fillStyle = stripe === 0 ? '#151122' : '#100c1a';
       polygon(ctx, leftBaseX1, ceilY1, rightBaseX1, ceilY1, rightBaseX2, ceilY2, leftBaseX2, ceilY2);
 
-
-
       // 4. Overhead Perspective Fluorescent Neon Tube Strips
-      if (w1 >= 6) {
-        const neonW1 = Math.max(1, Math.round(w1 / 20));
-        const neonW2 = Math.max(1, Math.round(w2 / 20));
+      if (w1 >= 8) {
+        const neonW1 = Math.max(1, Math.round(w1 / 22));
+        const neonW2 = Math.max(1, Math.round(w2 / 22));
         const neonY1 = ceilY1 + Math.max(1, Math.round(wallH1 * 0.08));
         const neonY2 = ceilY2 + Math.max(1, Math.round(wallH2 * 0.08));
 
@@ -670,11 +648,11 @@ const isBridge = seg.env === 'bridge';
         ctx.fillStyle = neonCol;
         polygon(ctx, x1 - neonW1, neonY1, x1 + neonW1, neonY1, x2 + neonW2, neonY2, x2 - neonW2, neonY2);
 
-        // Bright white core (LOD: closer segments w1 >= 14)
-        if (w1 >= 14) {
+        // Bright white core (LOD: closer segments w1 >= 20)
+        if (w1 >= 20) {
           ctx.fillStyle = '#ffffff';
-          const coreW1 = Math.max(1, Math.round(neonW1 * 0.4));
-          const coreW2 = Math.max(1, Math.round(neonW2 * 0.4));
+          const coreW1 = Math.max(1, Math.round(neonW1 * 0.45));
+          const coreW2 = Math.max(1, Math.round(neonW2 * 0.45));
           polygon(ctx, x1 - coreW1, neonY1, x1 + coreW1, neonY1, x2 + coreW2, neonY2, x2 - coreW2, neonY2);
         }
       }

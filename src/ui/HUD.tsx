@@ -17,7 +17,9 @@ export interface HUDProps {
   onToggleDebug: () => void;
   onOpenTrackLoader: () => void;
   onOpenInspector: () => void;
+  gameStarted?: boolean;
   onRestartRun?: () => void;
+  onReturnToMainMenu?: () => void;
 }
 
 interface ToastState {
@@ -54,8 +56,10 @@ export function HUD({
   inspectorOpen = false,
   onToggleDebug,
   onOpenTrackLoader,
+  gameStarted = true,
   onOpenInspector,
   onRestartRun,
+  onReturnToMainMenu,
 }: HUDProps) {
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot, bridge.getSnapshot);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -243,6 +247,8 @@ export function HUD({
   const gamepadConnected = snap?.gamepadConnected ?? false;
 
   const sodaDangerPct = Math.min(100, Math.round(sodaDanger * 100));
+
+  if (!gameStarted) return null;
 
   return (
     <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between p-3 font-mono text-white select-none sm:p-5">
@@ -470,7 +476,7 @@ export function HUD({
 
       {/* M8 Centralized Future Funk Pause Menu (Hub for all in-game options & tuning) */}
       <PauseMenu
-        open={isPaused && !trackLoaderOpen && !inspectorOpen}
+        open={gameStarted && isPaused && !trackLoaderOpen && !inspectorOpen}
         stageNumber={stageNumber}
         stagePaletteName={stagePaletteName}
         stageScore={stageScore}
@@ -502,6 +508,7 @@ export function HUD({
         onTogglePerfHud={() => setShowPerfHud((prev) => !prev)}
         onToggleAutoShift={() => triggerSyntheticKey('KeyG')}
         onToggleAutopilot={() => triggerSyntheticKey('F4')}
+        onReturnToMainMenu={onReturnToMainMenu}
       />
     </div>
   );

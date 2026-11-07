@@ -35,6 +35,7 @@ export interface PauseMenuProps {
   onTogglePerfHud: () => void;
   onToggleAutoShift?: () => void;
   onToggleAutopilot?: () => void;
+  onReturnToMainMenu?: () => void;
 }
 
 function formatLapTime(seconds: number): string {
@@ -82,6 +83,7 @@ export function PauseMenu({
   onTogglePerfHud,
   onToggleAutoShift,
   onToggleAutopilot,
+  onReturnToMainMenu,
 }: PauseMenuProps) {
   if (!open) return null;
 
@@ -94,12 +96,12 @@ export function PauseMenu({
   return (
     <div
       onClick={handleBackdropClick}
-      className="pointer-events-auto absolute inset-0 z-40 flex items-center justify-center bg-[#060112]/92 p-4 font-mono text-white backdrop-blur-xs select-none transition-opacity duration-200"
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#060112]/94 p-4 font-mono text-white backdrop-blur-xs select-none transition-opacity duration-200"
       role="dialog"
       aria-modal="true"
       aria-label="Pause Menu"
     >
-      <div className="relative w-full max-w-md rounded-lg border-2 border-pink-500/70 bg-[#0d0221]/98 p-5 text-center shadow-[0_0_50px_rgba(255,42,109,0.4)]">
+      <div className="relative w-full max-w-md max-h-[88vh] overflow-y-auto rounded-lg border-2 border-pink-500/70 bg-[#0d0221]/98 p-5 text-center shadow-[0_0_50px_rgba(255,42,109,0.4)]" style={{ colorScheme: 'dark', scrollbarColor: '#e879f9 #1a0633', scrollbarWidth: 'thin' }}>
         {/* Arcade Top Header Bar */}
         <div className="flex items-center justify-between border-b border-fuchsia-500/30 pb-2 text-[10px] tracking-[0.25em] text-cyan-300 uppercase">
           <span>OUTRUN FM 88.4</span>
@@ -186,6 +188,15 @@ export function PauseMenu({
           >
             FEEL TUNING [F2]
           </button>
+          {onReturnToMainMenu && (
+            <button
+              type="button"
+              onClick={onReturnToMainMenu}
+              className="col-span-2 cursor-pointer rounded border border-rose-500/60 bg-[#250518]/80 py-2 font-bold tracking-wider text-rose-300 transition hover:border-pink-400 hover:text-pink-100 hover:shadow-[0_0_12px_rgba(255,42,109,0.4)]"
+            >
+              TITLE SCREEN // MAIN MENU
+            </button>
+          )}
           <button
             type="button"
             onClick={onOpenInspector}

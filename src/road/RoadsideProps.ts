@@ -1158,7 +1158,7 @@ function drawTunnelPortal(
   const spanW = Math.max(28, Math.round(8600 * ppu));
   const portalH = Math.max(20, Math.round(5800 * ppu));
   const archW = Math.max(16, Math.round(5200 * ppu));
-  const archH = Math.max(14, Math.round(4200 * ppu));
+  const archH = Math.max(14, Math.round(4000 * ppu));
   const topY = Math.round(y - portalH);
   const archTopY = Math.round(y - archH);
 
@@ -1166,51 +1166,59 @@ function drawTunnelPortal(
   const archLeftX = Math.round(x - archW * 0.5);
   const archRightX = Math.round(x + archW * 0.5);
 
-  // 1. Mountain Wing-Walls & Concrete Retaining Structure (open arch lintel & pillars)
-  ctx.fillStyle = TUNNEL_PORTAL_CONCRETE;
-  const lintelH = Math.max(1, archTopY - topY);
+  // 1. Mountain Rock-Cut Abutments (wide mountain slope flanking the portal)
+  const wingW = Math.max(28, Math.round(6400 * ppu));
+  ctx.fillStyle = TUNNEL_PORTAL_DARK; // #1a1626
+  ctx.fillRect(leftX - wingW, topY, wingW, portalH);
+  ctx.fillRect(leftX + spanW, topY, wingW, portalH);
+
+  // Layered rock strata
+  ctx.fillStyle = '#120e1e';
+  ctx.fillRect(leftX - wingW, topY + Math.round(portalH * 0.35), wingW, Math.round(portalH * 0.28));
+  ctx.fillRect(leftX + spanW, topY + Math.round(portalH * 0.35), wingW, Math.round(portalH * 0.28));
+
+  // 2. Heavy Cast Concrete Frame & Lintel
+  ctx.fillStyle = TUNNEL_PORTAL_CONCRETE; // #3a354b
+  const lintelH = Math.max(2, archTopY - topY);
   ctx.fillRect(leftX, topY, spanW, lintelH);
-  const pillarW = Math.max(1, archLeftX - leftX);
+  const pillarW = Math.max(2, archLeftX - leftX);
   ctx.fillRect(leftX, archTopY, pillarW, archH);
   ctx.fillRect(archRightX, archTopY, pillarW, archH);
 
-  // Top Chamfer / Parapet
+  // Chamfered Parapet Cornice
   const chamferH = Math.max(2, Math.round(600 * ppu));
-  ctx.fillStyle = TUNNEL_PORTAL_LIGHT;
+  ctx.fillStyle = TUNNEL_PORTAL_LIGHT; // #5c5575
   ctx.fillRect(leftX, topY, spanW, chamferH);
 
-  // Rock-cut side abutments beyond the concrete portal
-  const wingW = Math.max(4, Math.round(1800 * ppu));
-  ctx.fillStyle = TUNNEL_PORTAL_DARK;
-  ctx.fillRect(leftX - wingW, topY + chamferH, wingW, portalH - chamferH);
-  ctx.fillRect(leftX + spanW, topY + chamferH, wingW, portalH - chamferH);
-
-  // 2. Interior Portal Inner Rim Shadow (leaving the roadway open to see into the tunnel)
-  ctx.fillStyle = TUNNEL_PORTAL_BLACK;
-  const shadowH = Math.max(1, Math.round(260 * ppu));
+  // 3. Interior Portal Inner Mouth Shadow (cavernous subterranean opening)
+  ctx.fillStyle = TUNNEL_PORTAL_BLACK; // #07050e
+  const shadowH = Math.max(2, Math.round(380 * ppu));
   ctx.fillRect(archLeftX, archTopY, archW, shadowH);
 
-  // 3. 45° Yellow/Black Safety Chevron Border around Arch Opening
+  // 4. Keisatsucho 45° Safety Chevrons around Arch Opening
   const chevronThick = Math.max(2, Math.round(340 * ppu));
   if (archW >= 24 && archH >= 12) {
-    ctx.fillStyle = TUNNEL_HAZARD_YELLOW;
-    // Top chevron band
+    ctx.fillStyle = TUNNEL_HAZARD_YELLOW; // #ffd166
     ctx.fillRect(archLeftX - chevronThick, archTopY - chevronThick, archW + chevronThick * 2, chevronThick);
-    // Left vertical chevron band
     ctx.fillRect(archLeftX - chevronThick, archTopY, chevronThick, archH);
-    // Right vertical chevron band
     ctx.fillRect(archRightX, archTopY, chevronThick, archH);
 
-    // Dark alternating diagonal stripes
-    ctx.fillStyle = TUNNEL_HAZARD_BLACK;
+    // Diagonal black hazard stripes
+    ctx.fillStyle = TUNNEL_HAZARD_BLACK; // #140f21
     const stripeCount = 10;
     const stripeStep = (archW + chevronThick * 2) / stripeCount;
     for (let s = 0; s < stripeCount; s += 2) {
       ctx.fillRect(Math.round(archLeftX - chevronThick + s * stripeStep), archTopY - chevronThick, Math.round(stripeStep * 0.5), chevronThick);
     }
+    const vSteps = Math.max(2, Math.floor(archH / Math.max(4, chevronThick * 2)));
+    const vStepH = archH / vSteps;
+    for (let v = 0; v < vSteps; v += 2) {
+      ctx.fillRect(archLeftX - chevronThick, Math.round(archTopY + v * vStepH), chevronThick, Math.round(vStepH * 0.5));
+      ctx.fillRect(archRightX, Math.round(archTopY + v * vStepH), chevronThick, Math.round(vStepH * 0.5));
+    }
   }
 
-  // 4. Overhead LED Message Board & Lane Control Indicators
+  // 5. Overhead Variable Message Sign (VMS) & Lane Indicators
   const signH = Math.max(3, Math.round(1100 * ppu));
   const signW = Math.max(14, Math.round(spanW * 0.45));
   const signX = Math.round(x - signW * 0.5);
@@ -1222,7 +1230,7 @@ function drawTunnelPortal(
     ctx.fillStyle = '#120d22';
     ctx.fillRect(signX, signY, signW, signH);
 
-    // Amber LED characters (速度落とせ / SLOW DOWN)
+    // Amber LED characters (関越 KANETSU / 速度落とせ SLOW DOWN)
     ctx.fillStyle = beatPulse > 0.5 ? '#ffe066' : '#ffaa00';
     const textH = Math.max(2, Math.round(signH * 0.45));
     ctx.fillRect(signX + 3, signY + 2, Math.max(2, Math.round(signW * 0.2)), textH);
@@ -1232,7 +1240,7 @@ function drawTunnelPortal(
     // Lane Green Down-Arrows (⬇ ⬇ ⬇)
     const arrowY = signY + textH + 2;
     if (signH >= 8) {
-      ctx.fillStyle = TUNNEL_LED_GREEN;
+      ctx.fillStyle = TUNNEL_LED_GREEN; // #00f59b
       for (let l = 0; l < 3; l++) {
         const lx = Math.round(signX + signW * (0.2 + l * 0.3));
         ctx.fillRect(lx, arrowY, 2, 2);
@@ -1249,33 +1257,46 @@ function drawTunnelFan(
   x: number,
   y: number,
   ppu: number,
+  beatPulse = 0,
 ): void {
   const fanW = Math.max(8, Math.round(1600 * ppu));
   const fanH = Math.max(5, Math.round(800 * ppu));
-  const suspendH = Math.max(14, Math.round(3800 * ppu));
-  const fanY = Math.round(y - suspendH);
+  // In RoadRenderer, ceiling is at y - wallH1 where wallH1 is round(w1 * 1.25)
+  // At roadWidth = 2000, w1 = ppu * 2000. So ceiling is at y - 2500 * ppu.
+  const ceilY = Math.round(y - 2500 * ppu);
+  const fanY = Math.round(y - 2000 * ppu);
   const fanX = Math.round(x - fanW * 0.5);
 
-  // Ceiling mounting brackets
-  const bracketH = Math.max(2, Math.round(600 * ppu));
+  // 1. Dual Heavy Steel Mounting Brackets connecting to ceiling
+  const bracketH = Math.max(2, fanY - ceilY);
   ctx.fillStyle = '#100c1e';
-  ctx.fillRect(fanX + Math.round(fanW * 0.2), fanY - bracketH, Math.max(1, Math.round(80 * ppu)), bracketH);
-  ctx.fillRect(fanX + Math.round(fanW * 0.8), fanY - bracketH, Math.max(1, Math.round(80 * ppu)), bracketH);
+  ctx.fillRect(fanX + Math.round(fanW * 0.18), ceilY, Math.max(1, Math.round(90 * ppu)), bracketH);
+  ctx.fillRect(fanX + Math.round(fanW * 0.82) - Math.max(1, Math.round(90 * ppu)), ceilY, Math.max(1, Math.round(90 * ppu)), bracketH);
 
-  // Cylindrical Housing
-  ctx.fillStyle = TUNNEL_FAN_STEEL;
+  // 2. Cylindrical Aerodynamic Housing
+  ctx.fillStyle = TUNNEL_FAN_STEEL; // #1e192c
   ctx.fillRect(fanX, fanY, fanW, fanH);
+  // Upper highlight rim
   ctx.fillStyle = '#2c2540';
   ctx.fillRect(fanX, fanY, fanW, Math.max(1, Math.round(fanH * 0.25)));
 
-  // Aerodynamic nose cone & grille
-  const hubR = Math.max(2, Math.round(fanH * 0.35));
-  ctx.fillStyle = TUNNEL_FAN_BLADE;
+  // Safety Hazard Bands on housing
+  ctx.fillStyle = '#ffd166';
+  ctx.fillRect(fanX + Math.round(fanW * 0.08), fanY, Math.max(1, Math.round(fanW * 0.08)), fanH);
+  ctx.fillRect(fanX + Math.round(fanW * 0.84), fanY, Math.max(1, Math.round(fanW * 0.08)), fanH);
+
+  // 3. Central Spinner Hub & Rotor Blades
+  const hubR = Math.max(2, Math.round(fanH * 0.42));
+  ctx.fillStyle = TUNNEL_FAN_BLADE; // #38324f
   ctx.fillRect(Math.round(x - hubR * 0.5), Math.round(fanY + fanH * 0.5 - hubR * 0.5), hubR, hubR);
 
-  // Amber status LED
-  ctx.fillStyle = '#ffaa00';
-  ctx.fillRect(fanX + 1, fanY + 1, 1, 1);
+  // Center spinner cone tip
+  ctx.fillStyle = '#5c5478';
+  ctx.fillRect(Math.round(x - hubR * 0.2), Math.round(fanY + fanH * 0.5 - hubR * 0.2), Math.max(1, Math.round(hubR * 0.4)), Math.max(1, Math.round(hubR * 0.4)));
+
+  // 4. Amber Hazard Warning LED (pulses with beat)
+  ctx.fillStyle = beatPulse > 0.4 ? '#ffe066' : '#ffaa00';
+  ctx.fillRect(fanX + 1, fanY + 1, Math.max(1, Math.round(200 * ppu)), Math.max(1, Math.round(200 * ppu)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1935,7 +1956,7 @@ export function drawProp(
       drawTunnelPortal(ctx, x, y, ppu, side, variant, beatPulse);
       break;
     case 'tunnel-fan':
-      drawTunnelFan(ctx, x, y, ppu);
+      drawTunnelFan(ctx, x, y, ppu, beatPulse);
       break;
     case 'vms':
       drawVMS(ctx, x, y, ppu, variant, beatPulse);

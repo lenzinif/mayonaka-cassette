@@ -169,4 +169,23 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     expect(text).not.toContain('GAME PAUSED');
     expect(text).not.toContain('RESUME DRIVE [P]');
   });
+  it('renders null when gameStarted is false, preventing premature in-game overlay and pause menu', () => {
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const snap = createMockSnapshot({ isPaused: true });
+    bridge.publish(() => snap);
+
+    const rawHtml = renderToString(
+      createElement(HUD, {
+        bridge,
+        gameStarted: false,
+        debugOpen: false,
+        onToggleDebug: vi.fn(),
+        onOpenTrackLoader: vi.fn(),
+        onOpenInspector: vi.fn(),
+        onRestartRun: vi.fn(),
+      }),
+    );
+
+    expect(rawHtml).toBe('');
+  });
 });

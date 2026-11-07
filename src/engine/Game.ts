@@ -43,6 +43,7 @@ import {
   getChosenForkHalfWidth,
   getForkCrossSection,
   type ForkCrossSection,
+  type RoadSegment,
   type Track,
 } from '@src/road/RoadSegment';
 import {
@@ -1001,29 +1002,52 @@ export class Game {
     this.view.forkChoice = forkZoneStartZ !== undefined ? this.forkChoice : undefined;
 
     const cameraSeg = findSegment(this.track, renderPos);
-    const isCameraInTunnel = cameraSeg ? cameraSeg.env === 'tunnel' : false;
+    const tunnelFactor = this.getTunnelTransitionFactor(cameraSeg);
 
-    if (isCameraInTunnel) {
-      ctx.fillStyle = '#080510';
-      ctx.fillRect(0, 0, width, height);
+    if (tunnelFactor <= 0) {
+      this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
+    } else if (tunnelFactor >= 1) {
+      this.background.renderTunnelVault(ctx, width, height, this.beatPulse);
     } else {
       this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse);
+      ctx.save();
+      ctx.globalAlpha = tunnelFactor;
+      this.background.renderTunnelVault(ctx, width, height, this.beatPulse);
+      ctx.restore();
     }
     this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic, this.beatPulse);
     drawPlayerCar(ctx, this.car, width, height);
-    if (!isCameraInTunnel) {
+    if (tunnelFactor < 0.6) {
       this.background.renderForegroundWeather(ctx, width, height);
     }
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
 
-    if (this.isPaused) {
+    if (this.isPaused && this.hasStartedDriving) {
       drawPauseOverlay(ctx, width, height);
     }
 
     const renderElapsed = performance.now() - t0;
     this.renderTimeMs = this.renderTimeMs * 0.85 + renderElapsed * 0.15;
   };
+
+  /**
+   * Calculates continuous tunnel transition factor (0.0 = open sky, 1.0 = subterranean vault).
+   * Provides zero-pop-in smooth ambient crossfade on tunnel entry and exit portals.
+   */
+  getTunnelTransitionFactor(cameraSeg?: RoadSegment): number {
+    if (!cameraSeg) return 0;
+    if (cameraSeg.env === 'tunnel') return 1;
+    if (cameraSeg.env === 'tunnel-entry') {
+      const entryStep = (cameraSeg.index % 4) + 1;
+      return Math.min(0.95, entryStep * 0.25);
+    }
+    if (cameraSeg.env === 'tunnel-exit') {
+      const exitStep = 3 - (cameraSeg.index % 4);
+      return Math.max(0.05, exitStep * 0.25);
+    }
+    return 0;
+  }
 
   getForkZoneStartZ(): number | undefined {
     if (!this.library.hasMultipleTracks || this.hasCustomTrack || !isSongTrack(this.track)) {

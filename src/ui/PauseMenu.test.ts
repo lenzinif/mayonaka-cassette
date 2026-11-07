@@ -103,4 +103,9 @@ describe('PauseMenu (UI Layer)', () => {
     expect(text).toContain(`BEST S · ${(54000).toLocaleString()}`);
     expect(text).toContain('LAST 00:42.15');
   });
+  it('renders return to main menu button when onReturnToMainMenu is provided', () => {
+    const onReturn = vi.fn();
+    const rawHtml = renderToString(PauseMenu({ ...defaultProps, onReturnToMainMenu: onReturn }));
+    expect(rawHtml).toContain('TITLE SCREEN // MAIN MENU');
+  });
 });
