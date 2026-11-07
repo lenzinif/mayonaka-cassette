@@ -1,3 +1,4 @@
+import { RENDER_HEIGHT, RENDER_WIDTH } from '@src/config/constants';
 import type { PropKind } from '@src/road/RoadSegment';
 import {
   computePlayerCarRearRig,
@@ -7,7 +8,7 @@ import {
 } from './PlayerCar';
 import type { CollisionEvent } from './TrafficAndProps';
 
-export type ParticleKind = 'smoke' | 'spark' | 'debris' | 'flame';
+export type ParticleKind = 'smoke' | 'spark' | 'debris';
 
 export interface Particle {
   active: boolean;
@@ -79,8 +80,6 @@ export class ParticleSystem {
     baseY: 334,
     leftTireX: 278,
     rightTireX: 362,
-    leftExhaustX: 294,
-    rightExhaustX: 346,
     spriteFrame: 0,
   };
 
@@ -267,11 +266,11 @@ export class ParticleSystem {
    */
   emitBoostOrShiftBurst(
     car: PlayerCar,
-    canvasWidth: number,
-    canvasHeight: number,
-    tier: 'PERFECT' | 'GOOD' | 'DRIFT_EXIT',
+    canvasWidth = RENDER_WIDTH,
+    canvasHeight = RENDER_HEIGHT,
+    _tier: 'PERFECT' | 'GOOD' | 'DRIFT_EXIT' = 'DRIFT_EXIT',
   ): void {
-    if (tier !== 'DRIFT_EXIT') return;
+    if (_tier !== 'DRIFT_EXIT') return;
     const rig = computePlayerCarRearRig(car, canvasWidth, canvasHeight, this.rearRigScratch);
     const carBaseY = rig.baseY;
 
@@ -372,11 +371,6 @@ export class ParticleSystem {
           ctx.fillStyle = p.secondaryColor;
           ctx.fillRect(px - 1, py - 1, 2, 2);
         }
-      } else if (p.kind === 'flame') {
-        const flameSize = Math.max(1, Math.round(p.size * (1 - t * 0.5)));
-        ctx.globalAlpha = Math.max(0, 1 - t * 0.85);
-        ctx.fillStyle = t < 0.35 ? p.secondaryColor : p.color;
-        ctx.fillRect(px - 1, py - 1, flameSize + 1, flameSize);
       } else if (p.kind === 'spark') {
         ctx.globalAlpha = Math.max(0, 1 - t * 0.75);
         // Pixel streak along velocity vector

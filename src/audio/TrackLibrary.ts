@@ -1,5 +1,10 @@
 import { isBeatMap, parseTitleArtistFromFilename, type BeatMap } from './BeatMap';
-import { BUNDLED_BEATMAPS } from './FunkAudioEngine';
+import {
+  BUNDLED_BEATMAPS,
+  BUNDLED_COASTAL_BEATMAP,
+  BUNDLED_WANGAN_BEATMAP,
+  DEFAULT_SYNTH_BEATMAP,
+} from './FunkAudioEngine';
 import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
 
 const IDB_NAME = 'mayonaka-cassette-audio';
@@ -59,6 +64,30 @@ export interface PlaylistItem {
   audioBuffer: AudioBuffer | null;
   isBundled: boolean;
 }
+
+export interface BundledBeatMapEntry {
+  id: string;
+  beatMapUrl: string;
+  fallback: BeatMap;
+}
+
+export const BUNDLED_BEATMAP_ENTRIES: readonly BundledBeatMapEntry[] = [
+  {
+    id: 'beatmap-neon-horizon',
+    beatMapUrl: 'audio/neon-horizon.beatmap.json',
+    fallback: DEFAULT_SYNTH_BEATMAP,
+  },
+  {
+    id: 'beatmap-midnight-wangan',
+    beatMapUrl: 'audio/midnight-wangan.beatmap.json',
+    fallback: BUNDLED_WANGAN_BEATMAP,
+  },
+  {
+    id: 'beatmap-melon-soda-sunset',
+    beatMapUrl: 'audio/melon-soda-sunset.beatmap.json',
+    fallback: BUNDLED_COASTAL_BEATMAP,
+  },
+] as const;
 
 export interface ImportProgress {
   completed: number;
@@ -120,6 +149,7 @@ export class TrackLibrary {
   private readonly bestScores = new Map<string, SongBestScore>();
   private readonly analyzer = new TrackAnalyzer();
   private readonly listeners = new Set<() => void>();
+  private readonly preloader?: { getJson<T = unknown>(id: string): T | null };
 
   private playlist: PlaylistItem[] = BUNDLED_BEATMAPS.map((beatMap) => ({
     id: beatMap.contentHash,
@@ -130,7 +160,8 @@ export class TrackLibrary {
   }));
   private activeIndex = 0;
 
-  constructor() {
+  constructor(preloader?: { getJson<T = unknown>(id: string): T | null }) {
+    this.preloader = preloader;
     this.loadBestScoresFromLocalStorage();
     void this.loadBestScoresFromIdb();
   }
@@ -255,6 +286,53 @@ export class TrackLibrary {
     }));
     this.activeIndex = 0;
     this.notify();
+  }
+
+  /**
+   * Loads bundled BeatMaps from preloader cache or companion JSON files, reusing
+   * preloaded assets when available and falling back to static bundled BeatMaps.
+   */
+  async loadBundledDefaults(): Promise<void> {
+    const updatedPlaylist: PlaylistItem[] = [];
+
+    for (const entry of BUNDLED_BEATMAP_ENTRIES) {
+      let beatMap: BeatMap | null = null;
+      if (this.preloader) {
+        const cached = this.preloader.getJson<BeatMap>(entry.id);
+        if (cached && isBeatMap(cached)) {
+          beatMap = cached;
+        }
+      }
+
+      if (!beatMap && typeof fetch !== 'undefined') {
+        try {
+          const res = await fetch(entry.beatMapUrl);
+          if (res.ok) {
+            const data: unknown = await res.json();
+            if (isBeatMap(data)) {
+              beatMap = data;
+            }
+          }
+        } catch {
+          // Fall back to built-in BeatMap
+        }
+      }
+
+      const finalBeatMap = beatMap ?? entry.fallback;
+      updatedPlaylist.push({
+        id: finalBeatMap.contentHash,
+        contentHash: finalBeatMap.contentHash,
+        beatMap: finalBeatMap,
+        audioBuffer: null,
+        isBundled: true,
+      });
+    }
+
+    if (updatedPlaylist.length > 0) {
+      this.playlist = updatedPlaylist;
+      this.activeIndex = Math.min(this.activeIndex, this.playlist.length - 1);
+      this.notify();
+    }
   }
 
   /**

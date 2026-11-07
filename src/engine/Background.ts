@@ -276,7 +276,6 @@ export class Background {
   // Layer 1: Mountain / distant ridge geometry
   private readonly ridgeHeights = new Float32Array(MOUNTAIN_POINTS);
   private readonly hillHeights = new Float32Array(MOUNTAIN_POINTS);
-  private readonly farRidgeHeights = new Float32Array(MOUNTAIN_POINTS);
 
   // Layer 1: Celestial starfield
   private readonly starX = new Float32Array(STAR_COUNT);
@@ -407,9 +406,6 @@ export class Background {
         hHill = 32 + Math.sin(u * Math.PI * 1.5) * 9 + Math.cos(u * Math.PI * 3.5) * 5;
       }
       this.hillHeights[i] = Math.max(0, hHill);
-
-      const hFar = Math.sin(t * 3 + 0.7) * 22 + Math.cos(t * 7 + 1.9) * 9 + 28;
-      this.farRidgeHeights[i] = Math.max(8, hFar);
     }
 
     // 2. Background Starfield

@@ -293,7 +293,7 @@ export function PauseMenu({
               <span className="font-bold text-cyan-300">WASD / ARROWS</span> Steer &amp; Gas
             </div>
             <div>
-              <span className="font-bold text-pink-400">S + STEER (OR C)</span> Drift
+              <span className="font-bold text-pink-400">S / DOWN + STEER</span> Drift
             </div>
             <div>
               <span className="font-bold text-emerald-300">SPACE / SHIFT</span> Shift Up / Down

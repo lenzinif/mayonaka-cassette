@@ -92,7 +92,7 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     tuning.bgRain = 0;
     tuning.bgBirds = 1;
     tuning.bgLightningOnBeat = 1;
-    tuning.bgConstellations = 0;
+
     tuning.bpmPulseStrength = 1.0;
   });
 

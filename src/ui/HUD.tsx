@@ -3,7 +3,7 @@ import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
 import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
 import type { GrooveTier } from '@src/entities/PlayerCar';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { CassetteTapeWidget } from './hud/CassetteTapeWidget';
 import { RhythmBezel } from './hud/RhythmBezel';
 import { VfdDigidash } from './hud/VfdDigidash';
@@ -20,6 +20,13 @@ export interface HUDProps {
   gameStarted?: boolean;
   onRestartRun?: () => void;
   onReturnToMainMenu?: () => void;
+  cleanHud?: boolean;
+  onToggleCleanHud?: () => void;
+  onTogglePause?: () => void;
+  onToggleAutoShift?: () => void;
+  onToggleTofuMode?: () => void;
+  onCycleSodaSkin?: () => void;
+  onToggleAutopilot?: () => void;
 }
 
 interface ToastState {
@@ -33,11 +40,6 @@ function formatLapTime(seconds: number): string {
   const secs = Math.floor(seconds % 60);
   const hundredths = Math.round((seconds * 100) % 100);
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
-}
-
-function triggerSyntheticKey(code: string): void {
-  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
-  window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
 }
 
 /**
@@ -60,13 +62,26 @@ export function HUD({
   onOpenInspector,
   onRestartRun,
   onReturnToMainMenu,
+  cleanHud,
+  onToggleCleanHud,
+  onTogglePause,
+  onToggleAutoShift,
+  onToggleTofuMode,
+  onCycleSodaSkin,
+  onToggleAutopilot,
 }: HUDProps) {
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot, bridge.getSnapshot);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [cleanHud, setCleanHud] = useState(false);
+  const [internalCleanHud, setInternalCleanHud] = useState(false);
   const [showPerfHud, setShowPerfHud] = useState(false);
   const [showCassetteDeck, setShowCassetteDeck] = useState(true);
   const [isTapeSlack, setIsTapeSlack] = useState(false);
+
+  const effectiveCleanHud = cleanHud ?? internalCleanHud;
+  const handleToggleCleanHud = useCallback(() => {
+    if (onToggleCleanHud) onToggleCleanHud();
+    else setInternalCleanHud((prev) => !prev);
+  }, [onToggleCleanHud]);
 
   // Keyboard shortcut listeners
   useEffect(() => {
@@ -76,7 +91,7 @@ export function HUD({
       }
       if (e.code === 'KeyH') {
         e.preventDefault();
-        setCleanHud((prev) => !prev);
+        handleToggleCleanHud();
       } else if (e.code === 'KeyC') {
         e.preventDefault();
         setShowCassetteDeck((prev) => !prev);
@@ -87,7 +102,7 @@ export function HUD({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [handleToggleCleanHud]);
 
   // Telemetry event listeners & tape slack triggers
   useEffect(() => {
@@ -283,7 +298,7 @@ export function HUD({
             playlistIndex={playlistIndex}
             playlistLength={playlistLength}
             isSlack={isTapeSlack}
-            visible={showCassetteDeck && !cleanHud}
+            visible={showCassetteDeck && !effectiveCleanHud}
             onToggleVisible={() => setShowCassetteDeck((prev) => !prev)}
           />
         </div>
@@ -317,24 +332,24 @@ export function HUD({
           <button
             type="button"
             onClick={(e) => {
-              setCleanHud((prev) => !prev);
+              handleToggleCleanHud();
               e.currentTarget.blur();
             }}
             className={`flex h-7 cursor-pointer items-center justify-center rounded border px-2 text-xs font-semibold tracking-wider transition ${
-              cleanHud
+              effectiveCleanHud
                 ? 'border-pink-500 bg-pink-950/90 text-pink-200'
                 : 'border-cyan-400/40 bg-[#090217]/85 text-cyan-200 hover:border-pink-400 hover:text-pink-200'
             }`}
             title="Modalità HUD essenziale [H]"
           >
-            {cleanHud ? 'FULL HUD [H]' : 'CLEAN [H]'}
+            {effectiveCleanHud ? 'FULL HUD [H]' : 'CLEAN [H]'}
           </button>
 
           {/* Pause Drive Button */}
           <button
             type="button"
             onClick={(e) => {
-              triggerSyntheticKey('KeyP');
+              onTogglePause?.();
               e.currentTarget.blur();
             }}
             className={`flex h-7 cursor-pointer items-center justify-center rounded border px-3 text-xs font-bold tracking-wider transition ${
@@ -470,7 +485,7 @@ export function HUD({
           isDrifting={isDrifting}
           driftTime={driftTime}
           isOffRoad={isOffRoad}
-          onToggleAutoShift={() => triggerSyntheticKey('KeyG')}
+          onToggleAutoShift={() => onToggleAutoShift?.()}
         />
       </div>
 
@@ -493,21 +508,21 @@ export function HUD({
         tofuMode={tofuMode}
         sodaSkin={sodaSkin}
         sodaSpills={sodaSpills}
-        cleanHud={cleanHud}
+        cleanHud={effectiveCleanHud}
         showPerfHud={showPerfHud}
         autoShift={autoShift}
         autopilotActive={snap?.autopilotActive ?? false}
-        onResume={() => triggerSyntheticKey('KeyP')}
+        onResume={() => onTogglePause?.()}
         onRestartRun={onRestartRun}
         onOpenTrackLoader={onOpenTrackLoader}
         onOpenInspector={onOpenInspector}
         onToggleDebug={onToggleDebug}
-        onToggleTofuMode={() => triggerSyntheticKey('KeyT')}
-        onCycleSodaSkin={() => triggerSyntheticKey('KeyV')}
-        onToggleCleanHud={() => setCleanHud((prev) => !prev)}
+        onToggleTofuMode={() => onToggleTofuMode?.()}
+        onCycleSodaSkin={() => onCycleSodaSkin?.()}
+        onToggleCleanHud={handleToggleCleanHud}
         onTogglePerfHud={() => setShowPerfHud((prev) => !prev)}
-        onToggleAutoShift={() => triggerSyntheticKey('KeyG')}
-        onToggleAutopilot={() => triggerSyntheticKey('F4')}
+        onToggleAutoShift={() => onToggleAutoShift?.()}
+        onToggleAutopilot={() => onToggleAutopilot?.()}
         onReturnToMainMenu={onReturnToMainMenu}
       />
     </div>

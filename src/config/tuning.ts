@@ -100,7 +100,6 @@ export const DEFAULT_TUNING = {
   bgBirds: 1,
   bgLightningOnBeat: 1,
   bgStars: 1,
-  bgConstellations: 0,
 } satisfies Record<string, number>;
 
 export type TuningKey = keyof typeof DEFAULT_TUNING;
@@ -170,15 +169,6 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 100,
     max: 500,
     step: 10,
-  },
-  {
-    group: 'Camera',
-    key: 'fogDensity',
-    label: 'Fog density',
-    hint: 'Intensità della foschia/sfumatura all’orizzonte',
-    min: 0,
-    max: 20,
-    step: 0.5,
   },
   {
     group: 'Camera',
@@ -579,6 +569,15 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
   },
   {
     group: 'Gearbox',
+    key: 'gear6MaxRatio',
+    label: '6th gear top ratio',
+    hint: 'Fine corsa 6ª marcia',
+    min: 0.85,
+    max: 1.15,
+    step: 0.01,
+  },
+  {
+    group: 'Gearbox',
     key: 'shiftPerfectMs',
     label: 'Perfect shift window',
     hint: 'Finestra temporale (±ms dal battito) per un cambio marcia PERFECT',
@@ -659,6 +658,24 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
   },
   {
     group: 'Groove',
+    key: 'grooveShiftGoodGain',
+    label: 'Good shift gain',
+    hint: 'Bonus Groove istantaneo su cambiata GOOD',
+    min: 0,
+    max: 20,
+    step: 0.5,
+  },
+  {
+    group: 'Groove',
+    key: 'grooveDropSyncGain',
+    label: 'Drop crest sync gain',
+    hint: 'Bonus Groove allo scollinamento sul drop',
+    min: 0,
+    max: 30,
+    step: 1,
+  },
+  {
+    group: 'Groove',
     key: 'grooveOffRoadDrainRate',
     label: 'Off-road groove drain',
     hint: 'Perdita di Groove al secondo quando si esce fuori strada',
@@ -722,6 +739,16 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0.4,
     max: 1.4,
     step: 0.05,
+  },
+  {
+    group: 'Tofu & Soda',
+    key: 'tofuSpillGroovePenaltyPct',
+    label: 'Spill Groove penalty',
+    unit: '%',
+    hint: 'Penalità Groove per ogni travaso in Tofu Mode',
+    min: 0,
+    max: 50,
+    step: 1,
   },
 
   {
@@ -793,15 +820,6 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     key: 'bgStars',
     label: 'Stars & shooting stars',
     hint: 'Stelle scintillanti e stelle cadenti nella volta celeste (1 = ON, 0 = OFF)',
-    min: 0,
-    max: 1,
-    step: 1,
-  },
-  {
-    group: 'Weather & Sky',
-    key: 'bgConstellations',
-    label: 'Constellations & meteors',
-    hint: 'Costellazioni geometriche pulsanti (1 = ON, 0 = OFF)',
     min: 0,
     max: 1,
     step: 1,

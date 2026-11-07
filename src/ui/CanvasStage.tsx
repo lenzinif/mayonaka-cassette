@@ -55,9 +55,6 @@ export function CanvasStage({
       loop.reset();
     };
 
-    const unlockOnGesture = () => {
-      void audio.unlock();
-    };
     const handleVisibilityChange = () => {
       if (document.hidden || document.visibilityState === 'hidden') {
         game.setPaused(true);
@@ -71,8 +68,6 @@ export function CanvasStage({
       }
     };
 
-    window.addEventListener('keydown', unlockOnGesture, { passive: true });
-    window.addEventListener('pointerdown', unlockOnGesture, { passive: true });
     document.addEventListener('visibilitychange', handleVisibilityChange);
     canvas.addEventListener('click', handleCanvasClick);
 
@@ -80,8 +75,6 @@ export function CanvasStage({
     return () => {
       loop.stop();
       humanInput.dispose();
-      window.removeEventListener('keydown', unlockOnGesture);
-      window.removeEventListener('pointerdown', unlockOnGesture);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       canvas.removeEventListener('click', handleCanvasClick);
     };

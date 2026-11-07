@@ -20,8 +20,8 @@ import { TrackLoader } from './ui/TrackLoader';
 export function App() {
   const [bridge] = useState(() => new TelemetryBridge<TelemetrySnapshot, GameEvent>(TELEMETRY_HZ));
   const [audio] = useState(() => new FunkAudioEngine());
-  const [library] = useState(() => new TrackLibrary());
   const [preloader] = useState(() => new AssetPreloader());
+  const [library] = useState(() => new TrackLibrary(preloader));
   const [preloadProgress, setPreloadProgress] = useState<PreloadProgress>(() => preloader.progress);
   const [preloadReady, setPreloadReady] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(() => audio.unlocked);
@@ -69,6 +69,7 @@ export function App() {
 
   // Audio unlock listener on first user gesture
   useEffect(() => {
+    if (audioUnlocked) return;
     const onGesture = () => {
       if (!audio.unlocked) {
         void audio.unlock().then(() => setAudioUnlocked(true));
@@ -80,7 +81,7 @@ export function App() {
       window.removeEventListener('keydown', onGesture);
       window.removeEventListener('pointerdown', onGesture);
     };
-  }, [audio]);
+  }, [audio, audioUnlocked]);
 
   const handleStartDrive = useCallback(() => {
     setGameStarted(true);
@@ -125,9 +126,10 @@ export function App() {
         setPreloadProgress({ ...p });
       })
       .then(() => {
+        void library.loadBundledDefaults();
         setPreloadReady(true);
       });
-  }, [preloader]);
+  }, [preloader, library]);
 
   useEffect(() => {
     return () => {
@@ -214,6 +216,13 @@ export function App() {
           gameStarted={gameStarted}
           trackLoaderOpen={trackLoaderOpen}
           inspectorOpen={inspectorOpen}
+          cleanHud={cleanHud}
+          onToggleCleanHud={() => setCleanHud((prev) => !prev)}
+          onTogglePause={() => gameRef.current?.togglePause()}
+          onToggleAutoShift={() => gameRef.current?.toggleAutoShift()}
+          onToggleTofuMode={() => gameRef.current?.toggleTofuMode()}
+          onCycleSodaSkin={() => gameRef.current?.cycleSodaSkin()}
+          onToggleAutopilot={() => gameRef.current?.toggleAutopilot()}
           onToggleDebug={() => setDebugOpen((prev) => !prev)}
           onOpenTrackLoader={() => {
             setIsInitialSelect(false);
@@ -231,6 +240,7 @@ export function App() {
             setIsInitialSelect(false);
             setTrackLoaderOpen(true);
           }}
+          onSelectForkBranch={(branch) => gameRef.current?.selectForkBranch(branch)}
         />
         <CRTOverlay enabled={crtEnabled} />
         <DebugPanel
@@ -277,18 +287,15 @@ export function App() {
             }}
             autoShift={autoShift}
             onToggleAutoShift={() => {
-              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyG', bubbles: true }));
-              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyG', bubbles: true }));
+              gameRef.current?.toggleAutoShift();
             }}
             tofuMode={tofuMode}
             onToggleTofuMode={() => {
-              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyT', bubbles: true }));
-              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyT', bubbles: true }));
+              gameRef.current?.toggleTofuMode();
             }}
             sodaSkin={sodaSkin}
             onCycleSodaSkin={() => {
-              window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyV', bubbles: true }));
-              window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyV', bubbles: true }));
+              gameRef.current?.cycleSodaSkin();
             }}
             cleanHud={cleanHud}
             onToggleCleanHud={() => setCleanHud((prev) => !prev)}

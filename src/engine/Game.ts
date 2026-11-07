@@ -19,7 +19,7 @@ import {
 import type { InputSource } from '@src/core/InputManager';
 import type { AssetPreloader } from '@src/core/AssetPreloader';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
-import type { GearNumber } from '@src/entities/Gearbox';
+import { Gearbox, type GearNumber } from '@src/entities/Gearbox';
 import { drawMelonSodaInset, MelonSoda, type SodaSkin } from '@src/entities/MelonSoda';
 import { ParticleSystem } from '@src/entities/Particles';
 import {
@@ -373,7 +373,7 @@ export class Game {
     this.input = options.input;
     this.bridge = options.bridge ?? new TelemetryBridge<TelemetrySnapshot, GameEvent>(TELEMETRY_HZ);
     this.audio = options.audio ?? new FunkAudioEngine();
-    this.library = options.library ?? new TrackLibrary();
+    this.library = options.library ?? new TrackLibrary(options.preloader);
     this.palette = options.palette ?? PALETTE_NIGHT_FUNK;
     this.hasCustomTrack = options.track !== undefined;
     this.activeRoadBeatMap = this.audio.beatMap;
@@ -389,6 +389,38 @@ export class Game {
 
   get isAutopilotActive(): boolean {
     return this.autopilot?.enabled ?? false;
+  }
+
+  get gearbox(): Gearbox {
+    return this.car.gearbox;
+  }
+
+  toggleTofuMode(): boolean {
+    const next = !this.melonSoda.active;
+    this.melonSoda.setActive(next);
+    if (next) this.stageTofuUsed = true;
+    this.bridge.emit({ type: 'tofuModeToggled', active: next });
+    this.bridge.publish(this.buildSnapshot);
+    return next;
+  }
+
+  cycleSodaSkin(): SodaSkin {
+    const nextSkin = this.melonSoda.cycleSkin();
+    this.bridge.emit({ type: 'sodaSkinChanged', skin: nextSkin });
+    this.bridge.publish(this.buildSnapshot);
+    return nextSkin;
+  }
+
+  toggleAutoShift(): boolean {
+    this.gearbox.autoShift = !this.gearbox.autoShift;
+    this.bridge.emit({ type: 'autoShiftToggled', enabled: this.gearbox.autoShift });
+    this.bridge.publish(this.buildSnapshot);
+    return this.gearbox.autoShift;
+  }
+
+  selectForkBranch(choice: 'left' | 'right'): void {
+    this.setForkManualChoice(choice);
+    this.bridge.publish(this.buildSnapshot);
   }
 
   toggleAutopilot(): boolean {
@@ -634,32 +666,21 @@ export class Game {
             if (shiftRes.rewardTier === 'PERFECT') {
               this.stagePerfectShifts++;
               this.stageScore += judgement.isDownbeat ? 500 : 350;
-              this.particles.emitBoostOrShiftBurst(
-                this.car,
-                RENDER_WIDTH,
-                RENDER_HEIGHT,
-                'PERFECT',
-              );
             } else if (shiftRes.rewardTier === 'GOOD') {
               this.stageGoodShifts++;
               this.stageScore += 150;
-              this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'GOOD');
             }
           }
         } else if (p.action === 'tofuMode') {
-          const active = this.melonSoda.toggle();
-          if (active) this.stageTofuUsed = true;
-          this.bridge.emit({ type: 'tofuModeToggled', active });
+          this.toggleTofuMode();
         } else if (p.action === 'cycleSodaSkin') {
-          const skin = this.melonSoda.cycleSkin();
-          this.bridge.emit({ type: 'sodaSkinChanged', skin });
+          this.cycleSodaSkin();
         } else if (p.action === 'autoShift') {
-          this.car.gearbox.autoShift = !this.car.gearbox.autoShift;
-          this.bridge.emit({ type: 'autoShiftToggled', enabled: this.car.gearbox.autoShift });
+          this.toggleAutoShift();
         } else if (p.action === 'forkLeft' && this.forkActive) {
-          this.setForkManualChoice('left');
+          this.selectForkBranch('left');
         } else if (p.action === 'forkRight' && this.forkActive) {
-          this.setForkManualChoice('right');
+          this.selectForkBranch('right');
         } else if (p.action === 'toggleAutopilot') {
           this.toggleAutopilot();
         }
@@ -1409,7 +1430,6 @@ export class Game {
           );
           this.audio.triggerFilterBlip(1.0);
           this.background.triggerLightningStrike();
-          this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'PERFECT');
           this.bridge.emit({
             type: 'dropSync',
             barIndex: dm.barIndex,

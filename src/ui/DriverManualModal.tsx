@@ -102,10 +102,10 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
             <div className="space-y-4">
               <div className="rounded border border-pink-500/40 bg-pink-950/20 p-3">
                 <div className="text-sm font-black tracking-wider text-pink-300 uppercase">
-                  ♪ The 4-Speed Beat-Shift Gearbox
+                  ♪ The 6-Speed Beat-Shift Gearbox
                 </div>
                 <p className="mt-1 text-xs text-pink-100/80">
-                  Your car has a 4-speed fake torque transmission. Unlike standard racers, shifting is a rhythm mechanic!
+                  Your car has a 6-speed fake torque transmission. Unlike standard racers, shifting is a rhythm mechanic!
                 </p>
               </div>
 
@@ -152,7 +152,7 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
                 <div className="flex gap-3 rounded border border-cyan-400/20 bg-[#13032b] p-3">
                   <div className="font-bold text-pink-400 w-24 shrink-0">ENTRY:</div>
                   <div className="text-cyan-100/80">
-                    While steering into a curve at high speed, tap <code className="text-pink-300">[SPACE]</code> or <code className="text-pink-300">[DOWN]</code>. The rear slides out and neon tire smoke erupts.
+                    While steering into a curve at high speed, hold <code className="text-pink-300">[S]</code> or <code className="text-pink-300">[DOWN]</code> while steering. The rear slides out and neon tire smoke erupts.
                   </div>
                 </div>
                 <div className="flex gap-3 rounded border border-cyan-400/20 bg-[#13032b] p-3">
@@ -228,10 +228,10 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
                 <div className="space-y-2 rounded border border-cyan-400/30 bg-[#12042b] p-3">
                   <div className="font-bold text-cyan-300 border-b border-cyan-400/20 pb-1">KEYBOARD MAPPINGS</div>
                   <div className="flex justify-between"><span>THROTTLE:</span><span className="text-pink-300">[W] / [UP]</span></div>
-                  <div className="flex justify-between"><span>BRAKE / REVERSE:</span><span className="text-pink-300">[S] / [DOWN]</span></div>
+                  <div className="flex justify-between"><span>BRAKE / DRIFT:</span><span className="text-pink-300">[S] / [DOWN]</span></div>
                   <div className="flex justify-between"><span>STEER LEFT / RIGHT:</span><span className="text-pink-300">[A] / [D]</span></div>
-                  <div className="flex justify-between"><span>DRIFT / HANDBRAKE:</span><span className="text-pink-300">[SPACE] / [SHIFT]</span></div>
-                  <div className="flex justify-between"><span>SHIFT UP / DOWN:</span><span className="text-pink-300">[E] / [Q]</span></div>
+                  <div className="flex justify-between"><span>SHIFT UP:</span><span className="text-pink-300">[SPACE] / [E]</span></div>
+                  <div className="flex justify-between"><span>SHIFT DOWN:</span><span className="text-pink-300">[SHIFT] / [Q]</span></div>
                   <div className="flex justify-between"><span>PAUSE / RESUME:</span><span className="text-pink-300">[P] / [ESC]</span></div>
                   <div className="flex justify-between"><span>AUTO-SHIFT ASSIST:</span><span className="text-pink-300">[G]</span></div>
                   <div className="flex justify-between"><span>TOFU MODE:</span><span className="text-pink-300">[T]</span></div>

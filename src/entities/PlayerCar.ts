@@ -27,8 +27,6 @@ export interface CarRearRig {
   baseY: number;
   leftTireX: number;
   rightTireX: number;
-  leftExhaustX: number;
-  rightExhaustX: number;
   spriteFrame: CarSpriteFrame;
 }
 
@@ -102,6 +100,12 @@ export class PlayerCar {
   x = 0;
   /** Previous step lateral offset for render interpolation. */
   prevX = 0;
+  /** Previous step visual yaw angle for render interpolation. */
+  prevYaw = 0;
+  /** Previous step visual pitch offset for render interpolation. */
+  prevPitch = 0;
+  /** Previous step bounce phase for render interpolation. */
+  prevBouncePhase = 0;
 
   /** Forward speed in world units per second. */
   speed = 0;
@@ -381,6 +385,9 @@ export class PlayerCar {
     forkBounds?: ForkCrossSection,
   ): void {
     this.prevX = this.x;
+    this.prevYaw = this.yaw;
+    this.prevPitch = this.pitch;
+    this.prevBouncePhase = this.bouncePhase;
     this.braking = controls.brake;
     this.roadOuterLimit = forkBounds ? forkBounds.outerLimit : 1;
     this.roadInnerGap = forkBounds ? forkBounds.innerGap : 0;
@@ -660,19 +667,18 @@ export function computePlayerCarRearRig(
   canvasWidth: number,
   canvasHeight: number,
   out: CarRearRig,
+  alpha = 1,
 ): CarRearRig {
-  const cx = Math.round(canvasWidth * 0.5 + car.yaw * 5);
+  const renderYaw = car.prevYaw + (car.yaw - car.prevYaw) * alpha;
+  const cx = Math.round(canvasWidth * 0.5 + renderYaw * 5);
   const baseY = Math.round(canvasHeight - 26);
-  const bank = Math.round(car.yaw * 6);
+  const bank = Math.round(renderYaw * 6);
   const tireShift = Math.round(bank * 0.2);
-  const exShift = Math.round(bank * 0.22);
 
   out.centerX = cx;
   out.baseY = baseY;
   out.leftTireX = cx - 30 + tireShift;
   out.rightTireX = cx + 30 + tireShift;
-  out.leftExhaustX = cx + 18 + exShift;
-  out.rightExhaustX = cx + 22 + exShift;
   out.spriteFrame = 0;
   return out;
 }
@@ -696,18 +702,22 @@ export function drawPlayerCar(
   car: PlayerCar,
   canvasWidth: number,
   canvasHeight: number,
+  alpha = 1,
 ): void {
-  const cx = Math.round(canvasWidth / 2 + car.yaw * 5);
+  const renderYaw = car.prevYaw + (car.yaw - car.prevYaw) * alpha;
+  const renderBouncePhase = car.prevBouncePhase + (car.bouncePhase - car.prevBouncePhase) * alpha;
+
+  const cx = Math.round(canvasWidth / 2 + renderYaw * 5);
   const baseY = Math.round(canvasHeight - 26);
 
   // Progressive banking / shear offset for authentic OutRun sprite stretch during steering:
   // Layers shift proportionally from bottom (tires ~0.2) to top (roof ~0.78)
-  const bank = Math.round(car.yaw * 6);
-  const treadPhase = Math.floor(car.bouncePhase * 2.5) & 1;
+  const bank = Math.round(renderYaw * 6);
+  const treadPhase = Math.floor(renderBouncePhase * 2.5) & 1;
 
   ctx.save();
   ctx.translate(cx, baseY);
-  ctx.rotate(car.yaw * 0.025);
+  ctx.rotate(renderYaw * 0.025);
 
   const halfW = 36;
   const roofHalfW = 30;
@@ -728,7 +738,7 @@ export function drawPlayerCar(
     const rightSmokeX = 30 + tireShift;
     ctx.fillStyle = car.isOffRoad ? 'rgba(180, 120, 210, 0.35)' : 'rgba(5, 217, 232, 0.38)';
     for (let i = 0; i < 4; i++) {
-      const phase = (car.bouncePhase * 0.7 + i * 1.7) % 4;
+      const phase = (renderBouncePhase * 0.7 + i * 1.7) % 4;
       const r = Math.round(3 + phase * 3);
       const ox = Math.round(smokeDir * (7 + phase * 8));
       const oy = Math.round(2 - phase * 2.5);

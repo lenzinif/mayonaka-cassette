@@ -24,7 +24,7 @@ export interface InputPressEvent {
  * Keyboard bindings:
  * - `Space` = Shift Up (`shiftUp`)
  * - `ShiftLeft` / `ShiftRight` = Shift Down (`shiftDown`)
- * - `KeyC` / `ControlLeft` = Drift hold (`drift`), plus OutRun-style Brake+Steer drift in `PlayerCar`
+ * - `ControlLeft` = Drift hold (`drift`), plus OutRun-style Brake+Steer drift in `PlayerCar`
  * - `KeyP` / `Escape` = Pause toggle (`pause`)
  * - `KeyE` / `KeyQ` removed per user feedback.
  */
@@ -40,7 +40,7 @@ const KEY_BINDINGS: Readonly<Record<string, Action>> = {
   Space: 'shiftUp',
   ShiftLeft: 'shiftDown',
   ShiftRight: 'shiftDown',
-  KeyC: 'drift',
+
   ControlLeft: 'drift',
   KeyT: 'tofuMode',
   KeyV: 'cycleSodaSkin',

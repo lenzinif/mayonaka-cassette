@@ -8,6 +8,7 @@ export interface RadioSelectorProps {
   library: TrackLibrary;
   onRestartRun: () => void;
   onOpenTrackLoader: () => void;
+  onSelectForkBranch?: (branch: 'left' | 'right') => void;
 }
 
 interface StageToastInfo {
@@ -29,11 +30,6 @@ const GRADE_BADGE_STYLES: Readonly<Record<RunGrade, string>> = {
   C: 'border-fuchsia-400/70 bg-fuchsia-950/85 text-fuchsia-200',
 };
 
-function triggerForkKey(code: 'Digit1' | 'Digit2'): void {
-  window.dispatchEvent(new KeyboardEvent('keydown', { code, bubbles: true }));
-  window.dispatchEvent(new KeyboardEvent('keyup', { code, bubbles: true }));
-}
-
 /**
  * M6 Stage Fork Radio Selector, Stage Title Toast & End-of-Run Grade Screen
  * (`AGENTS.md` §3 & §5 M6, `docs/DESIGN.md` §1 & §3).
@@ -43,6 +39,7 @@ export function RadioSelector({
   library,
   onRestartRun,
   onOpenTrackLoader,
+  onSelectForkBranch,
 }: RadioSelectorProps) {
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot);
   const [stageToast, setStageToast] = useState<StageToastInfo | null>(null);
@@ -124,7 +121,7 @@ export function RadioSelector({
               <button
                 type="button"
                 onClick={(e) => {
-                  triggerForkKey('Digit1');
+                  onSelectForkBranch?.('left');
                   e.currentTarget.blur();
                 }}
                 className={`cursor-pointer rounded border p-2.5 text-left transition ${
@@ -163,7 +160,7 @@ export function RadioSelector({
               <button
                 type="button"
                 onClick={(e) => {
-                  triggerForkKey('Digit2');
+                  onSelectForkBranch?.('right');
                   e.currentTarget.blur();
                 }}
                 className={`cursor-pointer rounded border p-2.5 text-left transition ${
