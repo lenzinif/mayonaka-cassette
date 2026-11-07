@@ -57,3 +57,17 @@ export function easeOut(a: number, b: number, t: number): number {
 export function easeInOut(a: number, b: number, t: number): number {
   return a + (b - a) * (-Math.cos(t * Math.PI) / 2 + 0.5);
 }
+
+export function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, value));
+}
+
+/** Hermite smoothstep `t^2 * (3 - 2t)` for `t` in `[0, 1]`. */
+export function smoothstep(t: number): number {
+  const u = Math.max(0, Math.min(1, t));
+  return u * u * (3 - 2 * u);
+}

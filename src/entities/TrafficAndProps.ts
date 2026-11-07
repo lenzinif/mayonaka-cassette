@@ -15,14 +15,20 @@ export interface KeiTruck {
   id: number;
   /** World Z position along the track `[0, track.length)`. */
   z: number;
+  /** Previous step world Z position for render interpolation. */
+  prevZ?: number;
   /** Default cruising lane offset (`-0.58`, `0`, `+0.58`). */
   baseLaneOffset: number;
   /** Current lateral offset in road half-widths (can exceed `±1` when knocked off-road). */
   laneOffset: number;
+  /** Previous step lateral offset for render interpolation. */
+  prevLaneOffset?: number;
   /** Lateral velocity in road half-widths/s (non-zero when knocked sideways). */
   lateralVel: number;
   /** Visual roll/yaw angle when shunted or careening off-road. */
   tiltAngle: number;
+  /** Previous step tilt angle for render interpolation. */
+  prevTiltAngle?: number;
   /** Recovery timer (seconds) after being knocked off-road. */
   knockedTimer: number;
   /** Forward speed as a fraction of `tuning.maxSpeed` (`0.36..0.54`). */
@@ -171,10 +177,13 @@ export class TrafficManager {
           this.trucks.push({
             id: truckId,
             z,
+            prevZ: z,
             baseLaneOffset: laneOffset,
             laneOffset,
+            prevLaneOffset: laneOffset,
             lateralVel: 0,
             tiltAngle: 0,
+            prevTiltAngle: 0,
             knockedTimer: 0,
             speedRatio,
             variant,
@@ -196,10 +205,13 @@ export class TrafficManager {
         this.trucks.push({
           id: truckId,
           z: segIdx * track.segmentLength,
+          prevZ: segIdx * track.segmentLength,
           baseLaneOffset: laneOffset,
           laneOffset,
+          prevLaneOffset: laneOffset,
           lateralVel: 0,
           tiltAngle: 0,
+          prevTiltAngle: 0,
           knockedTimer: 0,
           speedRatio: rng.range(0.38, 0.5),
           variant: rng.rangeInt(0, 2),
@@ -246,9 +258,11 @@ export class TrafficManager {
       if (isVisibleInSrc) {
         // Truck was visible on screen: preserve its relative distance to the player
         t.z = (t.z + deltaZ) % trackLen;
+        t.prevZ = t.z;
       } else if (t.z >= destStart && t.z < destEnd) {
         // Truck was not visible, but sits in the destination window: push it past the horizon
         t.z = (destEnd + (t.z - destStart) + 400) % trackLen;
+        t.prevZ = t.z;
       }
     }
 
@@ -280,6 +294,12 @@ export class TrafficManager {
     // When the player has not yet started driving (e.g. initial start, selecting music/skins,
     // or waiting at the starting grid), keep all AI traffic stationary and skip player collisions.
     if (!hasStartedDriving) {
+      for (let i = 0; i < this.trucks.length; i++) {
+        const t = this.trucks[i]!;
+        t.prevZ = t.z;
+        t.prevLaneOffset = t.laneOffset;
+        t.prevTiltAngle = t.tiltAngle;
+      }
       this.rebuildSpatialIndex(track);
       return;
     }
@@ -300,6 +320,9 @@ export class TrafficManager {
 
     for (let i = 0; i < this.trucks.length; i++) {
       const t = this.trucks[i]!;
+      t.prevZ = t.z;
+      t.prevLaneOffset = t.laneOffset;
+      t.prevTiltAngle = t.tiltAngle;
       const speedPenalty = t.knockedTimer > 0 && Math.abs(t.laneOffset) > 1 ? 0.65 : 1.0;
       t.z = (t.z + t.speedRatio * speedPenalty * maxSpeed * dt) % trackLen;
       if (t.z < 0) t.z += trackLen;
@@ -491,6 +514,7 @@ export class TrafficManager {
 
             // Truck jolts forward and wobbles slightly
             truck.z = (truck.z + segLen * 1.6) % trackLen;
+            truck.prevZ = truck.z;
             truck.lateralVel = -playerPushDir * 1.1;
             truck.tiltAngle = -playerPushDir * 0.2;
             truck.knockedTimer = 1.0;

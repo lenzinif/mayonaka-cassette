@@ -1,5 +1,7 @@
 import { SIM_STEP } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
+import { MAX_GEAR } from '@src/entities/Gearbox';
+import { computeCentrifugalPush, computeSteerAuthority } from '@src/entities/PlayerCar';
 import type { Action, InputPressEvent, InputSource } from './InputManager';
 
 export type AutopilotMode = 'perfect' | 'relaxed' | 'aggressive';
@@ -233,10 +235,8 @@ export class AutopilotDriver implements InputSource {
     // Blend current segment curve and upcoming lookahead curve
     const effectiveCurve = road.currentCurve * 0.65 + road.aheadCurve * 0.35;
     const speedRatio = car.speedRatio;
-    const gripFactor = car.isDrifting ? 1 - tuning.driftCentrifugalReduce : 1;
-    const centrifugalPush =
-      effectiveCurve * (speedRatio * speedRatio) * tuning.centrifugal * gripFactor;
-    const steerAuthority = Math.min(1, speedRatio * 1.35);
+    const centrifugalPush = computeCentrifugalPush(effectiveCurve, speedRatio, car.isDrifting);
+    const steerAuthority = computeSteerAuthority(speedRatio);
 
     const Kp = 3.2;
     const Kd = 0.25;
@@ -287,7 +287,7 @@ export class AutopilotDriver implements InputSource {
         const isFreshBeat = audio.nearestBeatIndex !== this.lastShiftBeatIndex;
 
         // Upshift condition: high RPM in gears 1..5
-        if (car.gear < 6 && car.rpm >= 0.74 && !car.isOffRoad) {
+        if (car.gear < MAX_GEAR && car.rpm >= 0.74 && !car.isOffRoad) {
           if (canShift && isFreshBeat) {
             this.pressQueue.push({ action: 'shiftUp', timeStamp: nowMs });
             this.lastShiftBeatIndex = audio.nearestBeatIndex;

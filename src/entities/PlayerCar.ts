@@ -88,6 +88,21 @@ export function evaluateGrooveTier(groove: number, currentTier: GrooveTier): Gro
   return TIER_ORDER[idx]!;
 }
 
+/** Computes speed-dependent steering authority in `[0, 1]`. */
+export function computeSteerAuthority(speedRatio: number): number {
+  return Math.min(1, speedRatio * 1.35);
+}
+
+/** Computes outward centrifugal lateral pull on a curve of given `curve` at `speedRatio`. */
+export function computeCentrifugalPush(
+  curve: number,
+  speedRatio: number,
+  isDrifting: boolean,
+): number {
+  const gripFactor = isDrifting ? 1 - tuning.driftCentrifugalReduce : 1;
+  return curve * (speedRatio * speedRatio) * tuning.centrifugal * gripFactor;
+}
+
 /**
  * Fake arcade car physics, 4-speed gearbox integration, and Groove meter math
  * (Design Pillar 1: Feel Over Simulation; Pillar 3: Protect the Flow State).
@@ -545,7 +560,7 @@ export class PlayerCar {
 
     // 4. Lateral movement: steering authority + centrifugal pull on curves.
     const turnInBonus = this.downshiftSpoolTimer > 0 ? 1.12 : 1.0;
-    const steerAuthority = Math.min(1, speedRatio * 1.35) * turnInBonus;
+    const steerAuthority = computeSteerAuthority(speedRatio) * turnInBonus;
     let lateralVel: number;
     if (this.driftDir !== 0) {
       const inward = this.driftDir * tuning.driftInwardSteer;
@@ -555,9 +570,11 @@ export class PlayerCar {
       lateralVel = this.steer * tuning.steerRate * steerAuthority;
     }
 
-    const gripFactor = this.driftDir !== 0 ? 1 - tuning.driftCentrifugalReduce : 1;
-    const centrifugalPush =
-      segmentCurve * (speedRatio * speedRatio) * tuning.centrifugal * gripFactor;
+    const centrifugalPush = computeCentrifugalPush(
+      segmentCurve,
+      speedRatio,
+      this.driftDir !== 0,
+    );
 
     const netLateralVel = lateralVel - centrifugalPush + this.bumpVx;
     this.x += netLateralVel * dt;

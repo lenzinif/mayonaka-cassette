@@ -46,6 +46,8 @@ export interface SodaMotionInput {
   speedRatio: number;
 }
 
+export type MelonSodaMotion = SodaMotionInput;
+
 /**
  * Multi-modal Dashboard Melon Cream Soda physics & Tofu Mode state machine
  * (AGENTS.md §3, §4.3, §4.9 & docs/DESIGN.md §5).
@@ -425,6 +427,25 @@ export class MelonSoda {
   }
 }
 
+const ICE_POSITIONS = [-8, 7] as const;
+
+function computeWaveYAt(
+  xNorm: number,
+  baseLevelY: number,
+  theta: number,
+  slopeScale: number,
+  crest: number,
+  threshold: number,
+  phase: number,
+): number {
+  const linearTilt = xNorm * theta * slopeScale;
+  const sWave = Math.sin(xNorm * Math.PI) * crest * (6.5 / threshold);
+  const ripple =
+    Math.sin(xNorm * 4.5 + phase * 3.2) *
+    Math.min(2.2, (Math.abs(theta) + Math.abs(crest)) * 2.5);
+  return baseLevelY - linearTilt - sWave + ripple;
+}
+
 /**
  * Renders the 120×80 px dashboard Melon Cream Soda inset at bottom-left of the `<canvas>`
  * ONLY when Tofu Mode (`soda.active`) is enabled (AGENTS.md §4.9, docs/DESIGN.md §5).
@@ -645,13 +666,6 @@ export function drawMelonSodaInset(
   // At `theta = threshold`, the wave edge reaches right up to the rim (`y = -22`)!
   const baseLevelY = -7 + heave * 0.85;
   const slopeScale = 14 / threshold;
-  const waveYAt = (xNorm: number): number => {
-    const linearTilt = xNorm * theta * slopeScale;
-    const sWave = Math.sin(xNorm * Math.PI) * crest * (6.5 / threshold);
-    const ripple =
-      Math.sin(xNorm * 4.5 + phase * 3.2) * Math.min(2.2, (Math.abs(theta) + Math.abs(crest)) * 2.5);
-    return baseLevelY - linearTilt - sWave + ripple;
-  };
 
   // Draw lower deep liquid gradient layer
   ctx.fillStyle = liquidDeepColor;
@@ -659,7 +673,7 @@ export function drawMelonSodaInset(
   ctx.moveTo(-22, 24);
   for (let s = 0; s <= 8; s++) {
     const xNorm = -1 + (s / 8) * 2;
-    ctx.lineTo(xNorm * 22, waveYAt(xNorm) + 4);
+    ctx.lineTo(xNorm * 22, computeWaveYAt(xNorm, baseLevelY, theta, slopeScale, crest, threshold, phase) + 4);
   }
   ctx.lineTo(22, 24);
   ctx.closePath();
@@ -671,7 +685,7 @@ export function drawMelonSodaInset(
   ctx.moveTo(-22, 10);
   for (let s = 0; s <= 12; s++) {
     const xNorm = -1 + (s / 12) * 2;
-    ctx.lineTo(xNorm * 22, waveYAt(xNorm));
+    ctx.lineTo(xNorm * 22, computeWaveYAt(xNorm, baseLevelY, theta, slopeScale, crest, threshold, phase));
   }
   ctx.lineTo(22, 10);
   ctx.closePath();
@@ -684,7 +698,7 @@ export function drawMelonSodaInset(
   for (let s = 0; s <= 12; s++) {
     const xNorm = -1 + (s / 12) * 2;
     const wx = xNorm * 22;
-    const wy = waveYAt(xNorm);
+    const wy = computeWaveYAt(xNorm, baseLevelY, theta, slopeScale, crest, threshold, phase);
     if (s === 0) ctx.moveTo(wx, wy);
     else ctx.lineTo(wx, wy);
   }
@@ -701,7 +715,7 @@ export function drawMelonSodaInset(
     ctx.fillStyle = '#e0fff0';
     for (let b = 0; b < 6; b++) {
       const bx = -11 + b * 4.4 + Math.sin(phase * 2 + b) * 1.2;
-      const topLimit = waveYAt(bx / 22) + 2;
+      const topLimit = computeWaveYAt(bx / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2;
       const by = 16 - ((phase * 14 + b * 6.5) % Math.max(4, 16 - topLimit));
       if (by > topLimit) {
         ctx.fillRect(Math.round(bx), Math.round(by), 2, 2);
@@ -709,10 +723,9 @@ export function drawMelonSodaInset(
     }
 
     // Two independent buoyant pixel-art ice cubes riding the local wave height
-    const icePositions = [-8, 7] as const;
-    for (let i = 0; i < icePositions.length; i++) {
-      const ix = Math.round(icePositions[i]! + floatTilt * 2.5);
-      const iy = Math.round(waveYAt(ix / 22) + 2);
+    for (let i = 0; i < ICE_POSITIONS.length; i++) {
+      const ix = Math.round(ICE_POSITIONS[i]! + floatTilt * 2.5);
+      const iy = Math.round(computeWaveYAt(ix / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2);
       ctx.save();
       ctx.translate(ix, iy);
       ctx.rotate(floatTilt * 0.4 + (i === 0 ? -0.12 : 0.15));
@@ -726,7 +739,7 @@ export function drawMelonSodaInset(
 
     // Buoyant pixel-art Vanilla Ice Cream Scoop + Maraschino Cherry bobbing & tilting on the wave
     const scoopX = Math.round(floatTilt * 3.8);
-    const scoopY = Math.round(waveYAt(scoopX / 22) + 1 + floatY * 0.35);
+    const scoopY = Math.round(computeWaveYAt(scoopX / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 1 + floatY * 0.35);
     ctx.save();
     ctx.translate(scoopX, scoopY);
     ctx.rotate(floatTilt * 0.55);
@@ -758,7 +771,7 @@ export function drawMelonSodaInset(
   } else if (soda.skin === 'tofu-cup') {
     // Subtle water surface specular glint in the Initial D paper cup
     const glintX = Math.round(floatTilt * 4);
-    const glintY = Math.round(waveYAt(glintX / 22) + 2);
+    const glintY = Math.round(computeWaveYAt(glintX / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(glintX - 5, glintY, 10, 1);
   }

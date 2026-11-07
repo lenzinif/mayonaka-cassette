@@ -1,3 +1,5 @@
+import { clamp01, smoothstep } from './RoadProjection';
+
 /**
  * A point on the road centre line. World coordinates are fixed at build time;
  * camera/screen fields are mutated in place every frame (zero allocations while rendering).
@@ -97,6 +99,21 @@ export function findSegment(track: Track, z: number): RoadSegment {
  *    (`0.0`) and full road width (`1.0`), while the unchosen branch curves away and fades out.
  *    At `t = 1.0` (finish line), the road is 100% centered with zero discontinuity or push.
  */
+/** End of Fork Phase 1 (pre-split widening zone `t in [0, 0.18]`). */
+export const FORK_WIDEN_END_T = 0.18;
+/** End of Fork Phase 2 (diverging carriageways `t in [0.18, 0.65]`; Phase 3 convergence is `[0.65, 1.0]`). */
+export const FORK_SPLIT_END_T = 0.65;
+/** Span of Fork Phase 2 (`0.65 - 0.18 = 0.47`). */
+export const FORK_SPLIT_SPAN_T = FORK_SPLIT_END_T - FORK_WIDEN_END_T;
+/** Span of Fork Phase 3 convergence (`1.0 - 0.65 = 0.35`). */
+export const FORK_CONVERGE_SPAN_T = 1 - FORK_SPLIT_END_T;
+/** Peak inner median V-island half-width at `t = FORK_SPLIT_END_T`. */
+export const FORK_PEAK_INNER_GAP = 0.52;
+/** Peak outer asphalt edge in road half-widths at `t = FORK_SPLIT_END_T` (`1.2 + 0.48 = 1.68`). */
+export const FORK_PEAK_OUTER_LIMIT = 1.68;
+/** Peak branch center X offset in road half-widths at `t = FORK_SPLIT_END_T` (`(1.68 + 0.52) / 2 = 1.10`). */
+export const FORK_PEAK_BRANCH_CENTER = 1.1;
+
 export interface ForkCrossSection {
   /** Normalized progress `[0, 1]` through the fork zone (`0` outside the fork). */
   t: number;
@@ -129,39 +146,33 @@ const DEFAULT_FORK_CROSS_SECTION: ForkCrossSection = {
  */
 export function getChosenForkCenter(t: number, choice: 'left' | 'right' = 'right'): number {
   const sign = choice === 'left' ? -1 : 1;
-  if (t <= 0.18) {
-    const p = t / 0.18;
-    const pEase = p * p * (3 - 2 * p);
+  if (t <= FORK_WIDEN_END_T) {
+    const pEase = smoothstep(t / FORK_WIDEN_END_T);
     return sign * (0.58 + (0.60 - 0.58) * pEase);
   }
-  if (t <= 0.65) {
-    const split = (t - 0.18) / (0.65 - 0.18);
-    const splitEase = split * split * (3 - 2 * split);
+  if (t <= FORK_SPLIT_END_T) {
+    const splitEase = smoothstep((t - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
     return sign * (0.60 + 0.50 * splitEase);
   }
   // Phase 3: Smooth convergence from ±1.10 down to 0.00 at finish line
-  const u = (t - 0.65) / 0.35;
-  const ease = u * u * (3 - 2 * u);
-  return sign * 1.1 * (1 - ease);
+  const ease = smoothstep((t - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
+  return sign * FORK_PEAK_BRANCH_CENTER * (1 - ease);
 }
 
 /**
  * Asphalt half-width of the chosen branch at fork progress `t`.
  */
 export function getChosenForkHalfWidth(t: number): number {
-  if (t <= 0.18) {
-    const p = t / 0.18;
-    const pEase = p * p * (3 - 2 * p);
+  if (t <= FORK_WIDEN_END_T) {
+    const pEase = smoothstep(t / FORK_WIDEN_END_T);
     return 0.58 + (0.60 - 0.58) * pEase;
   }
-  if (t <= 0.65) {
-    const split = (t - 0.18) / (0.65 - 0.18);
-    const splitEase = split * split * (3 - 2 * split);
+  if (t <= FORK_SPLIT_END_T) {
+    const splitEase = smoothstep((t - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
     return 0.60 - 0.02 * splitEase;
   }
   // Phase 3: Smoothly expands from 0.58 back to standard road half-width 1.00
-  const u = (t - 0.65) / 0.35;
-  const ease = u * u * (3 - 2 * u);
+  const ease = smoothstep((t - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
   return 0.58 + (1.0 - 0.58) * ease;
 }
 
@@ -193,11 +204,11 @@ export function getForkCrossSection(
   }
 
   const span = Math.max(1, trackLength - forkZoneStartZ);
-  const t = Math.max(0, Math.min(1, (worldZ - forkZoneStartZ) / span));
+  const t = clamp01((worldZ - forkZoneStartZ) / span);
   out.t = t;
 
-  if (t <= 0.18) {
-    const outerLimit = 1.0 + (t / 0.18) * 0.2;
+  if (t <= FORK_WIDEN_END_T) {
+    const outerLimit = 1.0 + (t / FORK_WIDEN_END_T) * 0.2;
     out.outerLimit = outerLimit;
     out.innerGap = 0;
     out.branchCenter = Math.abs(getChosenForkCenter(t, forkChoice));
@@ -207,10 +218,9 @@ export function getForkCrossSection(
     return out;
   }
 
-  if (t <= 0.65) {
-    const split = (t - 0.18) / (0.65 - 0.18);
-    const splitEase = split * split * (3 - 2 * split);
-    const innerGap = splitEase * 0.52;
+  if (t <= FORK_SPLIT_END_T) {
+    const splitEase = smoothstep((t - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
+    const innerGap = splitEase * FORK_PEAK_INNER_GAP;
     const outerLimit = 1.2 + splitEase * 0.48;
     const branchCenter = (outerLimit + innerGap) * 0.5;
 
@@ -230,12 +240,12 @@ export function getForkCrossSection(
   }
 
   // Phase 3: Smooth convergence
-  const u = (t - 0.65) / 0.35;
-  const ease = u * u * (3 - 2 * u);
+  const u = (t - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
+  const ease = smoothstep(u);
   const chosenCenter = getChosenForkCenter(t, forkChoice);
   const halfW = getChosenForkHalfWidth(t);
 
-  out.innerGap = 0.52 * (1 - ease);
+  out.innerGap = FORK_PEAK_INNER_GAP * (1 - ease);
   out.outerLimit = Math.max(1.0, Math.abs(chosenCenter) + halfW);
   out.branchCenter = Math.abs(chosenCenter);
   out.activeLeftEdge = chosenCenter - halfW;
@@ -266,18 +276,17 @@ export function getEffectivePropOffset(
     return baseOffset;
   }
   const span = Math.max(1, trackLength - forkZoneStartZ);
-  const t = Math.max(0, Math.min(1, (worldZ - forkZoneStartZ) / span));
+  const t = clamp01((worldZ - forkZoneStartZ) / span);
 
-  if (t <= 0.65) {
-    const split = t > 0.18 ? (t - 0.18) / (0.65 - 0.18) : 0;
-    const splitEase = split * split * (3 - 2 * split);
-    const outerShift = t <= 0.18 ? (t / 0.18) * 0.2 : 0.2 + splitEase * 0.48;
+  if (t <= FORK_SPLIT_END_T) {
+    const splitEase = t > FORK_WIDEN_END_T ? smoothstep((t - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T) : 0;
+    const outerShift = t <= FORK_WIDEN_END_T ? (t / FORK_WIDEN_END_T) * 0.2 : 0.2 + splitEase * 0.48;
     return baseOffset >= 0 ? baseOffset + outerShift : baseOffset - outerShift;
   }
 
   // Phase 3: Smooth convergence
-  const u = (t - 0.65) / 0.35;
-  const ease = u * u * (3 - 2 * u);
+  const u = (t - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
+  const ease = smoothstep(u);
   const isChosenSide =
     (forkChoice === 'right' && baseOffset >= 0) || (forkChoice === 'left' && baseOffset < 0);
 
@@ -331,7 +340,7 @@ export function getEffectiveTruckLaneOffset(
     return laneOffset;
   }
   const span = Math.max(1, trackLength - forkZoneStartZ);
-  const t = Math.max(0, Math.min(1, (worldZ - forkZoneStartZ) / span));
+  const t = clamp01((worldZ - forkZoneStartZ) / span);
 
   const branch: -1 | 1 = getTruckForkBranch(truckId, baseLaneOffset ?? laneOffset, forkBranch);
   const chosenSign: -1 | 1 = forkChoice === 'left' ? -1 : 1;
@@ -350,35 +359,33 @@ export function getEffectiveTruckLaneOffset(
 
   // Phase 1: Widening & approach zone (t in [0..0.18])
   // Smoothly diverge onto the chosen carriageway before the road physically splits!
-  if (t <= 0.18) {
-    const p = t / 0.18;
-    const pEase = p * p * (3 - 2 * p);
+  if (t <= FORK_WIDEN_END_T) {
+    const pEase = smoothstep(t / FORK_WIDEN_END_T);
     const targetSplitX = branch * 0.6 + branchLatOffset;
     return laneOffset + (targetSplitX - laneOffset) * pEase;
   }
 
   // Phase 2: Diverging Left & Right asphalt branches (t in [0.18..0.65])
   // Trucks drive centered on their chosen carriageway [-outerLimit, -innerGap] or [+innerGap, +outerLimit]
-  if (t <= 0.65) {
-    const split = (t - 0.18) / (0.65 - 0.18);
-    const splitEase = split * split * (3 - 2 * split);
+  if (t <= FORK_SPLIT_END_T) {
+    const splitEase = smoothstep((t - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
     const outerLimit = 1.2 + splitEase * 0.48;
-    const innerGap = splitEase * 0.52;
+    const innerGap = splitEase * FORK_PEAK_INNER_GAP;
     const branchCenter = (outerLimit + innerGap) * 0.5; // 0.60 at t=0.18 -> 1.10 at t=0.65
     return branch * branchCenter + branchLatOffset;
   }
 
   // Phase 3: Smooth convergence (t in [0.65..1.0])
-  const u = (t - 0.65) / 0.35;
-  const ease = u * u * (3 - 2 * u);
+  const u = (t - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
+  const ease = smoothstep(u);
 
   if (branch === chosenSign) {
     // Truck chose the same branch as the player: smoothly converges back to road center (0.0)
-    const cCenter = branch * 1.1 * (1 - ease);
+    const cCenter = branch * FORK_PEAK_BRANCH_CENTER * (1 - ease);
     return cCenter + branchLatOffset * (1 - ease);
   } else {
     // Truck chose the other branch: curves away outward with the unchosen branch
-    const unchosenCenter = branch * (1.1 + 0.5 * u);
+    const unchosenCenter = branch * (FORK_PEAK_BRANCH_CENTER + 0.5 * u);
     return unchosenCenter + branchLatOffset;
   }
 }

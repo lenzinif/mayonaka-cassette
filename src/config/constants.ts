@@ -27,3 +27,8 @@ export const TELEMETRY_HZ = 15;
 /** Application release version (aligned with package.json). */
 export const APP_VERSION = 'v0.2.0-alpha';
 
+/** Number of musical bars before the end of a track where the stage fork appears. */
+export const FORK_APPROACH_BARS = 6;
+
+/** Default DJ crossfade duration in musical bars when transitioning between stages. */
+export const DEFAULT_CROSSFADE_BARS = 4;

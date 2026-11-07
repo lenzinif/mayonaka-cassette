@@ -2,9 +2,15 @@ import { LANES, MAX_DRAW_DISTANCE } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
 import { drawKeiTruck, type TrafficManager } from '@src/entities/TrafficAndProps';
 import type { StagePalette } from './palette';
-import { interpolate, percentRemaining, project } from './RoadProjection';
+import { clamp01, interpolate, percentRemaining, project, smoothstep } from './RoadProjection';
 import {
   findSegment,
+  FORK_CONVERGE_SPAN_T,
+  FORK_PEAK_BRANCH_CENTER,
+  FORK_PEAK_INNER_GAP,
+  FORK_SPLIT_END_T,
+  FORK_SPLIT_SPAN_T,
+  FORK_WIDEN_END_T,
   getChosenForkCenter,
   getChosenForkHalfWidth,
   getEffectivePropOffset,
@@ -31,6 +37,8 @@ export interface RoadView {
   forkZoneStartZ?: number;
   /** Currently selected branch at the stage fork (`'left'` = loop, `'right'` = next track). */
   forkChoice?: 'left' | 'right';
+  /** Sub-frame interpolation factor in `[0, 1]` from `FixedStepper` (defaults to `1`). */
+  alpha?: number;
 }
 
 /**
@@ -75,6 +83,7 @@ export class RoadRenderer {
 
     const { segments, segmentLength, length: trackLength } = track;
     const { position, playerX, cameraDepth, roadWidth, width, height } = view;
+    const alpha = view.alpha ?? 1;
     const drawDistance = Math.min(
       Math.floor(view.drawDistance),
       MAX_DRAW_DISTANCE,
@@ -211,15 +220,37 @@ export class RoadRenderer {
         let tIdx = firstTruckIdx;
         while (tIdx !== -1) {
           const truck = traffic.trucks[tIdx]!;
-          const pct = percentRemaining(truck.z, segmentLength);
+          let prevTruckZ = truck.prevZ ?? truck.z;
+          if (truck.z < prevTruckZ && prevTruckZ - truck.z > trackLength * 0.5) {
+            prevTruckZ -= trackLength;
+          } else if (truck.z > prevTruckZ && truck.z - prevTruckZ > trackLength * 0.5) {
+            prevTruckZ += trackLength;
+          }
+          const renderTruckZ =
+            alpha >= 0.999
+              ? truck.z
+              : (((prevTruckZ + (truck.z - prevTruckZ) * alpha) % trackLength) + trackLength) % trackLength;
+          const renderLaneOffset =
+            truck.prevLaneOffset !== undefined
+              ? interpolate(truck.prevLaneOffset, truck.laneOffset, alpha)
+              : truck.laneOffset;
+          const renderTiltAngle =
+            truck.prevTiltAngle !== undefined
+              ? interpolate(truck.prevTiltAngle, truck.tiltAngle, alpha)
+              : truck.tiltAngle;
+
+          let relZ = renderTruckZ - seg.index * segmentLength;
+          if (relZ < -trackLength * 0.5) relZ += trackLength;
+          else if (relZ > trackLength * 0.5) relZ -= trackLength;
+          const pct = alpha >= 0.999 ? percentRemaining(truck.z, segmentLength) : relZ / segmentLength;
           const truckScreenY = interpolate(p1.screenY, p2.screenY, pct);
           const truckScale = interpolate(p1.scale, p2.scale, pct);
           const truckPpu = ((truckScale * width) / 2) * (roadWidth / 2000);
           if (truckScreenY - 1250 * truckPpu < segClipY) {
             const effectiveLaneOffset = getEffectiveTruckLaneOffset(
-              truck.laneOffset,
+              renderLaneOffset,
               truck.id,
-              truck.z,
+              renderTruckZ,
               trackLength,
               view.forkZoneStartZ,
               view.forkChoice,
@@ -234,16 +265,16 @@ export class RoadRenderer {
               let forkBranchAlpha = 1;
               if (
                 view.forkZoneStartZ !== undefined &&
-                truck.z > view.forkZoneStartZ &&
+                renderTruckZ > view.forkZoneStartZ &&
                 trackLength > view.forkZoneStartZ
               ) {
                 const forkSpan = Math.max(1, trackLength - view.forkZoneStartZ);
-                const forkT = (truck.z - view.forkZoneStartZ) / forkSpan;
-                if (forkT > 0.65) {
+                const forkT = (renderTruckZ - view.forkZoneStartZ) / forkSpan;
+                if (forkT > FORK_SPLIT_END_T) {
                   const branch = getTruckForkBranch(truck.id, truck.baseLaneOffset, truck.forkBranch);
                   const chosenSign = (view.forkChoice ?? 'right') === 'left' ? -1 : 1;
                   if (branch !== chosenSign) {
-                    const u = (forkT - 0.65) / 0.35;
+                    const u = (forkT - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
                     forkBranchAlpha = Math.max(0, 1 - u * 1.4);
                   }
                 }
@@ -262,7 +293,7 @@ export class RoadRenderer {
                   truckScreenY,
                   truckPpu,
                   truck.variant,
-                  truck.tiltAngle,
+                  renderTiltAngle,
                   truck.knockedTimer > 0,
                   truckRoadCurve,
                 );
@@ -318,213 +349,22 @@ export class RoadRenderer {
 
     // OutRun physical Y-fork geometry in the final outro segments when forkZoneStartZ is active
     if (forkZoneStartZ !== undefined && p2.worldZ > forkZoneStartZ && trackLength > forkZoneStartZ) {
-      const span = Math.max(1, trackLength - forkZoneStartZ);
-      const t1 = Math.max(0, Math.min(1, (p1.worldZ - forkZoneStartZ) / span));
-      const t2 = Math.max(0, Math.min(1, (p2.worldZ - forkZoneStartZ) / span));
-      const choice: 'left' | 'right' = forkChoice ?? 'right';
-
-      if (t2 <= 0.18) {
-        // Phase 1: Pre-split widening zone with center chevron warning gore
-        const p1 = t1 / 0.18;
-        const p2 = t2 / 0.18;
-        const pEase1 = p1 * p1 * (3 - 2 * p1);
-        const pEase2 = p2 * p2 * (3 - 2 * p2);
-
-        const outerW1 = w1 * (1 + pEase1 * 0.2);
-        const outerW2 = w2 * (1 + pEase2 * 0.2);
-
-        // Outer rumble strips (batched pair)
-        ctx.fillStyle = palette.rumble[stripe];
-        drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
-
-        // Asphalt road surface
-        ctx.fillStyle = palette.road[stripe];
-        polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
-
-        // Central median gore chevron / triangle (widens smoothly from width 0 at t=0 to ir at t=0.18)
-        const ir1 = r1 * 0.7;
-        const ir2 = r2 * 0.7;
-        const c1 = ir1 * pEase1;
-        const c2 = ir2 * pEase2;
-        if (c2 > 0.5) {
-          ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
-          polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
-        }
-
-        // Continuous lane lines (seamlessly diverging from ±1/3 normal road into ±0.60 branch centers)
-        if (stripe === 0 && w1 >= 6) {
-          const l1 = Math.max(1, w1 / 32);
-          const l2 = Math.max(1, w2 / 32);
-          const leftLine1 = x1 - (1 / 3 + (0.60 - 1 / 3) * pEase1) * w1;
-          const leftLine2 = x2 - (1 / 3 + (0.60 - 1 / 3) * pEase2) * w2;
-          const rightLine1 = x1 + (1 / 3 + (0.60 - 1 / 3) * pEase1) * w1;
-          const rightLine2 = x2 + (1 / 3 + (0.60 - 1 / 3) * pEase2) * w2;
-
-          ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
-          polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
-
-          ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
-          polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
-        }
-      } else if (t2 <= 0.65) {
-        // Phase 2: Diverging Left & Right asphalt branches with a central V-chevron median island
-        const split1 = Math.max(0, (t1 - 0.18) / (0.65 - 0.18));
-        const split2 = Math.max(0, (t2 - 0.18) / (0.65 - 0.18));
-        const splitEase1 = split1 * split1 * (3 - 2 * split1);
-        const splitEase2 = split2 * split2 * (3 - 2 * split2);
-
-        const outerW1 = w1 * (1.2 + splitEase1 * 0.48);
-        const outerW2 = w2 * (1.2 + splitEase2 * 0.48);
-        const gap1 = w1 * splitEase1 * 0.52;
-        const gap2 = w2 * splitEase2 * 0.52;
-
-        // Outer rumble strips (batched pair)
-        ctx.fillStyle = palette.rumble[stripe];
-        drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
-
-        // Left branch asphalt
-        ctx.fillStyle =
-          choice === 'left'
-            ? stripe === 0
-              ? '#392858'
-              : '#31214c'
-            : palette.road[stripe];
-        polygon(ctx, x1 - outerW1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - outerW2, y2);
-
-        // Right branch asphalt
-        ctx.fillStyle =
-          choice === 'right'
-            ? stripe === 0
-              ? '#392858'
-              : '#31214c'
-            : palette.road[stripe];
-        polygon(ctx, x1 + gap1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + gap2, y2);
-
-        // Inner median V-curbs
-        const ir1 = r1 * 0.7;
-        const ir2 = r2 * 0.7;
-        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
-        polygon(ctx, x1 - gap1 - ir1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - gap2 - ir2, y2);
-
-        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
-        polygon(ctx, x1 + gap1, y1, x1 + gap1 + ir1, y1, x2 + gap2 + ir2, y2, x2 + gap2, y2);
-
-        // Center guide lines down each branch (from ±0.60 at t=0.18 to ±1.10 at t=0.65)
-        if (stripe === 0 && w1 >= 6) {
-          const l1 = Math.max(1, w1 / 32);
-          const l2 = Math.max(1, w2 / 32);
-          const leftMid1 = x1 - (outerW1 + gap1) * 0.5;
-          const leftMid2 = x2 - (outerW2 + gap2) * 0.5;
-          const rightMid1 = x1 + (outerW1 + gap1) * 0.5;
-          const rightMid2 = x2 + (outerW2 + gap2) * 0.5;
-
-          ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
-          polygon(ctx, leftMid1 - l1, y1, leftMid1 + l1, y1, leftMid2 + l2, y2, leftMid2 - l2, y2);
-
-          ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
-          polygon(ctx, rightMid1 - l1, y1, rightMid1 + l1, y1, rightMid2 + l2, y2, rightMid2 - l2, y2);
-        }
-      } else {
-        // Phase 3: Seamless convergence of the chosen branch back to the center road!
-        const cCenter1 = getChosenForkCenter(t1, choice) * w1;
-        const cCenter2 = getChosenForkCenter(t2, choice) * w2;
-        const cHalfW1 = getChosenForkHalfWidth(t1) * w1;
-        const cHalfW2 = getChosenForkHalfWidth(t2) * w2;
-
-        const cLeft1 = x1 + cCenter1 - cHalfW1;
-        const cRight1 = x1 + cCenter1 + cHalfW1;
-        const cLeft2 = x2 + cCenter2 - cHalfW2;
-        const cRight2 = x2 + cCenter2 + cHalfW2;
-
-        // Chosen branch outer rumble strips (batched pair)
-        ctx.fillStyle = palette.rumble[stripe];
-        drawRumblePairSplit(ctx, cLeft1, cRight1, y1, cLeft2, cRight2, y2, r1, r2);
-
-        // Chosen branch asphalt
-        ctx.fillStyle = stripe === 0 ? '#392858' : '#31214c';
-        polygon(ctx, cLeft1, y1, cRight1, y1, cRight2, y2, cLeft2, y2);
-
-        // Seamless lane lines converging into standard 3-lane highway dividers (±1/3)
-        if (stripe === 0 && w1 >= 6) {
-          const l1 = Math.max(1, w1 / 32);
-          const l2 = Math.max(1, w2 / 32);
-
-          const u1 = Math.max(0, Math.min(1, (t1 - 0.65) / 0.35));
-          const u2 = Math.max(0, Math.min(1, (t2 - 0.65) / 0.35));
-          const ease1 = u1 * u1 * (3 - 2 * u1);
-          const ease2 = u2 * u2 * (3 - 2 * u2);
-
-          if (choice === 'right') {
-            // Right branch lane line: smoothly converges from +1.10 to +1/3 (the right lane divider of normal road!)
-            const rightLine1 = x1 + (1.10 * (1 - ease1) + (1 / 3) * ease1) * w1;
-            const rightLine2 = x2 + (1.10 * (1 - ease2) + (1 / 3) * ease2) * w2;
-            ctx.fillStyle = ease1 < 0.85 ? '#ffd319' : palette.lane;
-            polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
-
-            // Left highway divider (-1/3) smoothly emerges as road widens past the median
-            const leftLine1 = x1 - (1 / 3) * w1;
-            const leftLine2 = x2 - (1 / 3) * w2;
-            if (leftLine1 > cLeft1 + l1 * 2) {
-              const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
-              ctx.save();
-              ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
-              ctx.fillStyle = palette.lane;
-              polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
-              ctx.restore();
-            }
-          } else {
-            // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
-            const leftLine1 = x1 - (1.10 * (1 - ease1) + (1 / 3) * ease1) * w1;
-            const leftLine2 = x2 - (1.10 * (1 - ease2) + (1 / 3) * ease2) * w2;
-            ctx.fillStyle = ease1 < 0.85 ? '#05d9e8' : palette.lane;
-            polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
-
-            // Right highway divider (+1/3) smoothly emerges as road widens past the median
-            const rightLine1 = x1 + (1 / 3) * w1;
-            const rightLine2 = x2 + (1 / 3) * w2;
-            if (rightLine1 < cRight1 - l1 * 2) {
-              const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
-              ctx.save();
-              ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
-              ctx.fillStyle = palette.lane;
-              polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
-              ctx.restore();
-            }
-          }
-        }
-
-        // Unchosen branch curves outward and fades away into distance
-        const u2 = (t2 - 0.65) / 0.35;
-        const unchosenAlpha = Math.max(0, 1 - u2 * 1.4);
-        if (unchosenAlpha > 0.02) {
-          ctx.save();
-          ctx.globalAlpha = unchosenAlpha;
-          const uSign = choice === 'left' ? 1 : -1;
-          const u1 = Math.max(0, (t1 - 0.65) / 0.35);
-          const e1 = u1 * u1 * (3 - 2 * u1);
-          const e2 = u2 * u2 * (3 - 2 * u2);
-
-          const uCenter1 = uSign * (1.1 + 0.35 * e1) * w1;
-          const uCenter2 = uSign * (1.1 + 0.35 * e2) * w2;
-          const uHalfW1 = 0.58 * (1 - 0.2 * e1) * w1;
-          const uHalfW2 = 0.58 * (1 - 0.2 * e2) * w2;
-
-          const uLeft1 = x1 + uCenter1 - uHalfW1;
-          const uRight1 = x1 + uCenter1 + uHalfW1;
-          const uLeft2 = x2 + uCenter2 - uHalfW2;
-          const uRight2 = x2 + uCenter2 + uHalfW2;
-
-          ctx.fillStyle = palette.rumble[stripe];
-          polygon(ctx, uLeft1 - r1, y1, uLeft1, y1, uLeft2, y2, uLeft2 - r2, y2);
-          polygon(ctx, uRight1, y1, uRight1 + r1, y1, uRight2 + r2, y2, uRight2, y2);
-
-          ctx.fillStyle = palette.road[stripe];
-          polygon(ctx, uLeft1, y1, uRight1, y1, uRight2, y2, uLeft2, y2);
-          ctx.restore();
-        }
-      }
-
-
+      this.renderForkSegment(
+        ctx,
+        seg,
+        palette,
+        x1,
+        y1,
+        w1,
+        r1,
+        x2,
+        y2,
+        w2,
+        r2,
+        forkZoneStartZ,
+        trackLength,
+        forkChoice ?? 'right',
+      );
       return;
     }
 
@@ -540,55 +380,294 @@ export class RoadRenderer {
     }
 
     if (isBridge && w1 >= 14) {
-      const parH1 = Math.max(2, Math.round(w1 * 0.16));
-      const parH2 = Math.max(1, Math.round(w2 * 0.16));
+      this.renderBridgeParapets(ctx, seg, x1, y1, w1, r1, x2, y2, w2, r2);
+    }
+  }
 
-      // Continuous steel bridge parapets (Left & Right batched in 1 path)
-      ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
-      ctx.beginPath();
-      ctx.moveTo(x1 - w1 - r1, y1);
-      ctx.lineTo(x1 - w1 - r1, y1 - parH1);
-      ctx.lineTo(x2 - w2 - r2, y2 - parH2);
-      ctx.lineTo(x2 - w2 - r2, y2);
-      ctx.closePath();
-      ctx.moveTo(x1 + w1 + r1, y1);
-      ctx.lineTo(x1 + w1 + r1, y1 - parH1);
-      ctx.lineTo(x2 + w2 + r2, y2 - parH2);
-      ctx.lineTo(x2 + w2 + r2, y2);
-      ctx.closePath();
-      ctx.fill();
+  private renderForkSegment(
+    ctx: CanvasRenderingContext2D,
+    seg: RoadSegment,
+    palette: StagePalette,
+    x1: number,
+    y1: number,
+    w1: number,
+    r1: number,
+    x2: number,
+    y2: number,
+    w2: number,
+    r2: number,
+    forkZoneStartZ: number,
+    trackLength: number,
+    choice: 'left' | 'right',
+  ): void {
+    const { p1, p2, stripe } = seg;
+    const span = Math.max(1, trackLength - forkZoneStartZ);
+    const t1 = clamp01((p1.worldZ - forkZoneStartZ) / span);
+    const t2 = clamp01((p2.worldZ - forkZoneStartZ) / span);
 
-      // Top chrome rails & catadioptres (LOD: closer segments w1 >= 28)
-      if (w1 >= 28) {
-        ctx.fillStyle = '#9e95be';
-        ctx.beginPath();
-        ctx.moveTo(x1 - w1 - r1, y1 - parH1);
-        ctx.lineTo(x1 - w1 - r1 + 1, y1 - parH1);
-        ctx.lineTo(x2 - w2 - r2 + 1, y2 - parH2);
-        ctx.lineTo(x2 - w2 - r2, y2 - parH2);
-        ctx.closePath();
-        ctx.moveTo(x1 + w1 + r1, y1 - parH1);
-        ctx.lineTo(x1 + w1 + r1 - 1, y1 - parH1);
-        ctx.lineTo(x2 + w2 + r2 - 1, y2 - parH2);
-        ctx.lineTo(x2 + w2 + r2, y2 - parH2);
-        ctx.closePath();
-        ctx.fill();
+    if (t2 <= FORK_WIDEN_END_T) {
+      // Phase 1: Pre-split widening zone with center chevron warning gore
+      const p1Norm = t1 / FORK_WIDEN_END_T;
+      const p2Norm = t2 / FORK_WIDEN_END_T;
+      const pEase1 = smoothstep(p1Norm);
+      const pEase2 = smoothstep(p2Norm);
 
-        if (stripe === 0) {
-          ctx.fillStyle = seg.index % 4 === 0 ? '#00f5d4' : '#ff9e24';
-          const reflSize = Math.max(1, Math.round(parH1 * 0.35));
-          ctx.fillRect(Math.round(x1 - w1 - r1 + 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
-          ctx.fillRect(Math.round(x1 + w1 + r1 - reflSize - 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+      const outerW1 = w1 * (1 + pEase1 * 0.2);
+      const outerW2 = w2 * (1 + pEase2 * 0.2);
+
+      // Outer rumble strips (batched pair)
+      ctx.fillStyle = palette.rumble[stripe];
+      drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
+
+      // Asphalt road surface
+      ctx.fillStyle = palette.road[stripe];
+      polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
+
+      // Central median gore chevron / triangle (widens smoothly from width 0 at t=0 to ir at t=0.18)
+      const ir1 = r1 * 0.7;
+      const ir2 = r2 * 0.7;
+      const c1 = ir1 * pEase1;
+      const c2 = ir2 * pEase2;
+      if (c2 > 0.5) {
+        ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
+        polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
+      }
+
+      // Continuous lane lines (seamlessly diverging from ±1/3 normal road into ±0.60 branch centers)
+      if (stripe === 0 && w1 >= 6) {
+        const l1 = Math.max(1, w1 / 32);
+        const l2 = Math.max(1, w2 / 32);
+        const leftLine1 = x1 - (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
+        const leftLine2 = x2 - (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
+        const rightLine1 = x1 + (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
+        const rightLine2 = x2 + (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
+
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
+        polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
+        polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+      }
+    } else if (t2 <= FORK_SPLIT_END_T) {
+      // Phase 2: Diverging Left & Right asphalt branches with a central V-chevron median island
+      const split1 = Math.max(0, (t1 - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
+      const split2 = Math.max(0, (t2 - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
+      const splitEase1 = smoothstep(split1);
+      const splitEase2 = smoothstep(split2);
+
+      const outerW1 = w1 * (1.2 + splitEase1 * 0.48);
+      const outerW2 = w2 * (1.2 + splitEase2 * 0.48);
+      const gap1 = w1 * splitEase1 * FORK_PEAK_INNER_GAP;
+      const gap2 = w2 * splitEase2 * FORK_PEAK_INNER_GAP;
+
+      // Outer rumble strips (batched pair)
+      ctx.fillStyle = palette.rumble[stripe];
+      drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
+
+      // Left branch asphalt
+      ctx.fillStyle =
+        choice === 'left'
+          ? stripe === 0
+            ? '#392858'
+            : '#31214c'
+          : palette.road[stripe];
+      polygon(ctx, x1 - outerW1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - outerW2, y2);
+
+      // Right branch asphalt
+      ctx.fillStyle =
+        choice === 'right'
+          ? stripe === 0
+            ? '#392858'
+            : '#31214c'
+          : palette.road[stripe];
+      polygon(ctx, x1 + gap1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + gap2, y2);
+
+      // Inner median V-curbs
+      const ir1 = r1 * 0.7;
+      const ir2 = r2 * 0.7;
+      ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
+      polygon(ctx, x1 - gap1 - ir1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - gap2 - ir2, y2);
+
+      ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
+      polygon(ctx, x1 + gap1, y1, x1 + gap1 + ir1, y1, x2 + gap2 + ir2, y2, x2 + gap2, y2);
+
+      // Center guide lines down each branch (from ±0.60 at t=0.18 to ±1.10 at t=0.65)
+      if (stripe === 0 && w1 >= 6) {
+        const l1 = Math.max(1, w1 / 32);
+        const l2 = Math.max(1, w2 / 32);
+        const leftMid1 = x1 - (outerW1 + gap1) * 0.5;
+        const leftMid2 = x2 - (outerW2 + gap2) * 0.5;
+        const rightMid1 = x1 + (outerW1 + gap1) * 0.5;
+        const rightMid2 = x2 + (outerW2 + gap2) * 0.5;
+
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
+        polygon(ctx, leftMid1 - l1, y1, leftMid1 + l1, y1, leftMid2 + l2, y2, leftMid2 - l2, y2);
+
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
+        polygon(ctx, rightMid1 - l1, y1, rightMid1 + l1, y1, rightMid2 + l2, y2, rightMid2 - l2, y2);
+      }
+    } else {
+      // Phase 3: Seamless convergence of the chosen branch back to the center road!
+      const cCenter1 = getChosenForkCenter(t1, choice) * w1;
+      const cCenter2 = getChosenForkCenter(t2, choice) * w2;
+      const cHalfW1 = getChosenForkHalfWidth(t1) * w1;
+      const cHalfW2 = getChosenForkHalfWidth(t2) * w2;
+
+      const cLeft1 = x1 + cCenter1 - cHalfW1;
+      const cRight1 = x1 + cCenter1 + cHalfW1;
+      const cLeft2 = x2 + cCenter2 - cHalfW2;
+      const cRight2 = x2 + cCenter2 + cHalfW2;
+
+      // Chosen branch outer rumble strips (batched pair)
+      ctx.fillStyle = palette.rumble[stripe];
+      drawRumblePairSplit(ctx, cLeft1, cRight1, y1, cLeft2, cRight2, y2, r1, r2);
+
+      // Chosen branch asphalt
+      ctx.fillStyle = stripe === 0 ? '#392858' : '#31214c';
+      polygon(ctx, cLeft1, y1, cRight1, y1, cRight2, y2, cLeft2, y2);
+
+      // Seamless lane lines converging into standard 3-lane highway dividers (±1/3)
+      if (stripe === 0 && w1 >= 6) {
+        const l1 = Math.max(1, w1 / 32);
+        const l2 = Math.max(1, w2 / 32);
+
+        const u1 = clamp01((t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
+        const u2 = clamp01((t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
+        const ease1 = smoothstep(u1);
+        const ease2 = smoothstep(u2);
+
+        if (choice === 'right') {
+          // Right branch lane line: smoothly converges from +1.10 to +1/3 (the right lane divider of normal road!)
+          const rightLine1 = x1 + (FORK_PEAK_BRANCH_CENTER * (1 - ease1) + (1 / 3) * ease1) * w1;
+          const rightLine2 = x2 + (FORK_PEAK_BRANCH_CENTER * (1 - ease2) + (1 / 3) * ease2) * w2;
+          ctx.fillStyle = ease1 < 0.85 ? '#ffd319' : palette.lane;
+          polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+
+          // Left highway divider (-1/3) smoothly emerges as road widens past the median
+          const leftLine1 = x1 - (1 / 3) * w1;
+          const leftLine2 = x2 - (1 / 3) * w2;
+          if (leftLine1 > cLeft1 + l1 * 2) {
+            const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
+            ctx.save();
+            ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+            ctx.fillStyle = palette.lane;
+            polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+            ctx.restore();
+          }
+        } else {
+          // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
+          const leftLine1 = x1 - (FORK_PEAK_BRANCH_CENTER * (1 - ease1) + (1 / 3) * ease1) * w1;
+          const leftLine2 = x2 - (FORK_PEAK_BRANCH_CENTER * (1 - ease2) + (1 / 3) * ease2) * w2;
+          ctx.fillStyle = ease1 < 0.85 ? '#05d9e8' : palette.lane;
+          polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+
+          // Right highway divider (+1/3) smoothly emerges as road widens past the median
+          const rightLine1 = x1 + (1 / 3) * w1;
+          const rightLine2 = x2 + (1 / 3) * w2;
+          if (rightLine1 < cRight1 - l1 * 2) {
+            const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
+            ctx.save();
+            ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+            ctx.fillStyle = palette.lane;
+            polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+            ctx.restore();
+          }
         }
       }
 
-      // Expansion Joint across the asphalt every 8 segments on stripe 0
-      if (stripe === 0 && seg.index % 8 === 0) {
-        ctx.fillStyle = '#5c5478';
-        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
-        ctx.fillStyle = '#1e1a2b';
-        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x1 + w1, y1 - 1, x1 - w1, y1 - 1);
+      // Unchosen branch curves outward and fades away into distance
+      const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
+      const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
+      if (unchosenAlpha > 0.02) {
+        ctx.save();
+        ctx.globalAlpha = unchosenAlpha;
+        const uSign = choice === 'left' ? 1 : -1;
+        const u1Unchosen = Math.max(0, (t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
+        const e1 = smoothstep(u1Unchosen);
+        const e2 = smoothstep(u2Unchosen);
+
+        const uCenter1 = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * e1) * w1;
+        const uCenter2 = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * e2) * w2;
+        const uHalfW1 = 0.58 * (1 - 0.2 * e1) * w1;
+        const uHalfW2 = 0.58 * (1 - 0.2 * e2) * w2;
+
+        const uLeft1 = x1 + uCenter1 - uHalfW1;
+        const uRight1 = x1 + uCenter1 + uHalfW1;
+        const uLeft2 = x2 + uCenter2 - uHalfW2;
+        const uRight2 = x2 + uCenter2 + uHalfW2;
+
+        ctx.fillStyle = palette.rumble[stripe];
+        polygon(ctx, uLeft1 - r1, y1, uLeft1, y1, uLeft2, y2, uLeft2 - r2, y2);
+        polygon(ctx, uRight1, y1, uRight1 + r1, y1, uRight2 + r2, y2, uRight2, y2);
+
+        ctx.fillStyle = palette.road[stripe];
+        polygon(ctx, uLeft1, y1, uRight1, y1, uRight2, y2, uLeft2, y2);
+        ctx.restore();
       }
+    }
+  }
+
+  private renderBridgeParapets(
+    ctx: CanvasRenderingContext2D,
+    seg: RoadSegment,
+    x1: number,
+    y1: number,
+    w1: number,
+    r1: number,
+    x2: number,
+    y2: number,
+    w2: number,
+    r2: number,
+  ): void {
+    const stripe = seg.stripe;
+    const parH1 = Math.max(2, Math.round(w1 * 0.16));
+    const parH2 = Math.max(1, Math.round(w2 * 0.16));
+
+    // Continuous steel bridge parapets (Left & Right batched in 1 path)
+    ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
+    ctx.beginPath();
+    ctx.moveTo(x1 - w1 - r1, y1);
+    ctx.lineTo(x1 - w1 - r1, y1 - parH1);
+    ctx.lineTo(x2 - w2 - r2, y2 - parH2);
+    ctx.lineTo(x2 - w2 - r2, y2);
+    ctx.closePath();
+    ctx.moveTo(x1 + w1 + r1, y1);
+    ctx.lineTo(x1 + w1 + r1, y1 - parH1);
+    ctx.lineTo(x2 + w2 + r2, y2 - parH2);
+    ctx.lineTo(x2 + w2 + r2, y2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Top chrome rails & catadioptres (LOD: closer segments w1 >= 28)
+    if (w1 >= 28) {
+      ctx.fillStyle = '#9e95be';
+      ctx.beginPath();
+      ctx.moveTo(x1 - w1 - r1, y1 - parH1);
+      ctx.lineTo(x1 - w1 - r1 + 1, y1 - parH1);
+      ctx.lineTo(x2 - w2 - r2 + 1, y2 - parH2);
+      ctx.lineTo(x2 - w2 - r2, y2 - parH2);
+      ctx.closePath();
+      ctx.moveTo(x1 + w1 + r1, y1 - parH1);
+      ctx.lineTo(x1 + w1 + r1 - 1, y1 - parH1);
+      ctx.lineTo(x2 + w2 + r2 - 1, y2 - parH2);
+      ctx.lineTo(x2 + w2 + r2, y2 - parH2);
+      ctx.closePath();
+      ctx.fill();
+
+      if (stripe === 0) {
+        ctx.fillStyle = seg.index % 4 === 0 ? '#00f5d4' : '#ff9e24';
+        const reflSize = Math.max(1, Math.round(parH1 * 0.35));
+        ctx.fillRect(Math.round(x1 - w1 - r1 + 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+        ctx.fillRect(Math.round(x1 + w1 + r1 - reflSize - 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+      }
+    }
+
+    // Expansion Joint across the asphalt every 8 segments on stripe 0
+    if (stripe === 0 && seg.index % 8 === 0) {
+      ctx.fillStyle = '#5c5478';
+      polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      ctx.fillStyle = '#1e1a2b';
+      polygon(ctx, x1 - w1, y1, x1 + w1, y1, x1 + w1, y1 - 1, x1 - w1, y1 - 1);
     }
   }
 }
