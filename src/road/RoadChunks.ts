@@ -190,7 +190,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     crestOnExit: true,
     weight: 1.3,
     maneuvers: [
-      { bars: 2, curve: CURVE.EASY * 0.5, elevation: HILL.MEDIUM * 0.65 },
+      { bars: 2, curve: 0, elevation: HILL.MEDIUM * 0.65 },
       { bars: 2, curve: 0, elevation: HILL.HIGH * 0.85, easeRatio: [0.15, 0.15] },
     ],
     props: [
@@ -243,7 +243,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     weight: 1.1,
     maneuvers: [
       { bars: 2, curve: 0, elevation: HILL.MEDIUM * 0.5 },
-      { bars: 4, curve: CURVE.EASY * 0.8, elevation: HILL.MEDIUM * 0.9 },
+      { bars: 4, curve: 0, elevation: HILL.MEDIUM * 0.9 },
       { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.1, 0.1] },
     ],
     props: [
