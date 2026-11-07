@@ -291,17 +291,12 @@ export class RoadRenderer {
     const r1 = (w1 / Math.max(6, 2 * LANES)) * pulseScale;
     const r2 = (w2 / Math.max(6, 2 * LANES)) * pulseScale;
 
-const isBridge = seg.env === 'bridge';
-    const isTunnel = seg.env === 'tunnel' || seg.env === 'tunnel-entry' || seg.env === 'tunnel-exit';
+    const isBridge = seg.env === 'bridge';
 
-    // Bridge water surface, tunnel subterranean ground, or regular grass ground fill
+    // Bridge water surface or regular grass ground fill
     if (isBridge && isCameraOnBridge) {
       // Oceanic bay water surface with deep night reflection
       ctx.fillStyle = stripe === 0 ? '#060b1e' : '#040714';
-      if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
-    } else if (isTunnel) {
-      // Subterranean dark rock ground outside the tunnel walls
-      ctx.fillStyle = stripe === 0 ? '#0c0817' : '#080510';
       if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
     } else if (stripe === 0 || y2 < 180) {
       ctx.fillStyle = palette.grass[stripe];
@@ -581,84 +576,7 @@ const isBridge = seg.env === 'bridge';
         ctx.fillStyle = '#1e1a2b';
         polygon(ctx, x1 - w1, y1, x1 + w1, y1, x1 + w1, y1 - 1, x1 - w1, y1 - 1);
       }
-    } else if (isTunnel && w1 >= 4) {
-      const wallH1 = Math.max(3, Math.round(w1 * 1.25));
-      const wallH2 = Math.max(2, Math.round(w2 * 1.25));
-      const wallSpread1 = w1 + r1 * 1.15;
-      const wallSpread2 = w2 + r2 * 1.15;
-
-      const leftBaseX1 = x1 - wallSpread1;
-      const leftBaseX2 = x2 - wallSpread2;
-      const rightBaseX1 = x1 + wallSpread1;
-      const rightBaseX2 = x2 + wallSpread2;
-
-      const ceilY1 = y1 - wallH1;
-      const ceilY2 = y2 - wallH2;
-
-      // 1. Vertical Tiled Walls (Left & Right batched in a single path)
-      ctx.fillStyle = stripe === 0 ? '#272038' : '#1e182c';
-      ctx.beginPath();
-      ctx.moveTo(leftBaseX1, y1);
-      ctx.lineTo(leftBaseX1, ceilY1);
-      ctx.lineTo(leftBaseX2, ceilY2);
-      ctx.lineTo(leftBaseX2, y2);
-      ctx.closePath();
-      ctx.moveTo(rightBaseX1, y1);
-      ctx.lineTo(rightBaseX1, ceilY1);
-      ctx.lineTo(rightBaseX2, ceilY2);
-      ctx.lineTo(rightBaseX2, y2);
-      ctx.closePath();
-      ctx.fill();
-
-      // 2. Continuous Retro Sodium Reflector Line (LOD: closer segments w1 >= 14)
-      if (w1 >= 14) {
-        const reflY1 = y1 - Math.round(wallH1 * 0.42);
-        const reflY2 = y2 - Math.round(wallH2 * 0.42);
-        const reflH1 = Math.max(1, Math.round(wallH1 * 0.06));
-        const reflH2 = Math.max(1, Math.round(wallH2 * 0.06));
-
-        ctx.fillStyle = '#ffd166';
-        ctx.beginPath();
-        ctx.moveTo(leftBaseX1, reflY1);
-        ctx.lineTo(leftBaseX1, reflY1 - reflH1);
-        ctx.lineTo(leftBaseX2, reflY2 - reflH2);
-        ctx.lineTo(leftBaseX2, reflY2);
-        ctx.closePath();
-        ctx.moveTo(rightBaseX1, reflY1);
-        ctx.lineTo(rightBaseX1, reflY1 - reflH1);
-        ctx.lineTo(rightBaseX2, reflY2 - reflH2);
-        ctx.lineTo(rightBaseX2, reflY2);
-        ctx.closePath();
-        ctx.fill();
-      }
-
-      // 3. Curved Concrete Ceiling Arch connecting left and right walls
-      ctx.fillStyle = stripe === 0 ? '#151122' : '#100c1a';
-      polygon(ctx, leftBaseX1, ceilY1, rightBaseX1, ceilY1, rightBaseX2, ceilY2, leftBaseX2, ceilY2);
-
-      // 4. Overhead Perspective Fluorescent Neon Tube Strips
-      if (w1 >= 8) {
-        const neonW1 = Math.max(1, Math.round(w1 / 22));
-        const neonW2 = Math.max(1, Math.round(w2 / 22));
-        const neonY1 = ceilY1 + Math.max(1, Math.round(wallH1 * 0.08));
-        const neonY2 = ceilY2 + Math.max(1, Math.round(wallH2 * 0.08));
-
-        // Center Dual Neon Line
-        const neonCol = beatPulse > 0.6 ? '#ffe875' : '#ff9e24';
-        ctx.fillStyle = neonCol;
-        polygon(ctx, x1 - neonW1, neonY1, x1 + neonW1, neonY1, x2 + neonW2, neonY2, x2 - neonW2, neonY2);
-
-        // Bright white core (LOD: closer segments w1 >= 20)
-        if (w1 >= 20) {
-          ctx.fillStyle = '#ffffff';
-          const coreW1 = Math.max(1, Math.round(neonW1 * 0.45));
-          const coreW2 = Math.max(1, Math.round(neonW2 * 0.45));
-          polygon(ctx, x1 - coreW1, neonY1, x1 + coreW1, neonY1, x2 + coreW2, neonY2, x2 - coreW2, neonY2);
-        }
-      }
     }
-
-
   }
 }
 

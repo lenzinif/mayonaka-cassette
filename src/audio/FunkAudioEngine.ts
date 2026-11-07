@@ -307,8 +307,6 @@ export interface DrivingAudioParams {
    * Used when `holdOutroLoop === true` to modulate Tape Drag (Stage 1).
    */
   roadBeatsRemaining?: number;
-  /** True when the car is inside a tunnel (Fase 5: resonant acoustic profile). */
-  isTunnel?: boolean;
   /** True when the car is on a bridge (Fase 5: expansion joint audio cues). */
   isBridge?: boolean;
 }
@@ -1014,14 +1012,7 @@ export class FunkAudioEngine {
 
     this.currentCutoffHz +=
       (targetCutoff - this.currentCutoffHz) * (1 - Math.exp(-5.5 * dt));
-    const targetQ = driving.isDrifting
-      ? tuning.audioFilterDriftQ
-      : driving.isTunnel
-        ? (tuning.tunnelFilterResonanceQ ?? 3.4)
-        : 1.6;
-    if (driving.isTunnel) {
-      this.currentCutoffHz = Math.min(8500, this.currentCutoffHz);
-    }
+    const targetQ = driving.isDrifting ? tuning.audioFilterDriftQ : 1.6;
     this.currentQ += (targetQ - this.currentQ) * (1 - Math.exp(-8.0 * dt));
 
     // 7. Apply already-smoothed parameters to Web Audio nodes via direct `.value` assignment

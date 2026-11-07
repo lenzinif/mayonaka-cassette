@@ -29,16 +29,11 @@ export type PropKind =
   | 'shrub'
   | 'sign'
   | 'overpass'
-  | 'suspension-tower'
-  | 'tunnel-portal'
-  | 'tunnel-fan';
+  | 'suspension-tower';
 
 export type SegmentEnvironment =
   | 'standard'
-  | 'bridge'
-  | 'tunnel'
-  | 'tunnel-entry'
-  | 'tunnel-exit';
+  | 'bridge';
 
 /** A roadside sprite anchored to a segment. `offset` is in road half-widths (±1 = road edge). */
 export interface RoadSprite {

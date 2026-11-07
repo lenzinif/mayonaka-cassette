@@ -73,8 +73,6 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     'sign',
     'overpass',
     'suspension-tower',
-    'tunnel-portal',
-    'tunnel-fan',
   ];
 
   it('renders all 12 prop kinds cleanly without throwing', () => {
@@ -256,29 +254,7 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     expect(mock.rectCalls).toBeGreaterThan(rectsBefore2 + 8);
     expect(mock.fills).toContain('#7b2cbf'); // Violet primary
   });
-    it('renders Tunnel A monumental portal arch with Keisatsucho hazard chevrons, LED matrix board, and lane indicators', () => {
-    const mock = createMockCanvas();
 
-    const rectsBefore = mock.rectCalls;
-    drawProp(mock.ctx, 'tunnel-portal', 320, 240, 0.022, 1, 0, 0.8);
-    expect(mock.rectCalls).toBeGreaterThan(rectsBefore + 12);
-    expect(mock.fills).toContain('#3a354b'); // Portal cast concrete
-    expect(mock.fills).toContain('#07050e'); // Deep black subterranean opening
-    expect(mock.fills).toContain('#ffd166'); // Keisatsucho yellow hazard chevron
-    expect(mock.fills).toContain('#ffe066'); // Amber LED advisory board
-    expect(mock.fills).toContain('#00f59b'); // Green lane down-arrow
-  });
-
-  it('renders Tunnel B ceiling-mounted axial jet-fans with mounting brackets and spinner hub', () => {
-    const mock = createMockCanvas();
-
-    const rectsBefore = mock.rectCalls;
-    drawProp(mock.ctx, 'tunnel-fan', 320, 240, 0.022, 1, 0, 0);
-    expect(mock.rectCalls).toBeGreaterThan(rectsBefore + 5);
-    expect(mock.fills).toContain('#1e192c'); // Cylindrical steel housing
-    expect(mock.fills).toContain('#38324f'); // Aerodynamic nose cone
-    expect(mock.fills).toContain('#ffaa00'); // Amber status indicator
-  });
   it('executes 120 consecutive frames across all variants with zero runtime errors', () => {
     const mock = createMockCanvas();
     for (let f = 0; f < 120; f++) {

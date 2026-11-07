@@ -222,17 +222,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
               ? easeIn(startY, endY, yProgress)
               : easeInOut(startY, endY, yProgress);
 
-          let segEnv: SegmentEnvironment = chunk.env ?? 'standard';
-          if (chunk.env === 'tunnel') {
-            const relSeg = segments.length - chunkStartSeg;
-            if (relSeg < 4) {
-              segEnv = 'tunnel-entry';
-            } else if (relSeg >= chunkSegCount - 4) {
-              segEnv = 'tunnel-exit';
-            } else {
-              segEnv = 'tunnel';
-            }
-          }
+          const segEnv: SegmentEnvironment = chunk.env ?? 'standard';
           appendSegment(c, y, segEnv);
         }
       }
@@ -671,7 +661,7 @@ function populateChunkProps(
           ? 2.6
           : rule.kind === 'billboard' || rule.kind === 'vms'
             ? 1.85
-            : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'tunnel-portal' || rule.kind === 'suspension-tower' || rule.kind === 'tunnel-fan')
+            : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'suspension-tower')
               ? 0
               : rule.kind === 'shrub'
                 ? 1.35

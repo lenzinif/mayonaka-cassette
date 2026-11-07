@@ -120,25 +120,4 @@ describe('RoadRenderer — Rendering Environments', () => {
     // Expansion joint
     expect(mock.fills).toContain('#5c5478');
   });
-
-  it('renders tunnel segments with subterranean ground, vertical tiled walls, ceiling arch, and overhead neon strips', () => {
-    const renderer = new RoadRenderer();
-    const mock = createMockCanvas();
-    const track = createTestTrack('tunnel');
-
-    renderer.render(mock.ctx, track, defaultView, PALETTE_NIGHT_FUNK);
-
-    expect(renderer.stats.drawnSegments).toBeGreaterThan(0);
-    // Subterranean dark rock fill instead of grass
-    expect(mock.fills).toContain('#0c0817');
-    // Vertical tiled wall
-    expect(mock.fills).toContain('#272038');
-    // Wall reflector strip
-    expect(mock.fills).toContain('#ffd166');
-    // Concrete ceiling arch
-    expect(mock.fills).toContain('#151122');
-    // Overhead neon lights
-    expect(mock.fills).toContain('#ff9e24');
-    expect(mock.fills).toContain('#ffffff');
-  });
 });

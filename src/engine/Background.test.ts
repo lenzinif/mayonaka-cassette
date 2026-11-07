@@ -325,17 +325,6 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     expect(mockWithStars.fillRectCalls).toBeGreaterThan(mockWithoutStars.fillRectCalls);
   });
 
-  it('renders subterranean atmospheric tunnel vault with ceiling guide ribs and horizon glow', () => {
-    const bg = new Background();
-    const mock = createMockCanvasContext();
-
-    bg.renderTunnelVault(mock.ctx, 640, 360, 0.8);
-
-    expect(mock.fillRectCalls).toBeGreaterThan(0);
-    expect(mock.strokeCalls).toBeGreaterThan(0);
-    expect(mock.lineCalls).toBeGreaterThan(0);
-  });
-
   it('executes 120 simulation steps and renders with ZERO GC allocations', () => {
     const bg = new Background();
     const mock = createMockCanvasContext();

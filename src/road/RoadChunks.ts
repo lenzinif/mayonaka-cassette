@@ -253,20 +253,19 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
   }),
 
   defineChunk({
-    id: 'build-mountain-tunnel-entry-4',
-    description: 'Salita in cresta che scavalca la montagna e si tuffa nell imbocco monumentale della galleria',
+    id: 'build-mountain-pass-4',
+    description: 'Salita in cresta che scavalca il passo di montagna con guardrail e lampioni panoramici',
     role: 'build',
     bars: 4,
     crestOnExit: true,
-    env: 'tunnel',
     weight: 1.1,
     maneuvers: [
       { bars: 2, curve: CURVE.EASY * 0.5, elevation: HILL.MEDIUM * 0.7 },
       { bars: 2, curve: 0, elevation: HILL.HIGH * 0.8, easeRatio: [0.1, 0.1] },
     ],
     props: [
-      { kind: 'tunnel-portal', placement: 'both', everyBeats: 16, offset: 0 },
-      { kind: 'tunnel-fan', placement: 'both', everyBeats: 4, offset: 0 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
     ],
   }),
 
@@ -293,11 +292,10 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
   }),
 
   defineChunk({
-    id: 'drop-subterranean-rush-8',
-    description: 'Rettilineo ad altissima velocità dentro la galleria Wangan con file di neon e jet-fan',
+    id: 'drop-expressway-rush-8',
+    description: 'Rettilineo ad altissima velocità su autostrada metropolitana con file di lampioni e cartelloni',
     role: 'drop',
     bars: 8,
-    env: 'tunnel',
     weight: 1.15,
     energyRange: [0.45, 1.0],
     maneuvers: [
@@ -306,7 +304,8 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'tunnel-fan', placement: 'both', everyBeats: 4, offset: 0 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
+      { kind: 'building', placement: 'both', everyBeats: 4, offset: 2.35 },
     ],
   }),
 defineChunk({
@@ -367,7 +366,7 @@ defineChunk({
 
   defineChunk({
     id: 'drop-shibuya-express-8',
-    description: 'Discesa mozzafiato seguita da doppio apex veloce tra tunnel di lampioni e insegne',
+    description: 'Discesa mozzafiato seguita da doppio apex veloce tra corridoio di lampioni e insegne',
     role: 'drop',
     bars: 8,
     weight: 1.2,
@@ -442,11 +441,10 @@ defineChunk({
   }),
 
   defineChunk({
-    id: 'breakdown-tokyo-underground-8',
-    description: 'S-bends sotterranei tecnici tra le pareti piastrellate della galleria Shuto C1',
+    id: 'breakdown-shuto-curves-8',
+    description: 'S-bends tecnici tra le barriere autostradali della tangenziale Shuto C1',
     role: 'breakdown',
     bars: 8,
-    env: 'tunnel',
     weight: 1.1,
     energyRange: [0.3, 0.85],
     maneuvers: [
@@ -456,7 +454,8 @@ defineChunk({
       { bars: 2, curve: 0, elevation: HILL.LOW * 0.4 },
     ],
     props: [
-      { kind: 'tunnel-fan', placement: 'both', everyBeats: 4, offset: 0 },
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.22 },
     ],
   }),
 
@@ -514,18 +513,17 @@ defineChunk({
   }),
 
   defineChunk({
-    id: 'outro-tunnel-emergence-4',
-    description: 'Uscita dalla galleria sotterranea verso la luce dello skyline e del bivio finale',
+    id: 'outro-skyline-emergence-4',
+    description: 'Tratto finale verso la luce dello skyline e del bivio finale',
     role: 'outro',
     bars: 4,
-    env: 'tunnel',
     weight: 1.1,
     maneuvers: [
       { bars: 2, curve: 0, elevation: HILL.LOW * 0.4 },
       { bars: 2, curve: CURVE.EASY * 0.6, elevation: 0 },
     ],
     props: [
-      { kind: 'tunnel-portal', placement: 'both', everyBeats: 16, offset: 0 },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
       { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
     ],
   }),

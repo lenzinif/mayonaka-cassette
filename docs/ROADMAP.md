@@ -20,6 +20,7 @@ Piano di sviluppo per portare il gioco dalla versione alpha attuale (v0.1.0-alph
 
 Ridisegnare il cruscotto con elementi grafici anni '80 e ottimizzare la telemetria a schermo.
 
+### Redesign completato
 - [x] Stile plancia anni '80 (display fluorescente VFD):
   - [x] Tachimetro e contagiri a segmenti digitali verdi e turchesi, ispirati ai cruscotti giapponesi dell'epoca (Toyota Soarer, Subaru XT).
   - [x] Indicatore di marcia retroilluminato per il beat-shift.
@@ -29,10 +30,18 @@ Ridisegnare il cruscotto con elementi grafici anni '80 e ottimizzare la telemetr
 - [x] Indicatori di ritmo:
   - [x] Riposizionare i giudizi (`PERFECT`, `GOOD`, `EARLY`, `LATE`) sui montanti o vicino alle marce, lasciando libera la visuale della strada.
   - [x] Leggero impulso visivo sulla cornice a tempo di cassa.
-- [x] Adattabilità dello schermo:
+- [x] Adattabilità dello schermo & Menu:
   - [x] Supporto per display ultrawide (21:9) e finestre ridotte, mantenendo il canvas a 640×360 centrato con integer scaling.
   - [x] Tasto rapido per nascondere l'HUD e guidare a schermo pulito (`H`).
+  - [x] Pause Menu unificato e centralizzato in stile Future Funk per le opzioni in-game.
+  - [x] Menù di avvio arcade completo (`MainMenu.tsx`) con marquee FM 88.4, stato audio ON AIR e selezione cassette.
 
+### Pulizia e decluttering dell'HUD (In corso / Prossima attività)
+- [ ] Pulire e alleggerire l'HUD a schermo:
+  - [ ] Eliminare etichette ridondanti e testi secondari fissi per liberare la visuale centrale e l'asfalto.
+  - [ ] Perfezionare la gerarchia visiva e i contrasti (lasciare in evidenza solo tachimetro, marcia/ritmo e cassetta Groove).
+  - [ ] Ottimizzare la durata e la discrezione dei toast temporanei (cambi marcia, drop, lap).
+  - [ ] Rifinire la modalità Clean HUD (`H`) per una transizione ancora più pulita e cinematografica.
 ---
 
 ## 2. Nuovi elementi a bordo strada

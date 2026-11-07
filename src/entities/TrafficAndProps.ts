@@ -76,8 +76,6 @@ function propHitHalfWidth(kind: PropKind): number {
     case 'vms':
     case 'overpass':
     case 'suspension-tower':
-    case 'tunnel-portal':
-    case 'tunnel-fan':
       // Overhead structures span across the roadway; player drives right under
       return 0;
     case 'chevron':
