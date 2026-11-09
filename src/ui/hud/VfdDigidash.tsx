@@ -106,7 +106,7 @@ export function VfdDigidash({
       </div>
 
       {/* Unified JDM VFD Instrument Cluster Binnacle */}
-      <div className="flex flex-col gap-2 rounded-lg border-2 border-cyan-400/50 bg-[#060b14]/96 p-2.5 shadow-[0_0_25px_rgba(5,217,232,0.22)] backdrop-blur-md">
+      <div className="flex flex-col gap-2 rounded-lg border-2 border-cyan-400/50 bg-[#060b14]/96 p-2.5 shadow-[0_0_25px_rgba(5,217,232,0.22)]">
         {/* Upper Deck: VFD Groove Flux Meter with Tier Zones */}
         <div className="flex flex-col gap-1 rounded border border-cyan-500/20 bg-[#040811]/85 px-2.5 py-1.5">
           <div className="flex items-center justify-between text-[9px] font-bold tracking-widest uppercase">

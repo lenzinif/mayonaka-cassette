@@ -365,6 +365,9 @@ export class FunkAudioEngine {
   private dubFilterNode: BiquadFilterNode | null = null;
   private currentDubSend = 0;
   private currentDubFeedback = 0;
+  private lastAppliedDubSend = 0;
+  private lastAppliedDubFeedback = 0;
+  private lastAppliedDubFilterHz = -1;
   private outroSourceFaded = false;
 
   /** Progressive attack/release envelope for turntable pitch dips (collisions/shocks). */
@@ -683,10 +686,22 @@ export class FunkAudioEngine {
   }
 
   private resetDubState(): void {
+    if (
+      !this.outroLoopHolding &&
+      !this.outroSourceFaded &&
+      this.currentDubSend === 0 &&
+      this.currentDubFeedback === 0 &&
+      this.lastAppliedDubSend === 0 &&
+      this.lastAppliedDubFeedback === 0
+    ) {
+      return;
+    }
     this.outroLoopHolding = false;
     this.outroSourceFaded = false;
     this.currentDubSend = 0;
     this.currentDubFeedback = 0;
+    this.lastAppliedDubSend = 0;
+    this.lastAppliedDubFeedback = 0;
     if (this.ctx) {
       const now = this.ctx.currentTime;
       if (this.dubSendGain) {
@@ -749,6 +764,14 @@ export class FunkAudioEngine {
 
     osc.connect(gain);
     gain.connect(this.masterGain);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore disconnect errors in mock contexts
+      }
+    };
     osc.start(now);
     osc.stop(now + 0.12);
   }
@@ -775,15 +798,20 @@ export class FunkAudioEngine {
       gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
       osc.connect(gain);
       gain.connect(this.masterGain);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          gain.disconnect();
+        } catch {
+          // Ignore disconnect errors in mock contexts
+        }
+      };
       osc.start(t0);
       osc.stop(t0 + 0.1);
     }
   }
 
   /**
-   * Plays a synthesized retro thud and triggers a progressive turntable pitch sag on obstacle/traffic bump.
-   */
-    /**
    * Plays a synthesized low-frequency "clack-clack" thud when crossing a metallic bridge expansion joint (Ponte B).
    */
   playBridgeJoint(): void {
@@ -802,6 +830,14 @@ export class FunkAudioEngine {
 
     osc.connect(gain);
     gain.connect(this.masterGain);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore disconnect errors in mock contexts
+      }
+    };
     osc.start(now);
     osc.stop(now + 0.055);
   }
@@ -826,6 +862,14 @@ export class FunkAudioEngine {
 
     osc.connect(gain);
     gain.connect(this.masterGain);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore disconnect errors in mock contexts
+      }
+    };
     osc.start(now);
     osc.stop(now + 0.14);
   }
@@ -925,27 +969,17 @@ export class FunkAudioEngine {
     this.currentDubFeedback += (targetDubFeedback - this.currentDubFeedback) * (1 - Math.exp(-6.0 * dt));
 
     if (this.ctx) {
-      const now = this.ctx.currentTime;
-      if (this.dubSendGain) {
-        try {
-          this.dubSendGain.gain.setValueAtTime(this.currentDubSend, now);
-        } catch {
-          this.dubSendGain.gain.value = this.currentDubSend;
-        }
+      if (this.dubSendGain && Math.abs(this.currentDubSend - this.lastAppliedDubSend) >= 0.002) {
+        this.dubSendGain.gain.value = this.currentDubSend;
+        this.lastAppliedDubSend = this.currentDubSend;
       }
-      if (this.dubFeedbackGain) {
-        try {
-          this.dubFeedbackGain.gain.setValueAtTime(this.currentDubFeedback, now);
-        } catch {
-          this.dubFeedbackGain.gain.value = this.currentDubFeedback;
-        }
+      if (this.dubFeedbackGain && Math.abs(this.currentDubFeedback - this.lastAppliedDubFeedback) >= 0.002) {
+        this.dubFeedbackGain.gain.value = this.currentDubFeedback;
+        this.lastAppliedDubFeedback = this.currentDubFeedback;
       }
-      if (this.dubFilterNode) {
-        try {
-          this.dubFilterNode.frequency.setValueAtTime(tuning.outroDubFilterHz, now);
-        } catch {
-          this.dubFilterNode.frequency.value = tuning.outroDubFilterHz;
-        }
+      if (this.dubFilterNode && Math.abs(tuning.outroDubFilterHz - this.lastAppliedDubFilterHz) >= 2.0) {
+        this.dubFilterNode.frequency.value = tuning.outroDubFilterHz;
+        this.lastAppliedDubFilterHz = tuning.outroDubFilterHz;
       }
     }
 

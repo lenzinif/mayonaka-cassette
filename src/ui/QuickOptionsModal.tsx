@@ -1,4 +1,5 @@
 import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
+import { useEffect } from 'react';
 
 export interface QuickOptionsModalProps {
   open: boolean;
@@ -17,7 +18,7 @@ export interface QuickOptionsModalProps {
 
 /**
  * 1980s Retro Arcade Settings & Options Modal.
- * Allows live configuration of rhythm driving assist, Tofu Mode, Melon Soda skin, and visual filters.
+ * Live configuration of rhythm driving assist, Tofu Mode, Melon Soda skin, and visual filters.
  */
 export function QuickOptionsModal({
   open,
@@ -33,6 +34,18 @@ export function QuickOptionsModal({
   crtEnabled,
   onToggleCrt,
 }: QuickOptionsModalProps) {
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
 
   return (
@@ -40,164 +53,119 @@ export function QuickOptionsModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#060112]/94 p-4 font-mono text-white backdrop-blur-xs select-none"
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#060112]/85 p-4 font-mono text-white select-none"
       role="dialog"
       aria-modal="true"
-      aria-label="Options &amp; Settings"
+      aria-label="Options"
     >
       <div
-        className="relative flex flex-col w-full max-w-md max-h-[88vh] overflow-hidden rounded-lg border-2 border-pink-500/70 bg-[#0d0221]/98 shadow-[0_0_50px_rgba(255,42,109,0.4)]"
+        className="relative flex flex-col w-full max-w-md overflow-hidden rounded-lg border-2 border-pink-500/70 bg-[#0d0221]/98 shadow-[0_0_40px_rgba(255,42,109,0.35)]"
         style={{ colorScheme: 'dark' }}
       >
-        {/* Top Header Marquee */}
-        <div className="flex items-center justify-between border-b border-fuchsia-500/30 bg-[#160435] px-4 py-2.5 text-[10px] tracking-[0.25em] text-cyan-300 uppercase">
-          <span>OUTRUN FM // SYSTEM SETTINGS</span>
+        {/* Header: OPTIONS on left, BACK [ESC] on right */}
+        <div className="flex items-center justify-between border-b border-fuchsia-500/30 bg-[#160435] px-4 py-2.5 text-xs font-black tracking-widest text-cyan-300 uppercase">
+          <span>OPTIONS</span>
           <button
             type="button"
             onClick={onClose}
-            className="cursor-pointer text-pink-400 hover:text-white transition"
+            className="cursor-pointer rounded border border-fuchsia-400/40 bg-[#1a0636] px-2.5 py-1 text-[11px] font-bold tracking-wider text-fuchsia-200 transition hover:border-pink-400 hover:bg-pink-950/60 hover:text-white"
           >
-            [✕ CLOSE]
+            BACK [ESC]
           </button>
         </div>
 
-        {/* Options Body */}
-        <div
-          className="flex-1 overflow-y-auto p-5 space-y-4 text-xs"
-          style={{ scrollbarColor: '#e879f9 #1a0633', scrollbarWidth: 'thin' }}
-        >
-          {/* Audio & Rhythm Driving */}
-          <div>
-            <div className="text-[10px] font-bold tracking-widest text-fuchsia-300/80 uppercase">
-              RHYTHM &amp; DRIVING ASSIST
-            </div>
-            <div className="mt-2 space-y-2">
-              <button
-                type="button"
-                onClick={onToggleAutoShift}
-                className={`flex w-full cursor-pointer items-center justify-between rounded border p-2.5 transition ${
-                  autoShift
-                    ? 'border-cyan-400 bg-cyan-950/50 text-cyan-200 shadow-[0_0_12px_rgba(5,217,232,0.3)]'
-                    : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-cyan-400'
-                }`}
-              >
-                <div className="text-left">
-                  <div className="font-bold">AUTO-SHIFT ASSIST [G]</div>
-                  <div className="text-[10px] text-fuchsia-300/60">
-                    {autoShift ? 'Automatic gear shifts timed to downbeats' : 'Manual shifts via [Q]/[E] or bumpers'}
-                  </div>
-                </div>
-                <div className={`font-bold px-2 py-0.5 rounded text-[10px] ${autoShift ? 'bg-cyan-400 text-black' : 'bg-[#250840] text-fuchsia-300'}`}>
-                  {autoShift ? 'ENABLED' : 'MANUAL'}
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={onToggleTofuMode}
-                className={`flex w-full cursor-pointer items-center justify-between rounded border p-2.5 transition ${
-                  tofuMode
-                    ? 'border-emerald-400 bg-emerald-950/50 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.3)]'
-                    : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-emerald-400'
-                }`}
-              >
-                <div className="text-left">
-                  <div className="font-bold">TOFU MODE (×2 GROOVE) [T]</div>
-                  <div className="text-[10px] text-fuchsia-300/60">
-                    {tofuMode ? 'Active: Double Groove, but jerky driving spills soda' : 'Disabled: Relaxed driving physics'}
-                  </div>
-                </div>
-                <div className={`font-bold px-2 py-0.5 rounded text-[10px] ${tofuMode ? 'bg-emerald-400 text-black' : 'bg-[#250840] text-fuchsia-300'}`}>
-                  {tofuMode ? 'ON (×2)' : 'OFF'}
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Dashboard Customization */}
-          <div className="border-t border-fuchsia-500/25 pt-3">
-            <div className="text-[10px] font-bold tracking-widest text-fuchsia-300/80 uppercase">
-              DASHBOARD CUSTOMIZATION
-            </div>
-            <div className="mt-2 space-y-2">
-              <button
-                type="button"
-                onClick={onCycleSodaSkin}
-                className="flex w-full cursor-pointer items-center justify-between rounded border border-amber-400/40 bg-[#1a0f05]/60 p-2.5 transition hover:border-amber-300"
-              >
-                <div className="text-left">
-                  <div className="font-bold text-amber-200">CUP HOLDER SKIN [V]</div>
-                  <div className="text-[10px] text-amber-300/60">
-                    Click to cycle soda varieties
-                  </div>
-                </div>
-                <div className="font-bold px-2 py-0.5 rounded text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/40">
-                  {SODA_SKIN_LABELS[sodaSkin]}
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Visual Presentation */}
-          <div className="border-t border-fuchsia-500/25 pt-3">
-            <div className="text-[10px] font-bold tracking-widest text-fuchsia-300/80 uppercase">
-              DISPLAY &amp; HUD
-            </div>
-            <div className="mt-2 space-y-2">
-              <button
-                type="button"
-                onClick={onToggleCrt}
-                className={`flex w-full cursor-pointer items-center justify-between rounded border p-2.5 transition ${
-                  crtEnabled
-                    ? 'border-pink-400 bg-pink-950/50 text-pink-200 shadow-[0_0_12px_rgba(255,42,109,0.3)]'
-                    : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-pink-400'
-                }`}
-              >
-                <div className="text-left">
-                  <div className="font-bold">CRT SCANLINES &amp; VHS VIGNETTE</div>
-                  <div className="text-[10px] text-fuchsia-300/60">
-                    Phosphor scanline overlay
-                  </div>
-                </div>
-                <div className={`font-bold px-2 py-0.5 rounded text-[10px] ${crtEnabled ? 'bg-pink-500 text-white' : 'bg-[#250840] text-fuchsia-300'}`}>
-                  {crtEnabled ? 'ON' : 'OFF'}
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={onToggleCleanHud}
-                className={`flex w-full cursor-pointer items-center justify-between rounded border p-2.5 transition ${
-                  cleanHud
-                    ? 'border-cyan-400 bg-cyan-950/50 text-cyan-200 shadow-[0_0_12px_rgba(5,217,232,0.3)]'
-                    : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-cyan-400'
-                }`}
-              >
-                <div className="text-left">
-                  <div className="font-bold">MINIMAL CLEAN HUD [H]</div>
-                  <div className="text-[10px] text-fuchsia-300/60">
-                    Hide instruments for pure cinematic view
-                  </div>
-                </div>
-                <div className={`font-bold px-2 py-0.5 rounded text-[10px] ${cleanHud ? 'bg-cyan-400 text-black' : 'bg-[#250840] text-fuchsia-300'}`}>
-                  {cleanHud ? 'MINIMAL' : 'FULL'}
-                </div>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Footer Dismiss */}
-        <div className="flex items-center justify-between border-t border-fuchsia-500/30 bg-[#12032b] px-4 py-3">
-          <span className="text-[10px] text-fuchsia-300/60 uppercase">
-            SETTINGS SAVED AUTOMATICALLY
-          </span>
+        {/* Body: 5 Key-Value toggle buttons */}
+        <div className="p-4 space-y-2.5">
+          {/* 1. Transmission */}
           <button
             type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded border border-pink-400/80 bg-pink-600/80 px-4 py-1.5 text-xs font-bold tracking-wider text-white uppercase transition hover:bg-pink-500 hover:shadow-[0_0_15px_rgba(255,42,109,0.5)]"
+            onClick={onToggleAutoShift}
+            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
+              autoShift
+                ? 'border-cyan-400 bg-cyan-950/40 text-cyan-200 shadow-[0_0_12px_rgba(5,217,232,0.25)]'
+                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-cyan-400/60'
+            }`}
           >
-            CONFIRM // RETURN
+            <span className="font-bold">TRANSMISSION [G]</span>
+            <span
+              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                autoShift ? 'bg-cyan-400 text-black' : 'bg-[#250840] text-fuchsia-300'
+              }`}
+            >
+              {autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
+            </span>
+          </button>
+
+          {/* 2. Tofu Mode */}
+          <button
+            type="button"
+            onClick={onToggleTofuMode}
+            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
+              tofuMode
+                ? 'border-emerald-400 bg-emerald-950/40 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
+                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-emerald-400/60'
+            }`}
+          >
+            <span className="font-bold">TOFU MODE [T]</span>
+            <span
+              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                tofuMode ? 'bg-emerald-400 text-black' : 'bg-[#250840] text-fuchsia-300'
+              }`}
+            >
+              {tofuMode ? 'ON (×2 GROOVE)' : 'OFF'}
+            </span>
+          </button>
+
+          {/* 3. Dashboard Cup */}
+          <button
+            type="button"
+            onClick={onCycleSodaSkin}
+            className="flex w-full cursor-pointer items-center justify-between rounded border border-amber-400/40 bg-[#1a0f05]/60 px-3.5 py-2.5 text-xs text-amber-200 transition hover:border-amber-300"
+          >
+            <span className="font-bold">DASHBOARD CUP [V]</span>
+            <span className="font-bold px-2 py-0.5 rounded text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/40">
+              {SODA_SKIN_LABELS[sodaSkin]}
+            </span>
+          </button>
+
+          {/* 4. HUD Display */}
+          <button
+            type="button"
+            onClick={onToggleCleanHud}
+            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
+              cleanHud
+                ? 'border-cyan-400 bg-cyan-950/40 text-cyan-200 shadow-[0_0_12px_rgba(5,217,232,0.25)]'
+                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-cyan-400/60'
+            }`}
+          >
+            <span className="font-bold">HUD DISPLAY [H]</span>
+            <span
+              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                cleanHud ? 'bg-cyan-400 text-black' : 'bg-[#250840] text-fuchsia-300'
+              }`}
+            >
+              {cleanHud ? 'MINIMAL' : 'FULL'}
+            </span>
+          </button>
+
+          {/* 5. CRT Scanlines */}
+          <button
+            type="button"
+            onClick={onToggleCrt}
+            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
+              crtEnabled
+                ? 'border-pink-400 bg-pink-950/40 text-pink-200 shadow-[0_0_12px_rgba(255,42,109,0.25)]'
+                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-pink-400/60'
+            }`}
+          >
+            <span className="font-bold">CRT SCANLINES</span>
+            <span
+              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
+                crtEnabled ? 'bg-pink-500 text-white' : 'bg-[#250840] text-fuchsia-300'
+              }`}
+            >
+              {crtEnabled ? 'ON' : 'OFF'}
+            </span>
           </button>
         </div>
       </div>

@@ -38,6 +38,7 @@ export function TrackLoader({
 }: TrackLoaderProps) {
   const [, setVersion] = useState(0);
   const [progress, setProgress] = useState<ImportProgress | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [tapCount, setTapCount] = useState(0);
   const tapTimesRef = useRef<number[]>([]);
@@ -64,6 +65,10 @@ export function TrackLoader({
         } else {
           onClose();
         }
+      } else if (e.key === 'Escape' || e.code === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -77,6 +82,9 @@ export function TrackLoader({
 
   const handleFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return;
+    setSelectedFileName(
+      fileList.length === 1 ? fileList[0]!.name : `${fileList.length} file selezionati`,
+    );
     setProgress({
       completed: 0,
       total: fileList.length,
@@ -153,39 +161,25 @@ export function TrackLoader({
         {/* Header */}
         <div className="flex items-center justify-between border-b border-fuchsia-500/40 bg-[#180538] px-4 py-3">
           <div>
-            <div className="text-[10px] tracking-[0.25em] text-cyan-300 uppercase">
-              {isInitialSelect ? 'CASSETTE DECK // SELECT SOUNDTRACK' : 'CASSETTE DECK // STAGE SOUNDTRACK'}
-            </div>
             <h2 className="text-sm font-bold tracking-wider text-white uppercase">
-              {isInitialSelect
-                ? 'Choose Your Tape or Load Audio (MP3 / WAV / OGG / FLAC)'
-                : 'Load Music (MP3 / WAV / OGG / FLAC)'}
+              CASSETTE DECK
             </h2>
+            <div className="text-[10px] tracking-wider text-cyan-300 uppercase">
+              SELECT OR IMPORT AUDIO (MP3 / WAV / OGG / FLAC)
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            {isInitialSelect ? (
-              <button
-                type="button"
-                onClick={onStartDrive ?? onClose}
-                className="group relative cursor-pointer rounded border-2 border-pink-400 bg-gradient-to-r from-pink-600 via-fuchsia-600 to-cyan-600 px-3.5 py-1 text-xs font-black tracking-widest text-white uppercase shadow-[0_0_15px_rgba(255,42,109,0.5)] transition hover:scale-[1.02] hover:shadow-[0_0_25px_rgba(5,217,232,0.7)] active:scale-[0.98] animate-pulse"
-              >
-                INSERT TAPE &amp; DRIVE [ENTER] ▷
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={onClose}
-                className="cursor-pointer rounded border border-pink-500/50 bg-pink-950/70 px-2.5 py-1 text-xs font-bold text-pink-200 hover:border-cyan-400 hover:text-cyan-200"
-              >
-                CLOSE [ESC]
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="cursor-pointer rounded border border-fuchsia-400/40 bg-[#1a0636] px-2.5 py-1 text-[11px] font-bold tracking-wider text-fuchsia-200 transition hover:border-pink-400 hover:bg-pink-950/60 hover:text-white"
+          >
+            BACK [ESC]
+          </button>
         </div>
 
         {/* Body */}
         <div className="flex flex-col gap-4 overflow-y-auto p-4">
-          {/* Dropzone & Native File Input styled with ::file-selector-button */}
+          {/* Dropzone & File Picker */}
           <div
             className={`flex flex-col items-center justify-center gap-2 rounded border-2 border-dashed p-4 text-center transition ${
               isDragging
@@ -199,13 +193,22 @@ export function TrackLoader({
             <p className="text-[11px] text-fuchsia-300/75">
               Decoded and analysed locally in a Web Worker, cached in IndexedDB.
             </p>
-            <input
-              type="file"
-              multiple
-              accept="audio/*"
-              onChange={(e) => void handleFiles(e.target.files)}
-              className="mt-1 cursor-pointer text-[11px] text-fuchsia-200 file:mr-3 file:cursor-pointer file:rounded file:border file:border-cyan-400/60 file:bg-cyan-950/80 file:px-3 file:py-1 file:font-mono file:text-xs file:font-bold file:text-cyan-200 hover:file:bg-cyan-900"
-            />
+
+            <label className="group mt-1 flex w-full cursor-pointer flex-col items-center justify-center gap-1.5 text-center">
+              <input
+                type="file"
+                multiple
+                accept="audio/*"
+                onChange={(e) => void handleFiles(e.target.files)}
+                className="sr-only"
+              />
+              <span className="rounded border border-cyan-400/60 bg-cyan-950/80 px-4 py-1.5 font-mono text-xs font-bold text-cyan-200 shadow-[0_0_10px_rgba(5,217,232,0.2)] transition group-hover:border-cyan-300 group-hover:bg-cyan-900 group-hover:shadow-[0_0_15px_rgba(5,217,232,0.4)]">
+                SCEGLI FILE
+              </span>
+              <span className="text-[11px] text-fuchsia-200/70 text-center">
+                {selectedFileName ?? 'Nessun file selezionato'}
+              </span>
+            </label>
 
             {progress && (
               <div className="mt-2 w-full rounded border border-cyan-400/40 bg-[#090117] px-3 py-1.5 text-[11px] text-cyan-200">
@@ -225,7 +228,7 @@ export function TrackLoader({
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <div className="text-[10px] tracking-widest text-cyan-300 uppercase">
-                  ACTIVE TRACK // {active.beatMap.source.toUpperCase()} GRID
+                  ACTIVE TRACK · {active.beatMap.source.toUpperCase()} GRID
                 </div>
                 <div className="text-sm font-bold text-white">
                   {active.beatMap.artist} — {active.beatMap.title}
@@ -365,10 +368,10 @@ export function TrackLoader({
                           {item.beatMap.artist} — {item.beatMap.title}
                         </div>
                         <div className="truncate text-[10px] text-fuchsia-300/70">
-                          {item.beatMap.sections.length} sections //{' '}
-                          {Math.round(item.beatMap.durationSec)}s // {item.beatMap.source}
+                          {item.beatMap.sections.length} sections ·{' '}
+                          {Math.round(item.beatMap.durationSec)}s · {item.beatMap.source}
                           {best
-                            ? ` // BEST: ${best.bestGrade} (${best.bestScore.toLocaleString()} PTS)`
+                            ? ` · BEST: ${best.bestGrade} (${best.bestScore.toLocaleString()} PTS)`
                             : ''}
                         </div>
                       </div>
@@ -406,40 +409,6 @@ export function TrackLoader({
                 );
               })}
             </div>
-          </div>
-        </div>
-
-        {/* Sticky Footer Action Bar */}
-        <div className="flex items-center justify-between border-t border-fuchsia-500/40 bg-[#14042d] px-4 py-3">
-          <div className="mr-2 truncate text-[11px] text-fuchsia-300/80">
-            {isInitialSelect ? (
-              <span>
-                Selected Tape: <strong className="text-cyan-300">{active.beatMap.artist} — {active.beatMap.title}</strong>{' '}
-                <span className="font-bold text-pink-400">({active.beatMap.bpm.toFixed(1)} BPM)</span>
-              </span>
-            ) : (
-              <span>
-                Press <kbd className="rounded border border-pink-500/40 bg-pink-950/80 px-1.5 py-0.5 font-mono text-pink-300">ESC</kbd> to return to pause menu
-              </span>
-            )}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {!isInitialSelect && (
-              <button
-                type="button"
-                onClick={onClose}
-                className="cursor-pointer rounded border border-pink-500/50 bg-pink-950/70 px-3 py-1.5 text-xs font-bold text-pink-200 hover:border-cyan-400 hover:text-cyan-200"
-              >
-                CLOSE [ESC]
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={isInitialSelect ? (onStartDrive ?? onClose) : (onResumeDrive ?? onClose)}
-              className="cursor-pointer rounded border-2 border-pink-400 bg-gradient-to-r from-pink-600 via-fuchsia-600 to-cyan-600 px-4 py-1.5 text-xs font-black tracking-widest text-white uppercase shadow-[0_0_20px_rgba(255,42,109,0.6)] transition hover:scale-[1.02] hover:shadow-[0_0_25px_rgba(5,217,232,0.8)] active:scale-[0.98]"
-            >
-              {isInitialSelect ? 'START DRIVE [ENTER] ▷' : 'RESUME DRIVE [ENTER] ▷'}
-            </button>
           </div>
         </div>
       </div>

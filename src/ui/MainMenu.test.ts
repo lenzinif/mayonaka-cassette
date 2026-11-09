@@ -33,21 +33,23 @@ describe('MainMenu (UI Layer)', () => {
     expect(text).toContain('真夜中CASSETTE');
     expect(text).toContain('MAYONAKA CASSETTE');
     expect(text).toContain('OUTRUN FM 88.4');
-    expect(text).toContain('CLICK TO TUNE IN AUDIO');
-    expect(text).toContain('CURRENT TAPE:');
+    expect(text).toContain('TUNE IN AUDIO');
+    expect(text).toContain('TAPE');
     expect(text).toContain('Neon Horizon');
     expect(text).toContain('122.0 BPM');
 
-    // Menu items
-    expect(text).toContain('PRELOADING ASSETS... (45%)');
-    expect(text).toContain('CASSETTE TAPE SELECT');
-    expect(text).toContain('HOW TO PLAY // MANUAL');
-    expect(text).toContain('AUDIO &amp; GAMEPLAY OPTIONS');
+    // Clean 4-item arcade menu items
+    expect(text).toContain('LOADING ASSETS... (45%)');
+    expect(text).toContain('SELECT TRACK');
+    expect(text).toContain('OPTIONS');
+    expect(text).toContain('CONTROLS &amp; GUIDE');
+
+    // Discrete dev button in footer
     expect(text).toContain('BEATMAP LAB [DEV]');
 
-    // Footer info
-    expect(text).toContain('100% LOCAL DSP');
-    expect(text).toContain('INSPIRED BY YU SUZUKI');
+    // Footer navigation hint
+    expect(text).toContain('[W/S] NAVIGATE');
+    expect(text).toContain('[ENTER] SELECT');
   });
 
   it('renders ready state and flashing READY badge when preloading completes', () => {
@@ -60,7 +62,7 @@ describe('MainMenu (UI Layer)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('START DRIVE // INSERT COIN');
+    expect(text).toContain('START DRIVE');
     expect(text).toContain('READY');
   });
 
@@ -74,6 +76,6 @@ describe('MainMenu (UI Layer)', () => {
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
     expect(text).toContain('STEREO ON AIR');
-    expect(text).not.toContain('CLICK TO TUNE IN AUDIO');
+    expect(text).not.toContain('TUNE IN AUDIO');
   });
 });

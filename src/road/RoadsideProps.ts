@@ -87,31 +87,44 @@ function drawPalm(
     ctx.fillRect(Math.round(x - trunkW * 1.4), Math.round(y - 1), Math.round(trunkW * 2.8), Math.max(2, Math.round(trunkW * 0.45)));
   }
 
-  // Segmented pixel-art curved trunk
-  if (trunkW >= 2.5) {
-    const rings = trunkW >= 5 ? 6 : 4;
-    for (let r = 0; r < rings; r++) {
-      const t0 = r / rings;
-      const t1 = (r + 1) / rings;
-      const rx = Math.round(x + lean * (t0 * t0));
-      const ry = Math.round(y - h * t1);
-      const segH = Math.max(2, Math.ceil(h / rings + 1));
-      const segW = Math.max(2, Math.round(trunkW * (1.15 - t0 * 0.42)));
-      ctx.fillStyle = r % 2 === 0 ? PALM_TRUNK : '#2c1447';
-      ctx.fillRect(Math.round(rx - segW * 0.5), ry, segW, segH);
-      if (segW >= 4) {
-        ctx.fillStyle = PALM_TRUNK_LIGHT;
-        const hiW = Math.max(1, Math.round(segW * 0.32));
-        const hiX = side < 0 ? rx + Math.floor(segW * 0.15) : rx - Math.floor(segW * 0.45);
-        ctx.fillRect(hiX, ry, hiW, Math.max(1, segH - 1));
-      }
+  // Continuous tapered curved trunk with alternating bark rings
+  const rings = trunkW >= 5 ? 8 : trunkW >= 2.5 ? 5 : trunkW >= 1.2 ? 3 : 1;
+  for (let r = 0; r < rings; r++) {
+    const t0 = r / rings;
+    const t1 = (r + 1) / rings;
+    const x0 = x + lean * (t0 * t0);
+    const y0 = y - h * t0;
+    const w0 = Math.max(1, trunkW * (1.15 - t0 * 0.42));
+
+    const x1 = x + lean * (t1 * t1);
+    const y1 = y - h * t1;
+    const w1 = Math.max(1, trunkW * (1.15 - t1 * 0.42));
+
+    // Outer trunk segment
+    ctx.fillStyle = r % 2 === 0 ? PALM_TRUNK : '#2c1447';
+    ctx.beginPath();
+    ctx.moveTo(x0 - w0 * 0.5, y0);
+    ctx.lineTo(x1 - w1 * 0.5, y1);
+    ctx.lineTo(x1 + w1 * 0.5, y1);
+    ctx.lineTo(x0 + w0 * 0.5, y0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Highlight ridge along inner or outer curve
+    if (w0 >= 3.5 || w1 >= 3.5) {
+      ctx.fillStyle = PALM_TRUNK_LIGHT;
+      const hiW0 = Math.max(1, w0 * 0.32);
+      const hiW1 = Math.max(1, w1 * 0.32);
+      const hiX0 = side < 0 ? x0 + w0 * 0.15 : x0 - w0 * 0.47;
+      const hiX1 = side < 0 ? x1 + w1 * 0.15 : x1 - w1 * 0.47;
+      ctx.beginPath();
+      ctx.moveTo(hiX0, y0);
+      ctx.lineTo(hiX1, y1);
+      ctx.lineTo(hiX1 + hiW1, y1);
+      ctx.lineTo(hiX0 + hiW0, y0);
+      ctx.closePath();
+      ctx.fill();
     }
-  } else {
-    const tw = Math.max(1, Math.round(trunkW));
-    const halfH = Math.max(1, Math.round(h * 0.5));
-    ctx.fillStyle = PALM_TRUNK;
-    ctx.fillRect(Math.round(x - tw * 0.5), Math.round(y - halfH), tw, halfH);
-    ctx.fillRect(Math.round(topX - tw * 0.5), Math.round(topY), tw, Math.max(1, Math.round(h - halfH + 1)));
   }
 
   // Pixel-art palm crown & fronds
@@ -180,6 +193,15 @@ function drawLamp(
   const ry = Math.round(y);
   const topY = Math.round(y - h);
 
+  // Distant Low LOD: compact 2-rect silhouette for horizon lamps (< 10px tall)
+  if (h < 10) {
+    ctx.fillStyle = LAMP_POLE;
+    ctx.fillRect(rx, topY, 1, Math.max(2, Math.round(h)));
+    ctx.fillStyle = LAMP_LIGHT;
+    ctx.fillRect(Math.round(rx + arm), topY, 2, 1);
+    return;
+  }
+
   // Stepped steel plinth at base
   if (w >= 2) {
     const baseW = w * 2.2;
@@ -210,13 +232,13 @@ function drawLamp(
     );
   }
 
-  // Lamp head fixture & pixel-stepped neon glow halo
+  // Lamp head fixture & pixel-stepped neon glow halo (LOD: only draw semi-transparent halos on near lamps)
   const lw = Math.max(2, Math.round(280 * ppu));
   const lh = Math.max(1, Math.round(75 * ppu));
   const lampX = Math.round(rx + arm - lw * 0.5);
   const lampY = topY + w;
 
-  if (lw >= 4) {
+  if (lw >= 6) {
     ctx.fillStyle = 'rgba(255, 243, 176, 0.22)';
     ctx.fillRect(lampX - Math.round(lw * 0.45), lampY - lh, Math.round(lw * 1.9), lh * 4);
     ctx.fillStyle = 'rgba(5, 217, 232, 0.25)';

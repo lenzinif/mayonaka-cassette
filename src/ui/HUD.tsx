@@ -27,6 +27,8 @@ export interface HUDProps {
   onToggleTofuMode?: () => void;
   onCycleSodaSkin?: () => void;
   onToggleAutopilot?: () => void;
+  crtEnabled?: boolean;
+  onToggleCrt?: () => void;
 }
 
 interface ToastState {
@@ -69,6 +71,8 @@ export function HUD({
   onToggleTofuMode,
   onCycleSodaSkin,
   onToggleAutopilot,
+  crtEnabled = true,
+  onToggleCrt,
 }: HUDProps) {
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot, bridge.getSnapshot);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -512,6 +516,7 @@ export function HUD({
         showPerfHud={showPerfHud}
         autoShift={autoShift}
         autopilotActive={snap?.autopilotActive ?? false}
+        crtEnabled={crtEnabled}
         onResume={() => onTogglePause?.()}
         onRestartRun={onRestartRun}
         onOpenTrackLoader={onOpenTrackLoader}
@@ -523,6 +528,7 @@ export function HUD({
         onTogglePerfHud={() => setShowPerfHud((prev) => !prev)}
         onToggleAutoShift={() => onToggleAutoShift?.()}
         onToggleAutopilot={() => onToggleAutopilot?.()}
+        onToggleCrt={onToggleCrt}
         onReturnToMainMenu={onReturnToMainMenu}
       />
     </div>

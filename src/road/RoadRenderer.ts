@@ -135,6 +135,11 @@ export class RoadRenderer {
     // Pass 2: painter's algorithm (back-to-front).
     const cameraSeg = findSegment(track, view.position);
     const isCameraOnBridge = cameraSeg ? cameraSeg.env === 'bridge' : false;
+    if (isCameraOnBridge) {
+      // Pre-fill deep bay water surface once below the horizon (avoids ~180 full-width overdraws on bridge climbs)
+      ctx.fillStyle = '#040714';
+      ctx.fillRect(0, 180, width, height - 180);
+    }
     for (let n = drawDistance - 1; n >= 0; n--) {
       const seg = this.visible[n]!;
       const { p1, p2 } = seg;
@@ -339,12 +344,16 @@ export class RoadRenderer {
 
     // Bridge water surface or regular grass ground fill
     if (isBridge && isCameraOnBridge) {
-      // Oceanic bay water surface with deep night reflection
-      ctx.fillStyle = stripe === 0 ? '#060b1e' : '#040714';
-      if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
+      // Oceanic bay water surface with deep night reflection (clamped below horizon y=180;
+      // #040714 base is pre-filled once before Pass 2)
+      if (stripe === 0 && y1 > 180) {
+        const waterY2 = Math.max(180, y2);
+        ctx.fillStyle = '#060b1e';
+        ctx.fillRect(0, waterY2, width, y1 - waterY2);
+      }
     } else if (stripe === 0 || y2 < 180) {
       ctx.fillStyle = palette.grass[stripe];
-      if (stripe === 0 || y2 < 180) ctx.fillRect(0, y2, width, y1 - y2);
+      ctx.fillRect(0, y2, width, y1 - y2);
     }
 
     // OutRun physical Y-fork geometry in the final outro segments when forkZoneStartZ is active
@@ -379,7 +388,7 @@ export class RoadRenderer {
       drawLanes(ctx, x1, y1, x2, y2, w1, w2);
     }
 
-    if (isBridge && w1 >= 14) {
+    if (isBridge && w1 >= 18) {
       this.renderBridgeParapets(ctx, seg, x1, y1, w1, r1, x2, y2, w2, r2);
     }
   }
@@ -638,36 +647,26 @@ export class RoadRenderer {
     ctx.closePath();
     ctx.fill();
 
-    // Top chrome rails & catadioptres (LOD: closer segments w1 >= 28)
-    if (w1 >= 28) {
+    // Top chrome rails & catadioptres (LOD: closer segments w1 >= 28 using fast axis-aligned fillRects)
+    if (w1 >= 28 && stripe === 0) {
+      const leftRailX = Math.round(x1 - w1 - r1);
+      const rightRailX = Math.round(x1 + w1 + r1);
+      const railY = Math.round(y1 - parH1);
+      const railW = Math.max(1, Math.round(r1 * 0.25));
       ctx.fillStyle = '#9e95be';
-      ctx.beginPath();
-      ctx.moveTo(x1 - w1 - r1, y1 - parH1);
-      ctx.lineTo(x1 - w1 - r1 + 1, y1 - parH1);
-      ctx.lineTo(x2 - w2 - r2 + 1, y2 - parH2);
-      ctx.lineTo(x2 - w2 - r2, y2 - parH2);
-      ctx.closePath();
-      ctx.moveTo(x1 + w1 + r1, y1 - parH1);
-      ctx.lineTo(x1 + w1 + r1 - 1, y1 - parH1);
-      ctx.lineTo(x2 + w2 + r2 - 1, y2 - parH2);
-      ctx.lineTo(x2 + w2 + r2, y2 - parH2);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(leftRailX, railY, railW, 1);
+      ctx.fillRect(rightRailX - railW, railY, railW, 1);
 
-      if (stripe === 0) {
-        ctx.fillStyle = seg.index % 4 === 0 ? '#00f5d4' : '#ff9e24';
-        const reflSize = Math.max(1, Math.round(parH1 * 0.35));
-        ctx.fillRect(Math.round(x1 - w1 - r1 + 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
-        ctx.fillRect(Math.round(x1 + w1 + r1 - reflSize - 1), Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
-      }
+      ctx.fillStyle = seg.index % 4 === 0 ? '#00f5d4' : '#ff9e24';
+      const reflSize = Math.max(1, Math.round(parH1 * 0.35));
+      ctx.fillRect(leftRailX + 1, Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
+      ctx.fillRect(rightRailX - reflSize - 1, Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
     }
 
     // Expansion Joint across the asphalt every 8 segments on stripe 0
-    if (stripe === 0 && seg.index % 8 === 0) {
+    if (stripe === 0 && seg.index % 8 === 0 && w1 >= 22) {
       ctx.fillStyle = '#5c5478';
       polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
-      ctx.fillStyle = '#1e1a2b';
-      polygon(ctx, x1 - w1, y1, x1 + w1, y1, x1 + w1, y1 - 1, x1 - w1, y1 - 1);
     }
   }
 }

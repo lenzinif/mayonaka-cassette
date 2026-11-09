@@ -52,7 +52,10 @@ export function App() {
     return params.has('analyze');
   });
 
-  const [trackLoaderOpen, setTrackLoaderOpen] = useState(false);
+  const [trackLoaderOpen, setTrackLoaderOpen] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.has('deck') || params.has('tracks');
+  });
 
   // Sync telemetric quick options
   useEffect(() => {
@@ -217,6 +220,8 @@ export function App() {
           trackLoaderOpen={trackLoaderOpen}
           inspectorOpen={inspectorOpen}
           cleanHud={cleanHud}
+          crtEnabled={crtEnabled}
+          onToggleCrt={() => setCrtEnabled((prev) => !prev)}
           onToggleCleanHud={() => setCleanHud((prev) => !prev)}
           onTogglePause={() => gameRef.current?.togglePause()}
           onToggleAutoShift={() => gameRef.current?.toggleAutoShift()}

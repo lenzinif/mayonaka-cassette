@@ -940,16 +940,16 @@ export class Background {
       ctx.fillRect(0, seaTopY, width, 1);
       ctx.globalAlpha = 1;
 
-      // Golden setting sun reflection column on water surface directly below the sun
+      // Golden setting sun reflection column on water surface directly below the sun (2px step scanline)
       const sunRefW = Math.max(16, sunR * 0.45);
       ctx.fillStyle = this.lightningAlpha > 0.2 ? lTheme.boltMid : palette.sunBottom;
-      for (let dy = 0; dy < seaH; dy++) {
+      for (let dy = 0; dy < seaH; dy += 2) {
         const y = seaTopY + dy;
         const rip = Math.sin(renderSkyTime * 4.2 + dy * 0.75) * 2.2;
         const expand = (dy / seaH) * 22;
         const refAlpha = (1 - (dy / seaH) * 0.4) * (0.45 + pulse * 0.28);
         ctx.globalAlpha = Math.min(0.85, refAlpha);
-        ctx.fillRect(sunX - (sunRefW + expand) * 0.5 + rip, y, sunRefW + expand, 1);
+        ctx.fillRect(sunX - (sunRefW + expand) * 0.5 + rip, y, sunRefW + expand, 2);
       }
       ctx.globalAlpha = 1;
 
@@ -998,33 +998,28 @@ export class Background {
       // never a flat box or narrow vertical column) with aquatic ripples and silver core.
       const sunRSq = sunR * sunR;
       const waterDy = seaTopY - sunY;
+      const outerCol = this.lightningAlpha > 0.2 ? lTheme.boltMid : palette.sunBottom;
+      const innerCol = this.lightningAlpha > 0.2 ? lTheme.boltCore : palette.sunTop;
 
-      // 1. Outer cyan moon reflection disc (mirrors the exact circular contour of the moon)
-      ctx.fillStyle = this.lightningAlpha > 0.2 ? lTheme.boltMid : palette.sunBottom;
-      for (let dy = 0; dy < seaH; dy++) {
+      for (let dy = 0; dy < seaH; dy += 2) {
         const y = seaTopY + dy;
         const dyMoon = waterDy - dy;
         const chordSq = sunRSq - dyMoon * dyMoon;
         if (chordSq <= 0) continue;
         const hw = Math.sqrt(chordSq);
-        const rip = Math.sin(renderSkyTime * 4.2 + dy * 0.75) * 1.8;
-        const refAlpha = (1 - (dy / seaH) * 0.35) * (0.45 + pulse * 0.22);
-        ctx.globalAlpha = Math.min(0.8, refAlpha);
-        ctx.fillRect(sunX - hw + rip, y, hw * 2, 1);
-      }
+        const sinWave = Math.sin(renderSkyTime * 4.2 + dy * 0.75);
+        const normDy = dy / seaH;
 
-      // 2. Inner silver moonlight core (mirrored circular contour matching the luminous moon center)
-      ctx.fillStyle = this.lightningAlpha > 0.2 ? lTheme.boltCore : palette.sunTop;
-      for (let dy = 0; dy < seaH; dy++) {
-        const y = seaTopY + dy;
-        const dyMoon = waterDy - dy;
-        const chordSq = sunRSq - dyMoon * dyMoon;
-        if (chordSq <= 0) continue;
-        const hw = Math.sqrt(chordSq) * 0.52;
-        const rip = Math.sin(renderSkyTime * 4.2 + dy * 0.75) * 1.1;
-        const refAlpha = (1 - (dy / seaH) * 0.25) * (0.62 + pulse * 0.25);
-        ctx.globalAlpha = Math.min(0.9, refAlpha);
-        ctx.fillRect(sunX - hw + rip, y, hw * 2, 1);
+        // 1. Outer cyan moon reflection disc
+        ctx.fillStyle = outerCol;
+        ctx.globalAlpha = Math.min(0.8, (1 - normDy * 0.35) * (0.45 + pulse * 0.22));
+        ctx.fillRect(sunX - hw + sinWave * 1.8, y, hw * 2, 2);
+
+        // 2. Inner silver moonlight core
+        const innerHw = hw * 0.52;
+        ctx.fillStyle = innerCol;
+        ctx.globalAlpha = Math.min(0.9, (1 - normDy * 0.25) * (0.62 + pulse * 0.25));
+        ctx.fillRect(sunX - innerHw + sinWave * 1.1, y, innerHw * 2, 2);
       }
       ctx.globalAlpha = 1;
 
@@ -1168,12 +1163,12 @@ export class Background {
           ctx.fillStyle = colColor;
           const refW = Math.max(3, tw - 4);
 
-          for (let dy = 0; dy < waterH; dy++) {
+          for (let dy = 0; dy < waterH; dy += 2) {
             const y = waterTopY + dy;
             const rip = Math.round(Math.sin(renderSkyTime * 5.5 + dy * 0.9 + t * 1.3) * 1.8);
             const fade = (1 - dy / waterH) * (0.32 + pulse * 0.28);
             ctx.globalAlpha = Math.max(0, Math.min(1, fade));
-            ctx.fillRect(tx + 2 + rip, y, refW, 1);
+            ctx.fillRect(tx + 2 + rip, y, refW, 2);
           }
         }
       }

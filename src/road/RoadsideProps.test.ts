@@ -102,6 +102,15 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     expect(mockNear.rectCalls).toBeGreaterThan(mockFar.rectCalls);
   });
 
+  it('renders palm trees with continuous tapered trunk polygons and crown fronds', () => {
+    const mock = createMockCanvas();
+    drawProp(mock.ctx, 'palm', 320, 240, 0.03, 1, 0, 0);
+
+    // Continuous trunk rings are drawn via path fills, fronds and shadow via rects
+    expect(mock.fillCalls).toBeGreaterThan(0);
+    expect(mock.rectCalls).toBeGreaterThan(0);
+  });
+
   it('renders Akiba high-rise buildings with storefronts, window matrix, and vertical neon sign', () => {
     const mock = createMockCanvas();
     drawProp(mock.ctx, 'building', 180, 260, 0.02, -1, 0, 0);

@@ -9,11 +9,11 @@ import { HILL } from './TrackBuilder';
 
 export interface CanonicalSegmentData {
   /** Curvatura originale di ciascun segmento (lunghezza = segments.length). */
-  readonly curve: Float32Array;
+  readonly curve: Float64Array;
   /** Quota worldY di p1 per ciascun segmento (lunghezza = segments.length). */
-  readonly p1WorldY: Float32Array;
+  readonly p1WorldY: Float64Array;
   /** Quota worldY di p2 per ciascun segmento (lunghezza = segments.length). */
-  readonly p2WorldY: Float32Array;
+  readonly p2WorldY: Float64Array;
   /** Copia immutabile delle liste di sprite originali per segmento. */
   readonly sprites: readonly (readonly RoadSprite[])[];
 }
@@ -47,6 +47,8 @@ export interface SongTrack extends Track {
   chunks: PlacedRoadChunk[];
   dropMarkers: DropMarker[];
   readonly canonical: CanonicalSegmentData;
+  /** Inclusive/exclusive segment index bounds `[start, end)` dirtied by the last horizon stitch. */
+  dirtyStitchRange?: { start: number; end: number };
 }
 
 export interface SongRoadOptions {
@@ -266,9 +268,9 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
 
   // Pre-allocate immutable canonical blueprint for zero-GC runtime restoration & horizon stitching
   const count = segments.length;
-  const canonicalCurve = new Float32Array(count);
-  const canonicalP1WorldY = new Float32Array(count);
-  const canonicalP2WorldY = new Float32Array(count);
+  const canonicalCurve = new Float64Array(count);
+  const canonicalP1WorldY = new Float64Array(count);
+  const canonicalP2WorldY = new Float64Array(count);
   const canonicalSprites: (readonly RoadSprite[])[] = new Array(count);
 
   for (let i = 0; i < count; i++) {
@@ -398,9 +400,6 @@ export function stitchHorizonToTargetZ(
   const deltaY =
     track.canonical.p1WorldY[toSegIndex]! - track.segments[fromSegIndex]!.p1.worldY;
 
-  // Pre-index drop markers in a fast Set to avoid 276 linear array scans per stitch
-  const dropMarkerSet = new Set(track.dropMarkers.map((dm) => dm.segmentIndex));
-
   for (let n = 0; n < copyCount; n++) {
     const srcSeg = track.segments[fromSegIndex + n]!;
     const destSeg = track.segments[toSegIndex + n]!;
@@ -409,8 +408,8 @@ export function stitchHorizonToTargetZ(
     destSeg.p1.worldY = srcSeg.p1.worldY + deltaY;
     destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
 
-    // Preserve drop marker neon billboards if the destination segment is a drop marker
-    const isDestDropMarker = dropMarkerSet.has(toSegIndex + n);
+    // Preserve drop marker neon billboards if the destination segment is a drop marker (zero GC Set scan)
+    const isDestDropMarker = isDropMarkerSegment(track.dropMarkers, toSegIndex + n);
     if (isDestDropMarker) {
       const dropBillboards = track.canonical.sprites[toSegIndex + n]!.filter(
         (s) => s.kind === 'billboard',
@@ -450,21 +449,30 @@ export function stitchHorizonToTargetZ(
     seg.sprites = track.canonical.sprites[segIdx] as RoadSprite[];
   }
 
-  // Restore canonical geometry for segments outside the active window (zero GC)
-  for (let i = 0; i < toSegIndex; i++) {
-    const seg = track.segments[i]!;
-    seg.curve = track.canonical.curve[i]!;
-    seg.p1.worldY = track.canonical.p1WorldY[i]!;
-    seg.p2.worldY = track.canonical.p2WorldY[i]!;
-    seg.sprites = track.canonical.sprites[i] as RoadSprite[];
+  // Restore canonical geometry only for the previously dirtied stitch window outside the new active window (zero GC)
+  const newStart = toSegIndex;
+  const newEnd = toSegIndex + drawDistance;
+  if (track.dirtyStitchRange) {
+    const prevStart = Math.max(0, track.dirtyStitchRange.start);
+    const prevEnd = Math.min(segCount, track.dirtyStitchRange.end);
+    const beforeEnd = Math.min(prevEnd, newStart);
+    for (let i = prevStart; i < beforeEnd; i++) {
+      const seg = track.segments[i]!;
+      seg.curve = track.canonical.curve[i]!;
+      seg.p1.worldY = track.canonical.p1WorldY[i]!;
+      seg.p2.worldY = track.canonical.p2WorldY[i]!;
+      seg.sprites = track.canonical.sprites[i] as RoadSprite[];
+    }
+    const afterStart = Math.max(prevStart, newEnd);
+    for (let i = afterStart; i < prevEnd; i++) {
+      const seg = track.segments[i]!;
+      seg.curve = track.canonical.curve[i]!;
+      seg.p1.worldY = track.canonical.p1WorldY[i]!;
+      seg.p2.worldY = track.canonical.p2WorldY[i]!;
+      seg.sprites = track.canonical.sprites[i] as RoadSprite[];
+    }
   }
-  for (let i = toSegIndex + drawDistance; i < segCount; i++) {
-    const seg = track.segments[i]!;
-    seg.curve = track.canonical.curve[i]!;
-    seg.p1.worldY = track.canonical.p1WorldY[i]!;
-    seg.p2.worldY = track.canonical.p2WorldY[i]!;
-    seg.sprites = track.canonical.sprites[i] as RoadSprite[];
-  }
+  track.dirtyStitchRange = { start: newStart, end: newEnd };
 
   return {
     deltaZ: deltaSegs * segLen,
@@ -472,6 +480,13 @@ export function stitchHorizonToTargetZ(
     toSegIndex,
     copiedWindowSegs: copyCount,
   };
+}
+
+function isDropMarkerSegment(dropMarkers: readonly DropMarker[], segmentIndex: number): boolean {
+  for (let i = 0; i < dropMarkers.length; i++) {
+    if (dropMarkers[i]!.segmentIndex === segmentIndex) return true;
+  }
+  return false;
 }
 
 /**
@@ -487,6 +502,7 @@ export function restoreCanonicalTrack(track: SongTrack): void {
     s.p2.worldY = canonical.p2WorldY[i]!;
     s.sprites = canonical.sprites[i] as RoadSprite[];
   }
+  track.dirtyStitchRange = undefined;
 }
 
 function normalizeSections(beatMap: BeatMap): BeatSection[] {

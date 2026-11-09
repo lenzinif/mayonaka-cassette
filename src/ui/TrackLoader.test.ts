@@ -68,7 +68,7 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
     expect(html).toContain("Impossibile rimuovere l&#x27;unica traccia rimasta");
   });
 
-  it('renders initial soundtrack selection mode with START DRIVE buttons when isInitialSelect is true', () => {
+  it('renders initial soundtrack selection mode without bottom slop footer', () => {
     const library = new TrackLibrary();
     const onStartDrive = vi.fn();
     const html = renderToString(
@@ -84,11 +84,51 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
     );
     const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
 
-    expect(text).toContain('CASSETTE DECK // SELECT SOUNDTRACK');
-    expect(text).toContain('INSERT TAPE & DRIVE [ENTER] ▷');
-    expect(text).toContain('START DRIVE [ENTER] ▷');
-    expect(text).toContain('Selected Tape:');
-    expect(text).toContain('OutRun FM 88.4 — Neon Horizon (Synth Fallback)');
-    expect(text).toContain('(122.0 BPM)');
+    expect(text).toContain('CASSETTE DECK');
+    expect(text).toContain('SELECT OR IMPORT AUDIO (MP3 / WAV / OGG / FLAC)');
+    expect(text).toContain('BACK [ESC]');
+    expect(text).not.toContain('START DRIVE [ENTER] ▷');
+    expect(text).not.toContain('INSERT TAPE & DRIVE [ENTER] ▷');
+    expect(text).not.toContain('Selected Tape:');
+  });
+
+  it('renders unified BACK [ESC] button in header and no bottom slop footer when isInitialSelect is false', () => {
+    const library = new TrackLibrary();
+    const html = renderToString(
+      createElement(TrackLoader, {
+        open: true,
+        library,
+        isInitialSelect: false,
+        onSelectTrack: vi.fn(),
+        onUpdateBeatMap: vi.fn(),
+        onClose: vi.fn(),
+      }),
+    );
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+
+    expect(text).toContain('CASSETTE DECK');
+    expect(text).toContain('BACK [ESC]');
+    expect(text).not.toContain('RESUME DRIVE [ENTER] ▷');
+    expect(text).not.toContain('CLOSE [ESC]');
+    expect(text).not.toContain('Selected Tape:');
+  });
+
+  it('renders centered SCEGLI FILE button and "Nessun file selezionato" text underneath', () => {
+    const library = new TrackLibrary();
+    const html = renderToString(
+      createElement(TrackLoader, {
+        open: true,
+        library,
+        onSelectTrack: vi.fn(),
+        onUpdateBeatMap: vi.fn(),
+        onClose: vi.fn(),
+      }),
+    );
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+
+    expect(text).toContain('SCEGLI FILE');
+    expect(text).toContain('Nessun file selezionato');
+    expect(html).toContain('type="file"');
+    expect(html).toContain('class="sr-only"');
   });
 });
