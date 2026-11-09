@@ -25,7 +25,7 @@ export const MAX_DRAW_DISTANCE = 500;
 export const TELEMETRY_HZ = 15;
 
 /** Application release version (aligned with package.json). */
-export const APP_VERSION = 'v0.2.1-alpha';
+export const APP_VERSION = 'v0.2.2-alpha';
 
 /** Number of musical bars before the end of a track where the stage fork appears. */
 export const FORK_APPROACH_BARS = 6;

@@ -1,6 +1,6 @@
 # 真夜中Cassette (Mayonaka Cassette): roadmap e attività
 
-Piano di sviluppo per portare il gioco dalla versione alpha attuale (v0.2.1-alpha) alla beta e al rilascio.
+Piano di sviluppo per portare il gioco dalla versione alpha attuale (v0.2.2-alpha) alla beta e al rilascio.
 
 ---
 
@@ -36,12 +36,12 @@ Ridisegnare il cruscotto con elementi grafici anni '80 e ottimizzare la telemetr
   - [x] Pause Menu unificato e centralizzato in stile Future Funk per le opzioni in-game.
   - [x] Menù di avvio arcade completo (`MainMenu.tsx`) con marquee FM 88.4, stato audio ON AIR e selezione cassette.
 
-### Pulizia e decluttering dell'HUD (In corso / Prossima attività)
-- [ ] Pulire e alleggerire l'HUD a schermo:
-  - [ ] Eliminare etichette ridondanti e testi secondari fissi per liberare la visuale centrale e l'asfalto.
-  - [ ] Perfezionare la gerarchia visiva e i contrasti (lasciare in evidenza solo tachimetro, marcia/ritmo e cassetta Groove).
-  - [ ] Ottimizzare la durata e la discrezione dei toast temporanei (cambi marcia, drop, lap).
-  - [ ] Rifinire la modalità Clean HUD (`H`) per una transizione ancora più pulita e cinematografica.
+### Pulizia e decluttering dell'HUD
+- [x] Pulire e alleggerire l'HUD a schermo:
+  - [x] Eliminare etichette ridondanti e testi secondari fissi per liberare la visuale centrale e l'asfalto.
+  - [x] Perfezionare la gerarchia visiva e i contrasti (lasciare in evidenza solo tachimetro, marcia/ritmo e cassetta Groove).
+  - [x] Ottimizzare la durata e la discrezione dei toast temporanei (cambi marcia, drop, lap).
+  - [x] Rifinire la modalità Clean HUD (`H`) per una transizione ancora più pulita e cinematografica.
 ---
 
 ## 2. Nuovi elementi a bordo strada

@@ -11,7 +11,7 @@
 
 ---
 
-## 🚦 Project Status: Playable Alpha (v0.2.1-alpha)
+## 🚦 Project Status: Playable Alpha (v0.2.2-alpha)
 
 *Mayonaka Cassette* is currently in **Playable Alpha**:
 - **Arcade core loop:** Custom pseudo-3D canvas rasterizer with 120 Hz fixed-step physics, 4-speed beat-shift gearbox, centrifugal curve pull, and tire-smoking drift handling.
