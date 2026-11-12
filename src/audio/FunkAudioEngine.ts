@@ -5,7 +5,13 @@ import {
   type BeatJudgement,
   type BeatJudgementTier,
 } from './BeatClock';
-import { barDurationSec, beatDurationSec, type BeatMap, type BeatSection } from './BeatMap';
+import {
+  barDurationSec,
+  beatDurationSec,
+  type BeatMap,
+  type BeatSection,
+  type SectionRole,
+} from './BeatMap';
 
 /**
  * Default procedural Future Funk BeatMap (122 BPM, 64 bars = ~125.9 s) used when
@@ -311,6 +317,17 @@ export interface DrivingAudioParams {
   isBridge?: boolean;
 }
 
+export interface PreviewSample {
+  isPlaying: boolean;
+  trackTimeSec: number;
+  durationSec: number;
+  beatInBar: number;
+  barIndex: number;
+  beatPulse: number;
+  downbeatPulse: number;
+  sectionRole: SectionRole;
+}
+
 /**
  * Web Audio graph & master beat clock wrapper (`Source -> SourceGain -> BiquadFilter -> MasterGain -> Destination`).
  *
@@ -384,6 +401,23 @@ export class FunkAudioEngine {
   /** Momentary filter blip boost (e.g. on beat-matched shifts or drops). */
   private filterBlipBoost = 0;
 
+  /** Cassette Deck preview playback state (active independently of gameplay pause). */
+  private previewMode = false;
+  private previewPlaying = false;
+  private previewClickEnabled = false;
+  private savedGameplayState: { contentHash: string; trackSec: number } | null = null;
+  private lastPreviewSampleTimeMs = 0;
+  private readonly previewSample: PreviewSample = {
+    isPlaying: false,
+    trackTimeSec: 0,
+    durationSec: 1,
+    beatInBar: 0,
+    barIndex: 0,
+    beatPulse: 0,
+    downbeatPulse: 0,
+    sectionRole: 'intro',
+  };
+
   constructor(initialBeatMap: BeatMap = DEFAULT_SYNTH_BEATMAP) {
     this.beatClock = new BeatClock(initialBeatMap);
   }
@@ -431,11 +465,30 @@ export class FunkAudioEngine {
     return this.isPaused;
   }
 
+  get isPreviewMode(): boolean {
+    return this.previewMode;
+  }
+
+  get isPreviewPlaying(): boolean {
+    return this.previewPlaying;
+  }
+
+  get isPreviewClickEnabled(): boolean {
+    return this.previewClickEnabled;
+  }
+
+  setPreviewClickEnabled(enabled: boolean): void {
+    this.previewClickEnabled = enabled;
+  }
+
   /**
    * Freezes audio playback, suspends the Web Audio context, and halts BeatClock advancement
    * (AGENTS.md §5 M8 tab-visibility & pause handling).
    */
   async pause(): Promise<void> {
+    if (this.previewPlaying) {
+      this.pausePreview();
+    }
     if (this.isPaused) return;
     this.isPaused = true;
     this.resumeId++;
@@ -456,6 +509,9 @@ export class FunkAudioEngine {
    */
   async resume(): Promise<void> {
     if (!this.isPaused) return;
+    this.previewMode = false;
+    this.previewPlaying = false;
+    this.savedGameplayState = null;
     this.isPaused = false;
     const currentResumeId = ++this.resumeId;
 
@@ -575,7 +631,7 @@ export class FunkAudioEngine {
       }
     }
 
-    if (!this.isPaused && this.ctx.state === 'suspended') {
+    if ((!this.isPaused || this.previewMode) && this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
 
@@ -590,6 +646,222 @@ export class FunkAudioEngine {
   }
 
   /**
+   * Starts or resumes Cassette Deck preview playback at full filter clarity, even while
+   * gameplay is paused (`AGENTS.md` §4.5: called inside a user click/keydown gesture).
+   */
+  async startPreview(offsetSec?: number): Promise<void> {
+    if (!this.previewMode) {
+      this.previewMode = true;
+      this.savedGameplayState = {
+        contentHash: this.beatClock.map.contentHash,
+        trackSec: this.virtualTrackSec,
+      };
+    }
+
+    const dur = Math.max(0.1, this.beatClock.map.durationSec);
+    if (offsetSec !== undefined) {
+      this.virtualTrackSec = Math.max(0, Math.min(dur - 0.02, offsetSec));
+    }
+
+    await this.unlock();
+    if (!this.previewMode) return;
+
+    if (this.ctx && this.ctx.state === 'suspended') {
+      try {
+        await this.ctx.resume();
+      } catch {
+        // Ignore resume failure in restricted/mock environments
+      }
+    }
+    if (!this.previewMode) return;
+
+    this.stopOutgoingSource();
+    this.resetDubState();
+    this.applyPreviewFilterAndRate();
+    this.beatClock.resetCrossingState();
+
+    if (this.ctx) {
+      if (!this.currentBuffer) {
+        this.currentBuffer = this.buildSynthFallbackBuffer(this.ctx, this.beatClock.map.bpm);
+        this.isSynthLoopBuffer = true;
+      }
+      if (this.ctx.state === 'running') {
+        this.startSourceNode(this.virtualTrackSec, 0.02);
+        this.pendingTrackStart = false;
+      }
+    }
+
+    this.previewPlaying = true;
+    this.lastPreviewSampleTimeMs = typeof performance !== 'undefined' ? performance.now() : 0;
+  }
+
+  /**
+   * Pauses Cassette Deck preview playback while preserving the current scrub timestamp.
+   */
+  pausePreview(): void {
+    if (!this.previewPlaying) return;
+    if (this.ctx && this.ctx.state === 'running') {
+      const nowAudio = this.ctx.currentTime;
+      const elapsed = Math.min(0.25, Math.max(0, nowAudio - this.lastAudioTimeSec));
+      this.lastAudioTimeSec = nowAudio;
+      const dur = Math.max(0.1, this.beatClock.map.durationSec);
+      this.virtualTrackSec = (this.virtualTrackSec + elapsed) % dur;
+    }
+    this.stopSourceNode();
+    this.previewPlaying = false;
+  }
+
+  /**
+   * Toggles Cassette Deck preview playback between playing and paused.
+   */
+  async togglePreview(): Promise<boolean> {
+    if (this.previewPlaying) {
+      this.pausePreview();
+      return false;
+    }
+    await this.startPreview(this.virtualTrackSec);
+    return this.previewPlaying;
+  }
+
+  /**
+   * Seeks Cassette Deck preview playback to `timeSec` (clamped inside `[0, durationSec)`).
+   */
+  seekPreview(timeSec: number): void {
+    const dur = Math.max(0.1, this.beatClock.map.durationSec);
+    const clamped = Math.max(0, Math.min(dur - 0.02, timeSec));
+    this.virtualTrackSec = clamped;
+    this.beatClock.resetCrossingState();
+    if (this.previewMode && this.previewPlaying && this.ctx && this.ctx.state === 'running') {
+      this.startSourceNode(clamped, 0.015);
+    }
+  }
+
+  /**
+   * Exits Cassette Deck preview mode.
+   * When `restoreIfSameTrack` is true and the active track matches the track that was
+   * playing before preview started, restores the saved gameplay track timestamp.
+   */
+  stopPreview(restoreIfSameTrack = false): void {
+    if (!this.previewMode) return;
+    this.previewMode = false;
+    this.previewPlaying = false;
+
+    const sameTrack =
+      this.savedGameplayState !== null &&
+      this.savedGameplayState.contentHash === this.beatClock.map.contentHash;
+    if (restoreIfSameTrack && sameTrack && this.savedGameplayState) {
+      this.virtualTrackSec = this.savedGameplayState.trackSec;
+    } else {
+      this.virtualTrackSec = 0;
+    }
+    this.savedGameplayState = null;
+    this.beatClock.resetCrossingState();
+
+    if (this.isPaused) {
+      this.stopOutgoingSource();
+      this.stopSourceNode();
+      this.pendingTrackStart = true;
+      if (this.ctx && this.ctx.state === 'running') {
+        void this.ctx.suspend().catch(() => {});
+      }
+    }
+  }
+
+  /**
+   * Advances preview track clock & samples `BeatClock` for live 4-beat LEDs and optional
+   * metronome clicks while the Cassette Deck is open. Mutates a pre-allocated struct.
+   */
+  samplePreview(): Readonly<PreviewSample> {
+    const dur = Math.max(0.1, this.beatClock.map.durationSec);
+
+    if (this.previewPlaying) {
+      if (this.ctx && this.ctx.state === 'running') {
+        const nowAudio = this.ctx.currentTime;
+        const elapsed = Math.min(0.25, Math.max(0, nowAudio - this.lastAudioTimeSec));
+        this.lastAudioTimeSec = nowAudio;
+        this.virtualTrackSec += elapsed;
+      } else {
+        const nowMs =
+          typeof performance !== 'undefined' ? performance.now() : this.lastPreviewSampleTimeMs;
+        const elapsed =
+          this.lastPreviewSampleTimeMs > 0
+            ? Math.min(0.25, Math.max(0, (nowMs - this.lastPreviewSampleTimeMs) / 1000))
+            : 0;
+        this.lastPreviewSampleTimeMs = nowMs;
+        this.virtualTrackSec += elapsed;
+      }
+
+      if (this.virtualTrackSec >= dur) {
+        this.virtualTrackSec %= dur;
+        this.beatClock.resetCrossingState();
+      }
+    }
+
+    const latencySec = this.getOutputLatencySec();
+    const audibleSec = Math.max(0, this.virtualTrackSec - latencySec);
+    const clockState = this.beatClock.sample(audibleSec);
+
+    if (this.previewPlaying && this.previewClickEnabled && clockState.justCrossedBeat) {
+      this.triggerPreviewClick(clockState.beatInBar === 0);
+    }
+
+    this.previewSample.isPlaying = this.previewPlaying;
+    this.previewSample.trackTimeSec = this.virtualTrackSec;
+    this.previewSample.durationSec = dur;
+    this.previewSample.beatInBar = clockState.beatInBar;
+    this.previewSample.barIndex = Math.max(0, clockState.barIndex);
+    this.previewSample.beatPulse = clockState.beatPulse;
+    this.previewSample.downbeatPulse = clockState.downbeatPulse;
+    this.previewSample.sectionRole = clockState.sectionRole;
+    return this.previewSample;
+  }
+
+  private applyPreviewFilterAndRate(): void {
+    this.currentCutoffHz = tuning.audioFilterMaxHz;
+    this.currentQ = 1.6;
+    this.currentPlaybackRate = 1.0;
+    this.lastAppliedCutoffHz = -1;
+    this.lastAppliedQ = -1;
+    this.lastAppliedPlaybackRate = -1;
+    if (this.filterNode) {
+      this.filterNode.frequency.value = tuning.audioFilterMaxHz;
+      this.filterNode.Q.value = 1.6;
+      this.lastAppliedCutoffHz = tuning.audioFilterMaxHz;
+      this.lastAppliedQ = 1.6;
+    }
+    if (this.sourceNode) {
+      this.sourceNode.playbackRate.value = 1.0;
+      this.lastAppliedPlaybackRate = 1.0;
+    }
+  }
+
+  private triggerPreviewClick(isDownbeat: boolean): void {
+    if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = isDownbeat ? 'triangle' : 'sine';
+    osc.frequency.setValueAtTime(isDownbeat ? 1320 : 780, now);
+    osc.frequency.exponentialRampToValueAtTime(isDownbeat ? 660 : 390, now + 0.035);
+
+    gain.gain.setValueAtTime(isDownbeat ? 0.34 : 0.18, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+
+    osc.connect(gain);
+    gain.connect(this.masterGain);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore disconnect errors in mock contexts
+      }
+    };
+    osc.start(now);
+    osc.stop(now + 0.045);
+  }
+
+  /**
    * Rewinds the active track and BeatClock back to `0.0s` (beat 0, bar 0) so that
    * when the player starts driving from a standstill after browsing the main menu,
    * the audio clock and road start in phase without accumulated menu lag.
@@ -597,6 +869,9 @@ export class FunkAudioEngine {
   restartFromBeginning(): void {
     this.stopOutgoingSource();
     this.stopSourceNode();
+    this.previewMode = false;
+    this.previewPlaying = false;
+    this.savedGameplayState = null;
     this.crossfadeRemainingSec = 0;
     this.crossfadeTotalSec = 0;
     this.virtualTrackSec = 0;
@@ -630,8 +905,15 @@ export class FunkAudioEngine {
     this.isSynthLoopBuffer = audioBuffer === null;
     this.virtualTrackSec = 0;
 
-    if (this.ctx && this.ctx.state === 'running' && !this.isPaused) {
-      this.startSourceNode(0, 0);
+    if (
+      this.ctx &&
+      this.ctx.state === 'running' &&
+      (!this.isPaused || (this.previewMode && this.previewPlaying))
+    ) {
+      if (this.previewMode) {
+        this.applyPreviewFilterAndRate();
+      }
+      this.startSourceNode(0, this.previewMode ? 0.02 : 0);
       this.pendingTrackStart = false;
     } else {
       this.pendingTrackStart = true;
