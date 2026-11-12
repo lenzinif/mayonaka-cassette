@@ -230,11 +230,28 @@ const LIGHTNING_THEMES: readonly LightningTheme[] = [
 // Static color constants to avoid dynamic string interpolation in render()
 const COLOR_WHITE = '#ffffff';
 const COLOR_NIGHT_SKYLINE = '#080417';
+const COLOR_SUNSET_SKYLINE = '#240a38';
 const COLOR_BEACON_RED = '#ff2a75';
 const COLOR_BEACON_CYAN = '#00f5d4';
 const COLOR_RAIN_FAR = '#70b5e8';
 const COLOR_RAIN_NEAR = '#a6e8ff';
 const COLOR_WATER_DEEP = '#030514';
+
+function computeCoastalTowerHeight(t: number): number {
+  if (t <= 5 || t >= 26 || (t >= 12 && t <= 19)) {
+    return 0; // Margins or Central bay
+  } else if (t === 11 || t === 20) {
+    return 8; // Pier beacons
+  } else if (t >= 6 && t <= 10) {
+    // Left coastal city
+    const flank = t - 6;
+    return Math.round(18 + (1 - flank / 4) * 16 + ((t * 9 + 3) % 6));
+  } else {
+    // Right coastal city
+    const flank = 25 - t;
+    return Math.round(18 + (1 - flank / 4) * 16 + ((t * 7 + 5) % 6));
+  }
+}
 
 const RGBA_CACHE = new Map<string, string>();
 function hexToRgba(hex: string, alpha: number): string {
@@ -1157,7 +1174,7 @@ export class Background {
           const tw = this.towerWidths[t]!;
           if (tx + tw < -5 || tx > width + 5) continue;
 
-          const th = this.towerHeights[t]!;
+          const th = computeCoastalTowerHeight(t);
           if (th < 12) continue;
 
           const colColor = t % 2 === 0 ? winPrimary : winAccent;
@@ -1187,30 +1204,12 @@ export class Background {
         let th: number;
         let isPierBeacon = false;
         if (isSunsetBoulevard) {
-          th = Math.min(14, 5 + ((t * 5 + 3) % 9));
+          th = computeCoastalTowerHeight(t);
         } else if (isAkibaNight) {
           th = 18 + ((t * 13 + 7) % 32);
         } else {
-          // Mayonaka Bay: buildings strictly on the sides (ai lati), margin hills on outer edges, open sea in center
-          if (t <= 5 || t >= 26) {
-            // Margins (x: 0..100 and 520..620): outer coastal hills frame the edges, no buildings!
-            th = 0;
-          } else if (t >= 12 && t <= 19) {
-            // Central bay opening (x: 240..380): open sea, no buildings!
-            th = 0;
-          } else if (t === 11 || t === 20) {
-            // Harbor quayside pier beacons right at the bay entrance
-            th = 8;
-            isPierBeacon = true;
-          } else if (t >= 6 && t <= 10) {
-            // Left coastal city (x: 120..200): tallest near hillside (30-36px), stepping down towards harbor (16-20px)
-            const flank = t - 6; // 0..4
-            th = Math.round(18 + (1 - flank / 4) * 16 + ((t * 9 + 3) % 6));
-          } else {
-            // Right coastal city (x: 420..500): stepping up from harbor towards hillside (30-36px)
-            const flank = 25 - t; // 0..4
-            th = Math.round(18 + (1 - flank / 4) * 16 + ((t * 7 + 5) % 6));
-          }
+          th = computeCoastalTowerHeight(t);
+          isPierBeacon = t === 11 || t === 20;
         }
         if (th <= 0) continue;
 
@@ -1218,7 +1217,7 @@ export class Background {
         const style = this.towerStyle[t]!;
 
         // 7a. Building silhouette (clean silhouette with lightning roof highlight)
-        ctx.fillStyle = COLOR_NIGHT_SKYLINE;
+        ctx.fillStyle = isSunsetBoulevard ? COLOR_SUNSET_SKYLINE : COLOR_NIGHT_SKYLINE;
         if (style === 1) {
           // Stepped art-deco tower
           const stepW = Math.max(4, Math.floor(tw * 0.65));
@@ -1512,32 +1511,38 @@ export class Background {
     glowColor: string,
     crownColor: string,
     padX: number,
-    padBottom: number,
+    padTop: number,
   ): void {
     const yBase = cy + ch;
     const def = CLOUD_VARIANTS[variant % CLOUD_VARIANTS.length] ?? CLOUD_VARIANTS[0]!;
     const domes = def.domes;
     const domeCount = domes.length;
 
+    // Clip the cloud body and underside shading to y <= yBase so full-circle
+    // domes never protrude below the flat condensation base shelf.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cx - padX, cy - padTop, cw + padX * 2, padTop + ch);
+    ctx.clip();
+
     // 1. Base luminous cumulus body fill
     ctx.fillStyle = bodyColor;
     this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
     ctx.fill();
 
-    // 2. Clipped underside shading
-    ctx.save();
+    // 2. Clipped underside shading (intersected with y <= yBase)
     this.traceCloudSilhouette(ctx, cx, cy, cw, ch, variant);
     ctx.clip();
 
     // 2a. Soft deep underside belly shadow (lower ~36% of cloud mass)
     ctx.fillStyle = shadowColor;
     const shadowH = Math.max(4, Math.round(ch * 0.36));
-    ctx.fillRect(cx - padX, yBase - shadowH, cw + padX * 2, shadowH + padBottom);
+    ctx.fillRect(cx - padX, yBase - shadowH, cw + padX * 2, shadowH);
 
     // 2b. Warm ambient horizon bounce rim (bottom ~12% of cloud mass)
     ctx.fillStyle = glowColor;
     const glowH = Math.max(2, Math.round(ch * 0.12));
-    ctx.fillRect(cx - padX, yBase - glowH, cw + padX * 2, glowH + padBottom);
+    ctx.fillRect(cx - padX, yBase - glowH, cw + padX * 2, glowH);
 
     ctx.restore();
 
@@ -1577,7 +1582,6 @@ export class Background {
 
       const padX = this.cloudPadX[i]!;
       const padTop = this.cloudPadTop[i]!;
-      const padBottom = Math.ceil(ch * 0.20) + 6;
 
       let canvas = this.cloudCanvases[i];
       if (!canvas) {
@@ -1585,7 +1589,7 @@ export class Background {
         this.cloudCanvases[i] = canvas;
       }
       canvas.width = Math.ceil(cw + padX * 2);
-      canvas.height = Math.ceil(ch + padTop + padBottom);
+      canvas.height = Math.ceil(ch + padTop + 2);
       const ctx = canvas.getContext('2d');
       if (!ctx) continue;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -1603,7 +1607,7 @@ export class Background {
         cPal.baseGlow,
         cPal.rim,
         padX,
-        padBottom,
+        padTop,
       );
     }
   }
@@ -1653,7 +1657,6 @@ export class Background {
 
       // Fallback path for lightning flashes or headless test environments
       ctx.globalAlpha = (isFlashing ? 0.92 : 0.88) * layerAlpha;
-      const padBottom = Math.ceil(ch * 0.20) + 6;
       this.drawCloud(
         ctx,
         cx,
@@ -1667,7 +1670,7 @@ export class Background {
         glowColor,
         crownColor,
         padX,
-        padBottom,
+        padTop,
       );
       ctx.globalAlpha = 1;
     }
