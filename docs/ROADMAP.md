@@ -25,7 +25,7 @@ Ridisegnare il cruscotto con elementi grafici anni '80 e ottimizzare la telemetr
   - [x] Tachimetro e contagiri a segmenti digitali verdi e turchesi, ispirati ai cruscotti giapponesi dell'epoca (Toyota Soarer, Subaru XT).
   - [x] Indicatore di marcia retroilluminato per il beat-shift.
 - [x] Indicatore del Groove a cassetta:
-  - [x] Disegnare la barra del Groove come una musicassetta in pixel art, con le bobine che ruotano a seconda della velocità e del livello di Groove (`LOW`, `MEDIUM`, `HIGH`, `SSS`).
+  - [x] Disegnare la barra del Groove come una musicassetta in pixel art, con le bobine che ruotano a seconda della velocità e del livello di Groove (`LOW`, `MEDIUM`, `HIGH`, `OVERDRIVE`).
   - [x] Animazione del nastro allentato in caso di impatto o calo di Groove.
 - [x] Indicatori di ritmo:
   - [x] Riposizionare i giudizi (`PERFECT`, `GOOD`, `EARLY`, `LATE`) sui montanti o vicino alle marce, lasciando libera la visuale della strada.

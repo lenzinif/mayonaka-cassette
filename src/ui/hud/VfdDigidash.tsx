@@ -119,7 +119,7 @@ export function VfdDigidash({
             <div className="flex items-center gap-1">
               <span
                 className={`rounded px-1.5 py-0.2 text-[8px] font-black tracking-wider transition-all duration-150 ${
-                  grooveTier === 'SSS'
+                  grooveTier === 'OVERDRIVE'
                     ? 'border border-amber-300 bg-amber-950/90 text-amber-200 shadow-[0_0_10px_rgba(251,191,36,0.6)] animate-pulse'
                     : grooveTier === 'HIGH'
                       ? 'border border-pink-400 bg-pink-950/90 text-pink-200 shadow-[0_0_8px_rgba(255,42,109,0.5)]'
@@ -162,7 +162,7 @@ export function VfdDigidash({
               <span>LOW</span>
               <span className="text-cyan-500/70">MED</span>
               <span className="text-pink-500/70">HIGH</span>
-              <span className="text-amber-400/80 font-bold">SSS</span>
+              <span className="text-amber-400/80 font-bold">OVR</span>
             </div>
           </div>
         </div>

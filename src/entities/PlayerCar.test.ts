@@ -173,7 +173,7 @@ describe('PlayerCar', () => {
     expect(downshiftedCar.groove).toBeGreaterThan(luggingCar.groove);
   });
 
-  it('scales 6th-gear aerodynamic ceiling with Groove tier and unlocks Overdrive on SSS Groove + downhill plunges', () => {
+  it('scales 6th-gear aerodynamic ceiling with Groove tier and unlocks Overdrive on OVERDRIVE Groove + downhill plunges', () => {
     const lowGrooveCar = new PlayerCar();
     lowGrooveCar.gearbox.gear = 6;
     lowGrooveCar.groove = 10;
@@ -182,18 +182,18 @@ describe('PlayerCar', () => {
     const overdriveCar = new PlayerCar();
     overdriveCar.gearbox.gear = 6;
     overdriveCar.groove = 95;
-    overdriveCar.grooveTier = 'SSS';
+    overdriveCar.grooveTier = 'OVERDRIVE';
 
     const lowTop = lowGrooveCar.getEffectiveTopSpeed(tuning.maxSpeed, 0);
-    const sssFlatTop = overdriveCar.getEffectiveTopSpeed(tuning.maxSpeed, 0);
-    const sssDownhillTop = overdriveCar.getEffectiveTopSpeed(tuning.maxSpeed, -0.35);
+    const overdriveFlatTop = overdriveCar.getEffectiveTopSpeed(tuning.maxSpeed, 0);
+    const overdriveDownhillTop = overdriveCar.getEffectiveTopSpeed(tuning.maxSpeed, -0.35);
 
     expect(lowTop).toBeLessThan(tuning.maxSpeed * 0.95);
-    expect(sssFlatTop).toBeGreaterThan(tuning.maxSpeed * 1.02);
-    expect(sssDownhillTop).toBeGreaterThan(sssFlatTop);
+    expect(overdriveFlatTop).toBeGreaterThan(tuning.maxSpeed * 1.02);
+    expect(overdriveDownhillTop).toBeGreaterThan(overdriveFlatTop);
   });
 
-  it('applies hysteresis across Groove tiers (LOW -> MEDIUM -> HIGH -> SSS)', () => {
+  it('applies hysteresis across Groove tiers (LOW -> MEDIUM -> HIGH -> OVERDRIVE)', () => {
     expect(evaluateGrooveTier(24, 'LOW')).toBe('LOW');
     expect(evaluateGrooveTier(25, 'LOW')).toBe('MEDIUM');
 
@@ -201,19 +201,19 @@ describe('PlayerCar', () => {
     expect(evaluateGrooveTier(21, 'MEDIUM')).toBe('MEDIUM');
     expect(evaluateGrooveTier(18, 'MEDIUM')).toBe('LOW');
 
-    // SSS promotion at 85, demotion below 79
-    expect(evaluateGrooveTier(86, 'HIGH')).toBe('SSS');
-    expect(evaluateGrooveTier(81, 'SSS')).toBe('SSS');
-    expect(evaluateGrooveTier(78, 'SSS')).toBe('HIGH');
+    // OVERDRIVE promotion at 85, demotion below 79
+    expect(evaluateGrooveTier(86, 'HIGH')).toBe('OVERDRIVE');
+    expect(evaluateGrooveTier(81, 'OVERDRIVE')).toBe('OVERDRIVE');
+    expect(evaluateGrooveTier(78, 'OVERDRIVE')).toBe('HIGH');
   });
 
-  it('decays Groove in SSS and HIGH tiers when idle, but preserves MEDIUM and LOW tiers', () => {
-    // SSS decay
-    const sssCar = new PlayerCar();
-    sssCar.groove = 90;
-    sssCar.grooveTier = 'SSS';
-    sssCar.update(1.0, IDLE, 0, 0);
-    expect(sssCar.groove).toBeCloseTo(90 - tuning.grooveSssDrainRate, 1);
+  it('decays Groove in OVERDRIVE and HIGH tiers when idle, but preserves MEDIUM and LOW tiers', () => {
+    // OVERDRIVE decay
+    const overdriveCar = new PlayerCar();
+    overdriveCar.groove = 90;
+    overdriveCar.grooveTier = 'OVERDRIVE';
+    overdriveCar.update(1.0, IDLE, 0, 0);
+    expect(overdriveCar.groove).toBeCloseTo(90 - tuning.grooveOverdriveDrainRate, 1);
 
     // HIGH decay
     const highCar = new PlayerCar();
@@ -237,12 +237,12 @@ describe('PlayerCar', () => {
     expect(lowCar.groove).toBe(15);
   });
 
-  it('allows drifting to overpower SSS decay and rebuild Groove', () => {
+  it('allows drifting to overpower OVERDRIVE decay and rebuild Groove', () => {
     const car = new PlayerCar();
     car.gearbox.gear = 5;
     car.speed = tuning.maxSpeed * 0.8;
     car.groove = 88;
-    car.grooveTier = 'SSS';
+    car.grooveTier = 'OVERDRIVE';
 
     // Hold drift + right steer around curve for 1 second (60 steps)
     for (let i = 0; i < 60; i++) {
@@ -251,8 +251,8 @@ describe('PlayerCar', () => {
     }
 
     expect(car.isDrifting).toBe(true);
-    // Net gain should be positive, overcoming SSS tier decay
+    // Net gain should be positive, overcoming OVERDRIVE tier decay
     expect(car.groove).toBeGreaterThan(88);
-    expect(car.groove).toBeCloseTo(88 + (tuning.grooveDriftGainRate - tuning.grooveSssDrainRate), 0);
+    expect(car.groove).toBeCloseTo(88 + (tuning.grooveDriftGainRate - tuning.grooveOverdriveDrainRate), 0);
   });
 });

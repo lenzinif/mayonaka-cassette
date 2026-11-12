@@ -68,7 +68,7 @@ const TIER_CASSETTE_CONFIG: Readonly<
     accentColor: 'text-pink-400',
     labelColor: 'bg-fuchsia-100 text-slate-950',
   },
-  SSS: {
+  OVERDRIVE: {
     shellBorder: 'border-amber-400/90',
     shellBg: 'bg-[#1c1204]/96',
     shellGlow: 'shadow-[0_0_30px_rgba(251,191,36,0.38)]',

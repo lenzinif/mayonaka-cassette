@@ -175,7 +175,7 @@ export class ParticleSystem {
       const smokeRate = 48 * (0.5 + speedRatio * 0.6);
       this.smokeAccum += dt * smokeRate;
       const slideDir = -car.driftDir; // smoke trails opposite to drift nose direction
-      const isChargedDrift = car.driftTime >= 0.75 || grooveTier === 'SSS';
+      const isChargedDrift = car.driftTime >= 0.75 || grooveTier === 'OVERDRIVE';
 
       while (this.smokeAccum >= 1) {
         this.smokeAccum -= 1;

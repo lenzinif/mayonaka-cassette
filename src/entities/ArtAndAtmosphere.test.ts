@@ -92,7 +92,7 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     car.speed = 10000;
     car.driftDir = 1;
     car.driftTime = 1.1; // charged drift (> 0.75s)
-    car.grooveTier = 'SSS';
+    car.grooveTier = 'OVERDRIVE';
 
     for (let i = 0; i < 15; i++) {
       particles.update(1 / 60, car, 640, 360, car.grooveTier);

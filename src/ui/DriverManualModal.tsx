@@ -138,7 +138,7 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
               <div className="rounded border border-fuchsia-500/30 bg-[#180535] p-2.5 text-[11px]">
                 <div className="font-bold text-fuchsia-300 uppercase">GROOVE TIERS</div>
                 <p className="mt-1 text-fuchsia-200/80">
-                  <span className="text-pink-300 font-bold">LOW</span> → <span className="text-fuchsia-300 font-bold">MEDIUM</span> → <span className="text-cyan-300 font-bold">HIGH</span> → <span className="text-emerald-300 font-bold">SSS OVERDRIVE</span>.
+                  <span className="text-pink-300 font-bold">LOW</span> → <span className="text-fuchsia-300 font-bold">MEDIUM</span> → <span className="text-cyan-300 font-bold">HIGH</span> → <span className="text-emerald-300 font-bold">OVERDRIVE</span>.
                   Higher tiers unlock full synthwave frequencies and road glow.
                 </p>
               </div>

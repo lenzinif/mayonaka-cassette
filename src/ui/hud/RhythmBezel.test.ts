@@ -29,12 +29,12 @@ describe('RhythmBezel', () => {
     expect(html).toContain('rgba(5, 217, 232');
   });
 
-  it('renders amber overdrive glow when SSS groove tier is active', () => {
+  it('renders amber overdrive glow when OVERDRIVE groove tier is active', () => {
     const html = renderToString(
       createElement(RhythmBezel, {
         beatPulse: 0.8,
         beatInBar: 0,
-        grooveTier: 'SSS',
+        grooveTier: 'OVERDRIVE',
       }),
     );
 

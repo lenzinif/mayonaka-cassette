@@ -32,9 +32,9 @@ export interface CarRearRig {
 
 /**
  * 4 discrete Groove tiers with hysteresis (AGENTS.md §5 M5).
- * SSS corresponds to Funky Overdrive.
+ * OVERDRIVE corresponds to Funky Overdrive.
  */
-export type GrooveTier = 'LOW' | 'MEDIUM' | 'HIGH' | 'SSS';
+export type GrooveTier = 'LOW' | 'MEDIUM' | 'HIGH' | 'OVERDRIVE';
 
 export type CarEvent =
   | { type: 'driftStart'; direction: -1 | 1 }
@@ -46,17 +46,17 @@ export type CarEvent =
 export const GROOVE_PROMOTE_THRESHOLDS: Readonly<Record<Exclude<GrooveTier, 'LOW'>, number>> = {
   MEDIUM: 25,
   HIGH: 55,
-  SSS: 85,
+  OVERDRIVE: 85,
 };
 
 /** Demotion thresholds (with 6-point hysteresis band) for dropping DOWN a Groove tier. */
 export const GROOVE_DEMOTE_THRESHOLDS: Readonly<Record<Exclude<GrooveTier, 'LOW'>, number>> = {
   MEDIUM: 19,
   HIGH: 49,
-  SSS: 79,
+  OVERDRIVE: 79,
 };
 
-const TIER_ORDER: readonly GrooveTier[] = ['LOW', 'MEDIUM', 'HIGH', 'SSS'];
+const TIER_ORDER: readonly GrooveTier[] = ['LOW', 'MEDIUM', 'HIGH', 'OVERDRIVE'];
 
 /**
  * Evaluates the Groove tier for `groove` (`0..100`) given `currentTier`, applying hysteresis
@@ -243,11 +243,11 @@ export class PlayerCar {
     return this.gear < MAX_GEAR && this.rpm >= 0.96;
   }
 
-  /** True when in 6th gear at Overdrive speeds (`SSS` Groove or downhill slipstream draft). */
+  /** True when in 6th gear at Overdrive speeds (`OVERDRIVE` Groove or downhill slipstream draft). */
   get isOverdrive(): boolean {
     return (
       this.gear === MAX_GEAR &&
-      (this.speedRatio >= 0.995 || (this.grooveTier === 'SSS' && this.speedRatio >= 0.95))
+      (this.speedRatio >= 0.995 || (this.grooveTier === 'OVERDRIVE' && this.speedRatio >= 0.95))
     );
   }
 
@@ -257,7 +257,7 @@ export class PlayerCar {
    * - Gears 1–5 are governed by mechanical gearing (`gearbox.getGearTopSpeed`).
    * - Gear 6 (Overdrive) fights aerodynamic drag: flat-road equilibrium scales with Groove
    *   from `0.92 * maxSpeed` (`LOW` Groove) up to `1.00 * maxSpeed` (`HIGH` Groove) and
-   *   `1.04 * maxSpeed` in `SSS` (`FUNKY OVERDRIVE`), plus up to `+4.5%` gravity draft on steep downhills.
+   *   `1.04 * maxSpeed` in `OVERDRIVE` (`FUNKY OVERDRIVE`), plus up to `+4.5%` gravity draft on steep downhills.
    */
   getEffectiveTopSpeed(maxSpeed = tuning.maxSpeed, segmentSlope = 0): number {
     const mechanicalTop = this.gearbox.getGearTopSpeed(maxSpeed, this.gear);
@@ -268,7 +268,7 @@ export class PlayerCar {
     const grooveProgress = Math.max(0, Math.min(1, this.groove / 85));
     const baseAeroCeiling = 0.92 + grooveProgress * 0.08;
     const overdriveBonus =
-      this.grooveTier === 'SSS' ? 0.02 + Math.max(0, (this.groove - 85) / 15) * 0.025 : 0;
+      this.grooveTier === 'OVERDRIVE' ? 0.02 + Math.max(0, (this.groove - 85) / 15) * 0.025 : 0;
     const downhillBonus =
       segmentSlope < -0.02 ? Math.min(0.045, Math.abs(segmentSlope) * 0.14) : 0;
 
@@ -600,17 +600,18 @@ export class PlayerCar {
           tuning.grooveDriftGainRate * (tofuActive ? tuning.tofuGrooveMultiplier : 1);
       } else if (speedRatio >= 0.55) {
         const cruiseFactor = (speedRatio - 0.5) / 0.5;
-        const sssCruiseScale = this.grooveTier === 'SSS' ? tuning.grooveSssCruiseScale : 1.0;
+        const overdriveCruiseScale =
+          this.grooveTier === 'OVERDRIVE' ? tuning.grooveOverdriveCruiseScale : 1.0;
         continuousGain =
           tuning.grooveCruiseGainRate *
           cruiseFactor *
-          sssCruiseScale *
+          overdriveCruiseScale *
           (tofuActive ? tuning.tofuGrooveMultiplier : 1);
       }
 
       let tierDecayRate = 0;
-      if (this.grooveTier === 'SSS') {
-        tierDecayRate = tuning.grooveSssDrainRate;
+      if (this.grooveTier === 'OVERDRIVE') {
+        tierDecayRate = tuning.grooveOverdriveDrainRate;
       } else if (this.grooveTier === 'HIGH') {
         tierDecayRate = tuning.grooveHighDrainRate;
       }
