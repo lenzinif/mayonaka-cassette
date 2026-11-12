@@ -122,12 +122,17 @@ Rules:
 
 - Chunk intensity scales with `barEnergy` (curve strength, hill amplitude, traffic density).
 - Chunks are mirrored/varied with `SeededRandom` so the vocabulary does not repeat visibly.
-- Segment distance per bar = `referenceSpeed × barDuration`, where `referenceSpeed` _(start: 0.85 × maxSpeed)_ is a strong-but-not-perfect pace.
+- Segment distance per bar = `referenceSpeed × barDuration`, where `referenceSpeed` _(start: 0.76 × maxSpeed, calibrated for 3rd gear cruising & A1 pacing)_.
 
-**Song ↔ road sync (proposed):** the song is the master clock and never waits.
+**Song ↔ road sync:** the song is the master clock and drives the progression.
 
 - Driving at reference pace means crests land on drops — reward with a **SYNC** Groove bonus when the player crosses a "drop marker" within ±1 beat of the drop.
-- Falling behind: the song reaches its outro before the fork → the DJ loops the last 8 outro bars until the player reaches the fork.
+- **Hybrid Spacetime Sync (A1 + A2):**
+  - **A1 (Micro-Elastic Pacing):** dynamically scales road advancement between `0.84×` and `1.25×` relative to player speed to gently pull crests onto drops and ensure arrival at the fork aligned with the outro.
+  - **A2 (Horizon Phase Stitching):** when lag exceeds `1.75` bars outside active drops/forks, the engine seamlessly stitches canonical track segments at the horizon fog line with zero pop-in.
+- **Organic Outro Extension (Tape Drag + Dub Delay Wash):**
+  - **Stage 1 (Approaching Outro):** If the car lags on approach to the fork, the engine smoothly applies **Tape Drag** (reducing tape playback rate down to `0.85×`) and engages pre-outro dub send.
+  - **Stage 2 (Natural End Reached):** If the audio file reaches its natural duration before crossing the fork, rather than an abrupt 8-bar rewind/CD skip, the source gracefully washes out while a BPM-synced **Dub Tape Delay** (dotted-eighth `3/16` echo with low-pass filtering and feedback) rings out until the fork is crossed.
 - Running ahead: reaching the fork early starts the 4-bar crossfade early (as a DJ would).
 
 ---
@@ -136,10 +141,10 @@ Rules:
 
 OutRun had a LOW/HIGH stick; we extend it into a rhythm mechanic without becoming a sim.
 
-- **4 gears**, top-speed ratios _(start)_ `[0.35, 0.60, 0.82, 1.00] × maxSpeed`.
-- `rpm = speed / gearTopSpeed`; fake torque curve peaks around 0.7 rpm and fades toward redline; redline is a soft limiter (speed holds, no damage). Replaces the single `accelTaper` curve in `PlayerCar`.
+- **6 gears**, top-speed ratios `[0.28, 0.46, 0.63, 0.79, 0.91, 1.00] × maxSpeed` (`tuning.gear1MaxRatio` .. `tuning.gear6MaxRatio`).
+- `rpm = speed / gearTopSpeed`; fake torque curve peaks around 0.74 rpm with progressive high-gear taper (`tuning.accelTaper`), low-RPM lugging in higher gears, and a soft redline limiter at 1.0 rpm.
 - **Beat judgement** on every manual shift (timestamp-based, latency-compensated, AGENTS.md §4.8):
-  - `PERFECT` ±50 ms _(start)_ of a beat, `GOOD` ±100 ms; downbeat of a bar counts as a bigger bonus.
+  - `PERFECT` ±50 ms (`tuning.shiftPerfectMs`), `GOOD` ±100 ms (`tuning.shiftGoodMs`); downbeat of a bar counts as a bigger bonus.
   - Only counts when the shift makes sense (upshift at ≥ 0.72 rpm, downshift that keeps rpm < redline) → no spamming.
   - **Reward:** Groove gain (extra on downbeat) + brief low-pass filter "blip" open. **No speed or torque boost** (this is not Mario Kart — Groove is the sole reward).
   - Off-beat shift: works normally, no bonus, **no penalty** (Pillar 3).
@@ -157,13 +162,13 @@ Our direct Initial D homage with authentic Future Funk flavor: a tall retro-kiss
 - Everything related to the Melon Soda cup (inset display, liquid physics, splashes/spills, Groove multiplier, and spill penalty) is active **only while Tofu Mode is enabled** (`T` key or HUD toggle).
 - While Tofu Mode is active:
   - **Melon Soda inset** is visible (`120×80` px, bottom-left, drawn on canvas by the engine with pixelated styling).
-  - **Groove gain ×2** _(start)_.
+  - **Groove gain ×2** (`tuning.tofuGrooveMultiplier: 2.0`).
   - Inputs per step: lateral acceleration (steering + centrifugal + drift), longitudinal acceleration (throttle, brake, shifts, collisions), vertical (slope change at crests/dips). Differentiate → jerk `j`.
   - Liquid meniscus / tilt angle = spring-damper: `θ'' = −k·θ − c·θ' + G·j` _(start: tune so a clean committed drift entry gently tilts the soda without spilling; jerky counter-steering, erratic swerving, and panic braking cause a spill)_.
   - `|θ| > spillThreshold` → **spill event**:
     - Droplets of neon green soda splash over the glass rim onto the dashboard tray.
     - Distinct audio feedback: fizzy soda splash + ice cubes clinking against the glass (`clink!`) + brief momentary filter muffle / duck.
-    - Costs Groove _(start: −10 % of current tier progress)_.
+    - Costs Groove _(start: −20 % of current tier progress, `tuning.tofuSpillGroovePenaltyPct: 0.2`)_.
     - The beat grid and road sync are never displaced.
 - Turning Tofu Mode off hides the inset and ends the multiplier streak. Never a fail state.
 
@@ -181,11 +186,20 @@ The neon green **Melon Cream Soda** is the default; unlockable/selectable skins 
 | Action             | Keyboard                     | Gamepad (M8)       |
 | ------------------ | ---------------------------- | ------------------ |
 | Steer              | ← → / A D                    | Left stick / D-pad |
-| Accelerate / Brake | ↑ ↓ / W S                    | RT / LT            |
-| Drift              | S + Steer (or C / Left Ctrl) | A / Cross          |
+| Accelerate         | ↑ / W                        | RT                 |
+| Brake              | ↓ / S                        | LT                 |
+| Drift              | S + Steer (or Left Ctrl)     | A / Cross (alt: X) |
 | Shift up / down    | Space (up) / Shift (down)    | RB / LB            |
 | Auto-shift assist  | G                            | Select / Back      |
 | Tofu Mode          | T                            | Y / Triangle       |
+| Cycle Cup Skin     | V                            | B / Circle         |
+| Tape Widget Deck   | C                            | —                  |
+| Clean HUD Toggle   | H                            | —                  |
+| Stage Fork Pick    | 1 / 2                        | D-pad Left / Right |
+| Pause / Resume     | P / Escape                   | Start / Options    |
+| Live Tuning Panel  | F2                           | —                  |
+| Perf HUD           | F3                           | —                  |
+| Autopilot Driver   | F4 / 0                       | —                  |
 
 Shift and Tofu Mode use **press edges with timestamps** in `InputManager` (polling `isDown` alone is not enough for beat judgement).
 
@@ -195,3 +209,10 @@ Shift and Tofu Mode use **press edges with timestamps** in `InputManager` (polli
 
 - `referenceSpeed` value and whether it adapts to the player's Groove tier.
 - How to present `tempoStable: false` songs (allowed with reduced features, or warned at import).
+- **Sunset Boulevard (OG Future Funk) Coastal Horizon & Skyline (Questione Aperta)**:
+  - *Analisi comparativa scenari*: In **Mayonaka Bay** l'orizzonte funziona efficacemente perché il settore centrale (`x: 240..380`) è lasciato a mare aperto libero (`th = 0`), permettendo alla luna e alla scia acquatica di riflettersi sull'acqua con la città disposta solo sui fianchi laterali (`x: 120..200` e `420..500`). In **Akiba Night** non è presente il mare (metropoli interna incastonata tra crinali montuosi), rendendo naturale la skyline continua.
+  - *Criticità in Sunset Boulevard*: Essendo un'autostrada costiera marina, la silhouette continua e uniforme di edifici bassi (tutti i 32 blocchi attivi senza interruzioni) insieme al riempimento scuro del terreno forma una striscia nera continua che taglia l'orizzonte e cancella la visibilità del mare e della scia dorata del sole.
+  - *Direzione decisa per la risoluzione*: Adottare l'approccio collaudato di Mayonaka Bay anche per Sunset Boulevard:
+    1. **Apertura a mare aperto centrale**: impostare `th = 0` per il settore centrale (`x: 240..380`), lasciando l'orizzonte marino e il riflesso solare sull'acqua completamente aperti e visibili davanti al giocatore.
+    2. **Fianchi urbani costieri**: posizionare gli edifici esclusivamente ai lati (`x: 120..200` e `420..500`), lasciando che incornicino la costa senza chiudere la vista del tramonto.
+    3. **Tonalità in controluce calda**: sostituire per gli edifici il nero notturno `#080417` con una tinta violacea/prugna sfumata in controluce (es. `#240a38`, coerente con le montagne del tema).

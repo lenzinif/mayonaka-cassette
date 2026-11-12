@@ -79,6 +79,7 @@ describe('StagePalettes (Future Funk Presets)', () => {
     expect(PALETTE_OG_FUTURE_FUNK.rumble).toEqual(['#ff2a75', '#ffd319']);
     expect(PALETTE_OG_FUTURE_FUNK.lane).toBe('#fff2c2');
     expect(PALETTE_OG_FUTURE_FUNK.horizonGlow).toBe('#ffd447');
+    expect(PALETTE_OG_FUTURE_FUNK.mountainRim).toBe('#fff2c2');
     validatePalette(PALETTE_OG_FUTURE_FUNK);
   });
 

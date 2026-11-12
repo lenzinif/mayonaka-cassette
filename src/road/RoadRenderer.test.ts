@@ -170,4 +170,30 @@ describe('RoadRenderer — Rendering Environments', () => {
     expect(fadeAlpha).toBeLessThan(1);
     expect(mock.alphaHistory[mock.alphaHistory.length - 1]).toBe(1);
   });
+
+  it('renders scaled depth-band props and respects horizontal culling', () => {
+    const renderer = new RoadRenderer();
+    const mock = createMockCanvas();
+    const track = createTestTrack('standard');
+
+    // Segment 10 has a Band C building with scale 1.5 within view
+    track.segments[10]!.sprites.push({
+      kind: 'building',
+      offset: 3.5,
+      variant: 0,
+      scale: 1.5,
+    });
+
+    // Segment 10 also has a prop far outside horizontal cull bounds (offset 50)
+    track.segments[10]!.sprites.push({
+      kind: 'lamp',
+      offset: 50.0,
+      variant: 0,
+    });
+
+    renderer.render(mock.ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+
+    // Only the visible building should be drawn, the lamp at offset 50 is culled
+    expect(renderer.stats.drawnProps).toBe(1);
+  });
 });

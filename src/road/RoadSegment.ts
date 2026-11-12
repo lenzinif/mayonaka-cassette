@@ -37,11 +37,33 @@ export type SegmentEnvironment =
   | 'standard'
   | 'bridge';
 
+/**
+ * Depth bands for roadside props (docs/DESIGN.md §2 Fase 1):
+ * - A: Shoulder (1.10–1.45) — rhythmic functional fixtures (lamps, signs, gantries, chevrons), collidable.
+ * - B: Verge (1.6–3.0) — organic greenery & billboards (shrubs, palms, billboards), collidable.
+ * - C: Near field (3.0–6.0) — low buildings & near structures, organic, non-collidable.
+ * - D: Far field (6.0–14.0) — tall city skyline towers & backdrops, dense organic, non-collidable.
+ */
+export type PropBand = 'A' | 'B' | 'C' | 'D';
+
+export interface PropBandRange {
+  readonly min: number;
+  readonly max: number;
+}
+
+export const PROP_BAND_RANGES: Record<PropBand, PropBandRange> = {
+  A: { min: 1.1, max: 1.45 },
+  B: { min: 1.6, max: 3.0 },
+  C: { min: 3.0, max: 6.0 },
+  D: { min: 6.0, max: 14.0 },
+} as const;
+
 /** A roadside sprite anchored to a segment. `offset` is in road half-widths (±1 = road edge). */
 export interface RoadSprite {
   kind: PropKind;
   offset: number;
   variant: number;
+  scale?: number;
 }
 
 export interface RoadSegment {

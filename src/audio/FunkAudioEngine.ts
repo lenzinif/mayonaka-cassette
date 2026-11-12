@@ -538,9 +538,44 @@ export class FunkAudioEngine {
         this.dubFilterNode = dubFilter;
         this.dubFeedbackGain = dubFeedback;
       }
+
+      // Warm up transient OscillatorNode -> GainNode pipeline silently (via zero-gain sink)
+      // including 'triangle' wavetable and exponentialRampToValueAtTime AudioParam timelines
+      // so the first in-game shift, collision, or bridge expansion joint has 0ms JIT/graph overhead.
+      try {
+        const nowWarm = ctx.currentTime;
+        const warmOsc = ctx.createOscillator();
+        const warmGain = ctx.createGain();
+        const muteSink = ctx.createGain();
+        muteSink.gain.value = 0;
+
+        warmOsc.type = 'triangle';
+        warmOsc.frequency.setValueAtTime(80, nowWarm);
+        warmOsc.frequency.exponentialRampToValueAtTime(32, nowWarm + 0.004);
+
+        warmGain.gain.setValueAtTime(0.01, nowWarm);
+        warmGain.gain.exponentialRampToValueAtTime(0.001, nowWarm + 0.004);
+
+        warmOsc.connect(warmGain);
+        warmGain.connect(muteSink);
+        muteSink.connect(gain);
+        warmOsc.onended = () => {
+          try {
+            warmOsc.disconnect();
+            warmGain.disconnect();
+            muteSink.disconnect();
+          } catch {
+            // Ignore
+          }
+        };
+        warmOsc.start(nowWarm);
+        warmOsc.stop(nowWarm + 0.005);
+      } catch {
+        // Ignore in restricted/mock contexts
+      }
     }
 
-    if (this.ctx.state === 'suspended') {
+    if (!this.isPaused && this.ctx.state === 'suspended') {
       await this.ctx.resume();
     }
 
@@ -551,6 +586,30 @@ export class FunkAudioEngine {
     if (!this.isPaused && (this.pendingTrackStart || (!this.isPlaying && this.ctx.state === 'running'))) {
       this.startSourceNode(this.virtualTrackSec, 0);
       this.pendingTrackStart = false;
+    }
+  }
+
+  /**
+   * Rewinds the active track and BeatClock back to `0.0s` (beat 0, bar 0) so that
+   * when the player starts driving from a standstill after browsing the main menu,
+   * the audio clock and road start in phase without accumulated menu lag.
+   */
+  restartFromBeginning(): void {
+    this.stopOutgoingSource();
+    this.stopSourceNode();
+    this.crossfadeRemainingSec = 0;
+    this.crossfadeTotalSec = 0;
+    this.virtualTrackSec = 0;
+    this.resetDubState();
+    this.beatClock.resetCrossingState();
+    if (this.ctx) {
+      this.lastAudioTimeSec = this.ctx.currentTime;
+    }
+    if (this.ctx && this.ctx.state === 'running' && !this.isPaused) {
+      this.startSourceNode(0, 0);
+      this.pendingTrackStart = false;
+    } else {
+      this.pendingTrackStart = true;
     }
   }
 

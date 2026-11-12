@@ -159,11 +159,13 @@ describe('SongRoadGenerator', () => {
       const preCurve: number[] = [];
       const preStripe: number[] = [];
       const preDeltaY: number[] = [];
+      const preEnv: (string | undefined)[] = [];
       for (let n = 0; n < copyCount; n++) {
         const seg = road.segments[fromSegIndex + n]!;
         preCurve.push(seg.curve);
         preStripe.push(seg.stripe);
         preDeltaY.push(seg.p2.worldY - seg.p1.worldY);
+        preEnv.push(seg.env);
       }
 
       const res = stitchHorizonToTargetZ(road, currentZ, rawTargetZ, drawDistance);
@@ -175,11 +177,12 @@ describe('SongRoadGenerator', () => {
       expect(res.deltaZ % rumbleCycleWorld).toBe(0);
       expect(res.copiedWindowSegs).toBe(copyCount);
 
-      // 2. Visible segments match 100% in curve, stripe parity, and relative elevation slope
+      // 2. Visible segments match 100% in curve, stripe parity, environment, and relative elevation slope
       for (let n = 0; n < res.copiedWindowSegs; n++) {
         const destSeg = road.segments[res.toSegIndex + n]!;
         expect(destSeg.curve).toBe(preCurve[n]);
         expect(destSeg.stripe).toBe(preStripe[n]);
+        expect(destSeg.env).toBe(preEnv[n]);
         expect(destSeg.p2.worldY - destSeg.p1.worldY).toBeCloseTo(preDeltaY[n]!, 5);
       }
 
@@ -195,6 +198,7 @@ describe('SongRoadGenerator', () => {
         expect(s.curve).toBe(road.canonical.curve[i]);
         expect(s.p1.worldY).toBe(road.canonical.p1WorldY[i]);
         expect(s.p2.worldY).toBe(road.canonical.p2WorldY[i]);
+        expect(s.env).toBe(road.canonical.env[i]);
       }
     });
 
@@ -326,6 +330,138 @@ describe('SongRoadGenerator', () => {
         }
       }
       expect(chevronCount).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Depth-Band Placement Model (Phase 1)', () => {
+    it('is 100% deterministic with jitter and scale variance for the same seed', () => {
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:depth-band-determinism-seed',
+      };
+
+      const roadA = generateSongRoad(customMap);
+      const roadB = generateSongRoad(customMap);
+
+      expect(roadA.segments.length).toBe(roadB.segments.length);
+
+      let totalSpritesA = 0;
+      let scaledSpriteCount = 0;
+      for (let i = 0; i < roadA.segments.length; i++) {
+        const segA = roadA.segments[i]!;
+        const segB = roadB.segments[i]!;
+
+        expect(segA.sprites).toEqual(segB.sprites);
+        totalSpritesA += segA.sprites.length;
+        for (const s of segA.sprites) {
+          if (s.scale !== undefined && s.scale !== 1) {
+            scaledSpriteCount++;
+          }
+        }
+      }
+
+      expect(totalSpritesA).toBeGreaterThan(50);
+      expect(scaledSpriteCount).toBeGreaterThan(10);
+    });
+
+    it('guarantees no shrub ever has |offset| < 1.6 across all canonical chunks', () => {
+      for (const chunk of ROAD_CHUNKS) {
+        const customMap: BeatMap = {
+          ...DEFAULT_SYNTH_BEATMAP,
+          contentHash: `sha256:shrub-test-${chunk.id}`,
+          barEnergy: new Array<number>(chunk.bars).fill(0.7),
+          sections: [{ startBar: 0, bars: chunk.bars, role: chunk.role }],
+        };
+
+        const road = generateSongRoad(customMap, { catalog: [chunk] });
+        for (const seg of road.segments) {
+          for (const s of seg.sprites) {
+            if (s.kind === 'shrub') {
+              expect(Math.abs(s.offset)).toBeGreaterThanOrEqual(1.6);
+            }
+          }
+        }
+      }
+    });
+
+    it('generates multiple sprites for cluster rules', () => {
+      const clusterChunk = defineChunk({
+        id: 'test-cluster-chunk',
+        description: 'Test chunk for cluster generation',
+        role: 'intro',
+        bars: 4,
+        maneuvers: [{ bars: 4, curve: 0, elevation: 0 }],
+        props: [
+          {
+            kind: 'shrub',
+            placement: 'right',
+            everyBeats: 4,
+            band: 'B',
+            offset: 1.8,
+            cluster: { min: 3, max: 5, spreadBeats: 1.0, spreadLateral: 0.3 },
+            rhythmic: false,
+          },
+        ],
+      });
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:cluster-test-seed',
+        barEnergy: new Array<number>(4).fill(0.5),
+        sections: [{ startBar: 0, bars: 4, role: 'intro' }],
+      };
+
+      const road = generateSongRoad(customMap, { catalog: [clusterChunk] });
+      const shrubs = road.segments.flatMap((seg) => seg.sprites.filter((s) => s.kind === 'shrub'));
+
+      // 4 bars = 16 beats. With everyBeats: 4, there are 4 anchors.
+      // With cluster min: 3, max: 5, total shrubs must be between 12 and 20.
+      expect(shrubs.length).toBeGreaterThanOrEqual(12);
+      expect(shrubs.length).toBeLessThanOrEqual(20);
+      for (const sh of shrubs) {
+        expect(Math.abs(sh.offset)).toBeGreaterThanOrEqual(1.6);
+      }
+    });
+
+    it('emits ZERO pylon or jihanki sprites from all canonical chunks', () => {
+      for (const chunk of ROAD_CHUNKS) {
+        const customMap: BeatMap = {
+          ...DEFAULT_SYNTH_BEATMAP,
+          contentHash: `sha256:no-pylon-jihanki-${chunk.id}`,
+          barEnergy: new Array<number>(chunk.bars).fill(0.7),
+          sections: [{ startBar: 0, bars: chunk.bars, role: chunk.role }],
+        };
+
+        const road = generateSongRoad(customMap, { catalog: [chunk] });
+        for (const seg of road.segments) {
+          for (const s of seg.sprites) {
+            expect(s.kind).not.toBe('pylon');
+            expect(s.kind).not.toBe('jihanki');
+          }
+        }
+      }
+    });
+
+    it('keeps bridge chunks free of Band C and Band D props', () => {
+      const bridgeChunks = ROAD_CHUNKS.filter((c) => c.env === 'bridge');
+      expect(bridgeChunks.length).toBeGreaterThanOrEqual(2);
+
+      for (const chunk of bridgeChunks) {
+        const customMap: BeatMap = {
+          ...DEFAULT_SYNTH_BEATMAP,
+          contentHash: `sha256:bridge-depth-${chunk.id}`,
+          barEnergy: new Array<number>(chunk.bars).fill(0.7),
+          sections: [{ startBar: 0, bars: chunk.bars, role: chunk.role }],
+        };
+
+        const road = generateSongRoad(customMap, { catalog: [chunk] });
+        for (const seg of road.segments) {
+          for (const s of seg.sprites) {
+            // Bridge must be free of Band C and Band D props (|offset| >= 3.0)
+            expect(Math.abs(s.offset)).toBeLessThan(3.0);
+          }
+        }
+      }
     });
   });
 });

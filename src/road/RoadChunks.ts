@@ -1,5 +1,5 @@
 import type { SectionRole } from '@src/audio/BeatMap';
-import type { PropKind, SegmentEnvironment } from './RoadSegment';
+import type { PropBand, PropKind, SegmentEnvironment } from './RoadSegment';
 import { CURVE, HILL } from './TrackBuilder';
 
 /**
@@ -24,8 +24,26 @@ export interface ChunkPropRule {
   placement: PropPlacement;
   /** Spacing in musical beats (1 = every beat, 2 = every 2 beats, 4 = once per bar). */
   everyBeats: number;
-  /** Lateral distance from road centre in road half-widths (default: 1.35 for palm/lamp, 1.75 for billboard). */
+  /** Lateral distance from road centre in road half-widths (default: sampled from band range or default kind offset). */
   offset?: number;
+  /** Depth band: 'A' (shoulder), 'B' (verge), 'C' (near field), 'D' (far field). */
+  band?: PropBand;
+  /** Deterministic jitter applied to placement. */
+  jitter?: {
+    lateral?: number;
+    beats?: number;
+  };
+  /** Cluster configuration for organic grouping. */
+  cluster?: {
+    min: number;
+    max: number;
+    spreadBeats: number;
+    spreadLateral: number;
+  };
+  /** Whether prop is placed strictly on the beat grid. Defaults to true for Band A, false for B/C/D. */
+  rhythmic?: boolean;
+  /** Scale variance (scale = 1 ± scaleJitter). Defaults to 0 for rhythmic, 0.2 for non-rhythmic. */
+  scaleJitter?: number;
 }
 
 export interface ChunkManeuver {
@@ -119,8 +137,10 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: CURVE.EASY * 0.75, elevation: HILL.LOW * 0.4 },
     ],
     props: [
-      { kind: 'palm', placement: 'both', everyBeats: 2, offset: 1.35 },
-      { kind: 'lamp', placement: 'alternating', everyBeats: 4, offset: 1.2 },
+      { kind: 'lamp', placement: 'alternating', everyBeats: 4, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'palm', placement: 'both', everyBeats: 2, band: 'B', offset: 1.9, jitter: { lateral: 0.2, beats: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'shrub', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, cluster: { min: 2, max: 4, spreadBeats: 1.2, spreadLateral: 0.35 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 8, band: 'D', offset: 8.5, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -137,8 +157,12 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: -CURVE.EASY * 0.5, elevation: 0 },
     ],
     props: [
-      { kind: 'palm', placement: 'outside-curve', everyBeats: 2, offset: 1.4 },
-      { kind: 'billboard', placement: 'inside-curve', everyBeats: 8, offset: 1.75 },
+      { kind: 'lamp', placement: 'both', everyBeats: 4, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'palm', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.0, jitter: { lateral: 0.25, beats: 0.4 }, cluster: { min: 1, max: 3, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'billboard', placement: 'inside-curve', everyBeats: 8, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 1.8, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'building', placement: 'inside-curve', everyBeats: 8, band: 'C', offset: 4.5, jitter: { lateral: 0.5, beats: 0.8 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 8, band: 'D', offset: 9.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -154,10 +178,11 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: -CURVE.EASY, elevation: 0 },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
-      { kind: 'building', placement: 'both', everyBeats: 4, offset: 2.35 },
-      { kind: 'jihanki', placement: 'alternating', everyBeats: 4, offset: 1.42 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.8, jitter: { lateral: 0.4, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.5, jitter: { lateral: 1.2, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -174,8 +199,11 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 3, curve: -CURVE.EASY * 0.8, elevation: 0 },
     ],
     props: [
-      { kind: 'palm', placement: 'both', everyBeats: 2, offset: 1.38 },
-      { kind: 'lamp', placement: 'both', everyBeats: 4, offset: 1.22 },
+      { kind: 'lamp', placement: 'both', everyBeats: 4, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'palm', placement: 'both', everyBeats: 2, band: 'B', offset: 1.95, jitter: { lateral: 0.2, beats: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 1.7, cluster: { min: 2, max: 4, spreadBeats: 1.2, spreadLateral: 0.35 }, rhythmic: false },
+      { kind: 'billboard', placement: 'right', everyBeats: 8, band: 'B', offset: 2.4, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 8, band: 'D', offset: 10.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -194,8 +222,10 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: HILL.HIGH * 0.85, easeRatio: [0.15, 0.15] },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, offset: 1.22 },
-      { kind: 'billboard', placement: 'both', everyBeats: 4, offset: 1.75 },
+      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'billboard', placement: 'both', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.2, jitter: { lateral: 0.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.0, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -212,10 +242,12 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.15, 0.1] },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, offset: 1.2 },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
-      { kind: 'vms', placement: 'right', everyBeats: 8, offset: 1.8 },
-      { kind: 'building', placement: 'both', everyBeats: 4, offset: 2.35 },
+      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.2, rhythmic: true },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'vms', placement: 'right', everyBeats: 8, band: 'A', offset: 1.38, rhythmic: true },
+      { kind: 'billboard', placement: 'left', everyBeats: 8, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.0, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.5, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -230,7 +262,12 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: CURVE.MEDIUM * 0.6, elevation: HILL.MEDIUM * 0.7 },
       { bars: 2, curve: 0, elevation: HILL.HIGH * 0.9, easeRatio: [0.1, 0.1] },
     ],
-    props: [{ kind: 'lamp', placement: 'both', everyBeats: 1, offset: 1.2 }],
+    props: [
+      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.2, rhythmic: true },
+      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.5, jitter: { lateral: 0.6, beats: 0.8 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
+    ],
   }),
 
   defineChunk({
@@ -247,8 +284,8 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.1, 0.1] },
     ],
     props: [
-      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, offset: 0 },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.18 },
+      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.18, rhythmic: true },
     ],
   }),
 
@@ -264,15 +301,19 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: HILL.HIGH * 0.8, easeRatio: [0.1, 0.1] },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'sign', placement: 'right', everyBeats: 4, band: 'A', offset: 1.35, rhythmic: true },
+      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 1.8, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'palm', placement: 'both', everyBeats: 4, band: 'B', offset: 2.3, jitter: { lateral: 0.3, beats: 0.5 }, rhythmic: false, scaleJitter: 0.25 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.0, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.2 },
     ],
   }),
 
   // ============================================================================
   // DROP — Long fast straights, high-speed sweepers, adrenaline flow
   // ============================================================================
-    defineChunk({
+  defineChunk({
     id: 'drop-rainbow-expressway-8',
     description: 'Rettilineo ad altissima velocità su ponte sospeso panoramico sul mare con torri monumentali',
     role: 'drop',
@@ -286,8 +327,8 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, offset: 0 },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.18 },
+      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.18, rhythmic: true },
     ],
   }),
 
@@ -304,11 +345,15 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
-      { kind: 'building', placement: 'both', everyBeats: 4, offset: 2.35 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'gantry', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'billboard', placement: 'alternating', everyBeats: 8, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.8, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.5, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
-defineChunk({
+
+  defineChunk({
     id: 'drop-midnight-plunge',
     description: 'Tuffo giù dal crest ad altissima velocità con curvone da quarta piena',
     role: 'drop',
@@ -320,8 +365,11 @@ defineChunk({
       { bars: 2, curve: CURVE.MEDIUM, elevation: 0 },
     ],
     props: [
-      { kind: 'palm', placement: 'both', everyBeats: 1, offset: 1.35 },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, offset: 1.75 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'palm', placement: 'both', everyBeats: 1, band: 'B', offset: 1.9, jitter: { lateral: 0.2, beats: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
+      { kind: 'shrub', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 1.75, cluster: { min: 2, max: 3, spreadBeats: 0.8, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -338,11 +386,13 @@ defineChunk({
       { bars: 3, curve: -CURVE.MEDIUM * 1.1, elevation: -HILL.LOW * 0.4 },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, offset: 1.25 },
-      { kind: 'building', placement: 'both', everyBeats: 4, offset: 2.35 },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
-      { kind: 'vms', placement: 'right', everyBeats: 8, offset: 1.8 },
+      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.35, rhythmic: true },
+      { kind: 'vms', placement: 'right', everyBeats: 8, band: 'A', offset: 1.38, rhythmic: true },
+      { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.0, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.0, jitter: { lateral: 1.6, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -359,8 +409,11 @@ defineChunk({
       { bars: 2, curve: CURVE.MEDIUM * 0.85, elevation: -HILL.LOW * 0.4 },
     ],
     props: [
-      { kind: 'palm', placement: 'both', everyBeats: 1, offset: 1.35 },
-      { kind: 'lamp', placement: 'alternating', everyBeats: 2, offset: 1.2 },
+      { kind: 'lamp', placement: 'alternating', everyBeats: 2, band: 'A', offset: 1.2, rhythmic: true },
+      { kind: 'palm', placement: 'both', everyBeats: 1, band: 'B', offset: 1.95, jitter: { lateral: 0.2, beats: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 1.7, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.4, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -377,9 +430,11 @@ defineChunk({
       { bars: 3, curve: -CURVE.MEDIUM * 0.95, elevation: HILL.LOW * 0.4, easeRatio: [0.2, 0.2] },
     ],
     props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
-      { kind: 'lamp', placement: 'both', everyBeats: 1, offset: 1.22 },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, offset: 1.72 },
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.35, rhythmic: true },
+      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.1, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.8, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.2, jitter: { lateral: 1.4, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -395,8 +450,11 @@ defineChunk({
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'palm', placement: 'both', everyBeats: 1, offset: 1.36 },
-      { kind: 'billboard', placement: 'both', everyBeats: 4, offset: 1.78 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'palm', placement: 'both', everyBeats: 1, band: 'B', offset: 1.9, jitter: { lateral: 0.2, beats: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'billboard', placement: 'both', everyBeats: 4, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 1.72, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.5, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -415,9 +473,11 @@ defineChunk({
       { bars: 2, curve: -CURVE.HARD * 0.85, elevation: HILL.LOW * 0.4, easeRatio: [0.2, 0.2] },
     ],
     props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
-      { kind: 'pylon', placement: 'alternating', everyBeats: 4, offset: 2.6 },
-      { kind: 'shrub', placement: 'both', everyBeats: 2, offset: 1.35 },
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.35, rhythmic: true },
+      { kind: 'sign', placement: 'alternating', everyBeats: 4, band: 'A', offset: 1.38, rhythmic: true },
+      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 1.8, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 0.35 }, rhythmic: false },
+      { kind: 'palm', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 2.3, jitter: { lateral: 0.25, beats: 0.4 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.5, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -434,9 +494,12 @@ defineChunk({
       { bars: 3, curve: CURVE.HARD * 0.9, elevation: HILL.LOW * 0.5, easeRatio: [0.2, 0.2] },
     ],
     props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, offset: 1.68 },
-      { kind: 'palm', placement: 'inside-curve', everyBeats: 2, offset: 1.35 },
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.35, rhythmic: true },
+      { kind: 'lamp', placement: 'inside-curve', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
+      { kind: 'palm', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 1.95, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 1.7, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -454,8 +517,11 @@ defineChunk({
       { bars: 2, curve: 0, elevation: HILL.LOW * 0.4 },
     ],
     props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.22 },
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.35, rhythmic: true },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.9, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.8, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -471,7 +537,13 @@ defineChunk({
       { bars: 2, curve: CURVE.HARD * 0.9, elevation: 0 },
       { bars: 1, curve: -CURVE.EASY, elevation: HILL.LOW * 0.5 },
     ],
-    props: [{ kind: 'sign', placement: 'alternating', everyBeats: 2, offset: 1.38 }],
+    props: [
+      { kind: 'sign', placement: 'alternating', everyBeats: 2, band: 'A', offset: 1.38, rhythmic: true },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'billboard', placement: 'alternating', everyBeats: 2, band: 'B', offset: 2.1, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.2, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.2, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
+    ],
   }),
 
   defineChunk({
@@ -487,9 +559,12 @@ defineChunk({
       { bars: 2, curve: CURVE.MEDIUM * 1.1, elevation: HILL.LOW * 0.8, easeRatio: [0.2, 0.2] },
     ],
     props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, offset: 1.66 },
-      { kind: 'lamp', placement: 'inside-curve', everyBeats: 1, offset: 1.22 },
+      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.35, rhythmic: true },
+      { kind: 'lamp', placement: 'inside-curve', everyBeats: 1, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
+      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 1.75, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 0.35 }, rhythmic: false },
+      { kind: 'palm', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 2.4, jitter: { lateral: 0.25, beats: 0.4 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -507,8 +582,10 @@ defineChunk({
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'palm', placement: 'both', everyBeats: 2, offset: 1.35 },
-      { kind: 'lamp', placement: 'both', everyBeats: 4, offset: 1.22 },
+      { kind: 'lamp', placement: 'both', everyBeats: 4, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'palm', placement: 'both', everyBeats: 2, band: 'B', offset: 1.9, jitter: { lateral: 0.2, beats: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 1.7, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.5, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -523,8 +600,11 @@ defineChunk({
       { bars: 2, curve: CURVE.EASY * 0.6, elevation: 0 },
     ],
     props: [
-      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.9, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.5, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -540,8 +620,12 @@ defineChunk({
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'palm', placement: 'both', everyBeats: 2, offset: 1.38 },
-      { kind: 'billboard', placement: 'both', everyBeats: 8, offset: 1.75 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'palm', placement: 'both', everyBeats: 2, band: 'B', offset: 1.95, jitter: { lateral: 0.2, beats: 0.3 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'billboard', placement: 'both', everyBeats: 8, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 1.7, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 0.3 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 8, band: 'C', offset: 4.5, jitter: { lateral: 0.6, beats: 0.8 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.5, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
@@ -556,10 +640,11 @@ defineChunk({
       { bars: 2, curve: 0, elevation: 0 },
     ],
     props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, offset: 1.25 },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, offset: 0 },
-      { kind: 'building', placement: 'both', everyBeats: 4, offset: 2.35 },
-      { kind: 'jihanki', placement: 'alternating', everyBeats: 4, offset: 1.42 },
+      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
+      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.9, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
+      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.6, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 ];

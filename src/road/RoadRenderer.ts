@@ -194,6 +194,12 @@ export class RoadRenderer {
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       for (let i = 0; i < sprites.length; i++) {
         const s = sprites[i]!;
+        const spriteScale = s.scale ?? 1;
+        const propPpu = scaledPpu * spriteScale;
+
+        // Cheap distant LOD: skip far-field (Band D) props when scaledPpu is tiny (<0.0012)
+        if (Math.abs(s.offset) >= 6.0 && propPpu < 0.0012) continue;
+
         const effectiveOffset = getEffectivePropOffset(
           s.offset,
           p1.worldZ,
@@ -202,13 +208,23 @@ export class RoadRenderer {
           view.forkChoice,
         );
         const sx = p1.screenX + p1.screenW * effectiveOffset;
-        if (sx < -width * 0.35 || sx > width * 1.35) continue;
+
+        // Approximate visual width in screen pixels for horizontal culling (widen for large offsets / large structures)
+        const propW =
+          s.kind === 'gantry' || s.kind === 'overpass' || s.kind === 'suspension-tower'
+            ? p1.screenW * 2.5
+            : s.kind === 'building'
+              ? Math.max(p1.screenW * 1.2, 5000 * propPpu)
+              : Math.max(32, 2600 * propPpu);
+
+        if (sx + propW < 0 || sx - propW > width) continue;
+
         drawProp(
           ctx,
           s.kind,
           sx,
           p1.screenY,
-          scaledPpu,
+          propPpu,
           effectiveOffset < 0 ? -1 : 1,
           s.variant,
           beatPulse,

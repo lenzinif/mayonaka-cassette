@@ -76,7 +76,7 @@ export const PALETTE_OG_FUTURE_FUNK: StagePalette = {
   sunTop: '#ffd447',
   sunBottom: '#ff2a75',
   mountain: '#240a38',
-  mountainRim: '#05d9e8',
+  mountainRim: '#fff2c2',
   grass: ['#210933', '#160524'],
   road: ['#291b38', '#20152d'],
   rumble: ['#ff2a75', '#ffd319'],

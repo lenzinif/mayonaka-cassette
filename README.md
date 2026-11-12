@@ -3,7 +3,7 @@
 > **A retro-futuristic driving flow experience powered by Japanese Future Funk rhythms.**
 
 [![Playable Alpha](https://img.shields.io/badge/status-playable%20alpha-f59e0b?style=for-the-badge&logo=retroarch&logoColor=white)](https://github.com/lenzinif/mayonaka-cassette)
-[![Version](https://img.shields.io/badge/version-v0.2.1--alpha-ff007f?style=for-the-badge)](https://github.com/lenzinif/mayonaka-cassette)
+[![Version](https://img.shields.io/badge/version-v0.2.2--alpha-ff007f?style=for-the-badge)](https://github.com/lenzinif/mayonaka-cassette)
 [![Live Demo](https://img.shields.io/badge/demo-play%20online-00f0ff?style=for-the-badge&logo=googlechrome&logoColor=black)](https://lenzinif.github.io/mayonaka-cassette/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
@@ -14,7 +14,7 @@
 ## 🚦 Project Status: Playable Alpha (v0.2.2-alpha)
 
 *Mayonaka Cassette* is currently in **Playable Alpha**:
-- **Arcade core loop:** Custom pseudo-3D canvas rasterizer with 120 Hz fixed-step physics, 4-speed beat-shift gearbox, centrifugal curve pull, and tire-smoking drift handling.
+- **Arcade core loop:** Custom pseudo-3D canvas rasterizer with 120 Hz fixed-step physics, 6-speed beat-shift gearbox, centrifugal curve pull, and tire-smoking drift handling.
 - **Audio-reactive road generator:** Client-side Web Worker DSP analyzes uploaded songs (BPM, energy, sections) and generates a deterministic highway timed to your favorite drops and buildups.
 - **Dashboard & atmosphere:** Dashboard Melon Soda spring-damper fluid simulation with Initial D-inspired Tofu Mode, evasive Kei truck traffic, dynamic Web Audio filter sweeps, and stage fork branching.
 - **Next steps towards Beta:** More roadside pixel-art scenery, custom retro biomes, and CRT scanline magic.
@@ -32,7 +32,7 @@ Jump straight into the driver's seat in your browser:
 
 Inspired by Yu Suzuki's classic OutRun arcade ethos and the vibrant beat of Japanese Future Funk:
 
-1. **Feel Over Simulation:** No rigid-body physics engines here. Centrifugal curve pull, tire slide, suspension hill cresting, and 4-speed torque curves are driven by tuned arcade formulas.
+1. **Feel Over Simulation:** No rigid-body physics engines here. Centrifugal curve pull, tire slide, suspension hill cresting, and 6-speed torque curves are driven by tuned arcade formulas.
 2. **Music Drives State, Driving Manipulates Music:** Clean drifts and high speeds open the Web Audio low-pass filter; speed drops and collisions muffle the soundscape and trigger tape pitch dips.
 3. **Protect the Flow State:** Collisions with roadside obstacles or kei trucks never stop you dead. They deduct Groove, temporarily dip speed, muffle the audio, and keep you rolling forward.
 4. **Your Music Is the Level:** Drop in your own local audio tracks to generate a deterministic, unique road tailored to the song's energy and structure.
@@ -43,12 +43,19 @@ Inspired by Yu Suzuki's classic OutRun arcade ethos and the vibrant beat of Japa
 
 | Action | Keyboard | Gamepad |
 | :--- | :--- | :--- |
-| **Accelerate** | `ArrowUp` / `W` | `Right Trigger (R2)` / `A` |
-| **Brake / Reverse** | `ArrowDown` / `S` | `Left Trigger (L2)` / `B` |
+| **Accelerate** | `ArrowUp` / `W` | `Right Trigger (RT)` |
+| **Brake** | `ArrowDown` / `S` | `Left Trigger (LT)` |
 | **Steer Left / Right** | `ArrowLeft` / `A`, `ArrowRight` / `D` | `Left Stick` / `D-Pad` |
-| **Shift Up (Beat-Shift)** | `E` / `Space` | `Right Bumper (RB)` |
-| **Shift Down** | `Q` / `Shift` | `Left Bumper (LB)` |
-| **Pause / Resume** | `Escape` / `P` | `Start / Menu` |
+| **Drift** | `S + Steer` / `Left Ctrl` | `A / Cross` (alt: `X`) |
+| **Shift Up (Beat-Shift)** | `Space` | `Right Bumper (RB)` |
+| **Shift Down** | `Shift` | `Left Bumper (LB)` |
+| **Auto-Shift Assist** | `G` | `Select / Back` |
+| **Tofu Mode Toggle** | `T` | `Y / Triangle` |
+| **Cycle Cup Skin** | `V` | `B / Circle` |
+| **Tape Widget Deck** | `C` | — |
+| **Clean HUD Toggle** | `H` | — |
+| **Stage Fork Pick** | `1` / `2` | `D-pad Left / Right` |
+| **Pause / Resume** | `Escape` / `P` | `Start / Options` |
 | **Feel Tuning Panel** | `F2` or `?debug` | — |
 
 ---

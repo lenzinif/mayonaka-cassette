@@ -104,7 +104,7 @@ export function computeCentrifugalPush(
 }
 
 /**
- * Fake arcade car physics, 4-speed gearbox integration, and Groove meter math
+ * Fake arcade car physics, 6-speed gearbox integration, and Groove meter math
  * (Design Pillar 1: Feel Over Simulation; Pillar 3: Protect the Flow State).
  *
  * All lateral positions (`x`, `prevX`) are in road half-widths:
@@ -142,7 +142,7 @@ export class PlayerCar {
   /** True while braking input is active. */
   braking = false;
 
-  /** 4-speed beat-shift gearbox (M5). */
+  /** 6-speed beat-shift gearbox (M5). */
   readonly gearbox = new Gearbox();
 
   /** Groove meter in `[0, 100]` and hysteresis-stabilised Groove tier (M5). */

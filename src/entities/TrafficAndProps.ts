@@ -556,6 +556,8 @@ export class TrafficManager {
       const seg = track.segments[(prevSegIdx + s) % segCount]!;
       for (let i = 0; i < seg.sprites.length; i++) {
         const sp = seg.sprites[i]!;
+        // Only props in bands A and B (|offset| < 3.0) are collidable; near-field C and far-field D never collide
+        if (Math.abs(sp.offset) >= 3.0) continue;
         const effectiveOffset = getEffectivePropOffset(
           sp.offset,
           seg.p1.worldZ,
@@ -563,7 +565,7 @@ export class TrafficManager {
           forkZoneStartZ,
           forkChoice,
         );
-        const hitW = propHitHalfWidth(sp.kind);
+        const hitW = propHitHalfWidth(sp.kind) * (sp.scale ?? 1);
         if (Math.abs(car.x - effectiveOffset) < hitW) {
           const floorSpeed = maxSpeed * 0.25;
           const signedDiff = car.x - effectiveOffset;

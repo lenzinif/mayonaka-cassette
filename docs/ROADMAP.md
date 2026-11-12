@@ -59,11 +59,10 @@ Aggiungere varietà agli ostacoli e alle decorazioni nei `RoadChunks`:
   - [x] Frecce direzionali animate a ritmo di musica per le curve cieche (`chevron`).
   - [x] Arbusti e siepi a bordo carreggiata a doppia sagoma (siepe a cupola e *niwaki* a palchi asimmetrici).
   - [x] Segnaletica stradale normale: limite circolare 80 km/h, uscita autostradale verde Shuto C1, rombo giallo di pericolo curva (`sign`).
-- [x] Gallerie e sovrappassi (Ponti & Tunnel):
+- [x] Sovrappassi e ponti scenografici:
   - [x] **Ponte A (Cavalcavia / Overpass a scavalco):** Struttura sopraelevata in cemento armato con travature in acciaio e piloni di sostegno laterali sotto cui l'auto transita a tutta velocità (`offset: 0`).
   - [x] **Ponte B (Sezione su Ponte Sospeso / Rainbow Bridge):** Tratto di strada con barriere metalliche a traliccio continuo sul bordo asfalto, torri monumentali ad arco bianco/arancio e tiranti diagonali illuminati.
-  - [x] **Tunnel A (Portale d'Ingresso Tunnel):** Imboccatura monumentale ad arco in cemento armato con bande riflettenti di sagoma giallo/nere e luci di galleria.
-  - [x] **Tunnel B (Interno Galleria con Luci al Neon):** Centine ad arco continuo a soffitto con tubi al neon arancioni al sodio o ciano che sfilano in rapida successione prospettica a ritmo di musica.
+  - [-] **Gallerie e Tunnel:** Inizialmente prototipati e poi rimossi nella v0.2.0 (commit `517b41f`) per preservare la visuale aperta dell'orizzonte e del cielo synthwave; l'esperienza autostradale si concentra su skyline aperti e ponti monumentali.
 - [ ] Varietà nel traffico:
   - [ ] Nuovi veicoli oltre al kei truck: berline squadrate anni '80, furgoni per le consegne e motociclette con scia luminosa.
 
@@ -75,6 +74,7 @@ Aggiungere scenari alternativi caricati tra una canzone e l'altra o al cambio di
 
 - [x] Tokyo Midnight Expressway (Shuto / Wangan): skyline con grattacieli pixelati, luci rosse sulle torri di trasmissione e asfalto scuro con riflessi blu e viola (`night` / `MAYONAKA BAY`).
 - [x] Sunset Coastal Highway: costa al tramonto arancione e magenta, sole basso a strisce, palme e gradiente marino (`og_future_funk` / `SUNSET BOULEVARD`).
+  - [ ] **Raffinamento orizzonte & skyline (Questione Aperta):** Come verificato nel confronto con Mayonaka Bay (in cui l'apertura centrale sul mare funziona ottimamente) e Akiba Night (dove la città continua ha senso non essendoci il mare), in Sunset Boulevard la silhouette continua dei 32 edifici bassi forma una fascia scura orizzontale che occlude il mare e il riflesso solare. Allineare Sunset Boulevard al modello Mayonaka Bay: settore centrale (`x: 240..380`) a mare aperto libero (`th = 0`), edifici bassi relegati solo ai fianchi costieri (`x: 120..200` e `420..500`) e silhouette calda in controluce prugna/viola (`#240a38`) anziché nero.
 - [ ] Mount Haruna / Touge notturno: strada di montagna tra i pini, tornanti stretti, nebbia viola sui crinali e luna piena.
 - [x] Cyber Megacity: asfalto bagnato con riflessi di luce, pioggia leggera e atmosfera notturna (`akiba_night` con meteo dinamico).
 - [ ] Transizioni di palette: dissolvenza graduale dei colori tra cielo e orizzonte durante il passaggio tra i brani.

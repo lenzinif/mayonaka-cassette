@@ -4,7 +4,15 @@ import { DEFAULT_TUNING, tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
 import { getChunksForRole, ROAD_CHUNKS, type RoadChunk } from './RoadChunks';
 import { easeIn, easeInOut } from './RoadProjection';
-import { createPoint, type RoadSegment, type RoadSprite, type SegmentEnvironment, type Track } from './RoadSegment';
+import {
+  createPoint,
+  PROP_BAND_RANGES,
+  type PropBand,
+  type RoadSegment,
+  type RoadSprite,
+  type SegmentEnvironment,
+  type Track,
+} from './RoadSegment';
 import { HILL } from './TrackBuilder';
 
 export interface CanonicalSegmentData {
@@ -16,6 +24,8 @@ export interface CanonicalSegmentData {
   readonly p2WorldY: Float64Array;
   /** Copia immutabile delle liste di sprite originali per segmento. */
   readonly sprites: readonly (readonly RoadSprite[])[];
+  /** Ambiente originale (`'standard'` | `'bridge'`) di ciascun segmento. */
+  readonly env: readonly SegmentEnvironment[];
 }
 
 export interface PlacedRoadChunk {
@@ -272,6 +282,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
   const canonicalP1WorldY = new Float64Array(count);
   const canonicalP2WorldY = new Float64Array(count);
   const canonicalSprites: (readonly RoadSprite[])[] = new Array(count);
+  const canonicalEnv: SegmentEnvironment[] = new Array(count);
 
   for (let i = 0; i < count; i++) {
     const s = segments[i]!;
@@ -279,6 +290,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     canonicalP1WorldY[i] = s.p1.worldY;
     canonicalP2WorldY[i] = s.p2.worldY;
     canonicalSprites[i] = s.sprites.slice();
+    canonicalEnv[i] = s.env ?? 'standard';
   }
 
   const canonical: CanonicalSegmentData = {
@@ -286,6 +298,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     p1WorldY: canonicalP1WorldY,
     p2WorldY: canonicalP2WorldY,
     sprites: canonicalSprites,
+    env: canonicalEnv,
   };
 
   return {
@@ -407,17 +420,12 @@ export function stitchHorizonToTargetZ(
     destSeg.curve = srcSeg.curve;
     destSeg.p1.worldY = srcSeg.p1.worldY + deltaY;
     destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
+    destSeg.env = srcSeg.env;
 
-    // Preserve drop marker neon billboards if the destination segment is a drop marker (zero GC Set scan)
+    // Preserve drop marker neon billboards if the destination segment is a drop marker (zero GC)
     const isDestDropMarker = isDropMarkerSegment(track.dropMarkers, toSegIndex + n);
     if (isDestDropMarker) {
-      const dropBillboards = track.canonical.sprites[toSegIndex + n]!.filter(
-        (s) => s.kind === 'billboard',
-      );
-      destSeg.sprites = [
-        ...srcSeg.sprites.filter((s) => s.kind !== 'billboard'),
-        ...dropBillboards,
-      ];
+      destSeg.sprites = track.canonical.sprites[toSegIndex + n] as RoadSprite[];
     } else {
       destSeg.sprites = srcSeg.sprites;
     }
@@ -445,8 +453,9 @@ export function stitchHorizonToTargetZ(
     seg.p2.worldY = nextY;
     prevY = nextY;
 
-    // Restore canonical sprites in the horizon fog without array allocation
+    // Restore canonical sprites and environment in the horizon fog without array allocation
     seg.sprites = track.canonical.sprites[segIdx] as RoadSprite[];
+    seg.env = track.canonical.env[segIdx]!;
   }
 
   // Restore canonical geometry only for the previously dirtied stitch window outside the new active window (zero GC)
@@ -462,6 +471,7 @@ export function stitchHorizonToTargetZ(
       seg.p1.worldY = track.canonical.p1WorldY[i]!;
       seg.p2.worldY = track.canonical.p2WorldY[i]!;
       seg.sprites = track.canonical.sprites[i] as RoadSprite[];
+      seg.env = track.canonical.env[i]!;
     }
     const afterStart = Math.max(prevStart, newEnd);
     for (let i = afterStart; i < prevEnd; i++) {
@@ -470,6 +480,7 @@ export function stitchHorizonToTargetZ(
       seg.p1.worldY = track.canonical.p1WorldY[i]!;
       seg.p2.worldY = track.canonical.p2WorldY[i]!;
       seg.sprites = track.canonical.sprites[i] as RoadSprite[];
+      seg.env = track.canonical.env[i]!;
     }
   }
   track.dirtyStitchRange = { start: newStart, end: newEnd };
@@ -501,6 +512,7 @@ export function restoreCanonicalTrack(track: SongTrack): void {
     s.p1.worldY = canonical.p1WorldY[i]!;
     s.p2.worldY = canonical.p2WorldY[i]!;
     s.sprites = canonical.sprites[i] as RoadSprite[];
+    s.env = canonical.env[i]!;
   }
   track.dirtyStitchRange = undefined;
 }
@@ -648,6 +660,14 @@ function populateChunkChevrons(
   }
 }
 
+function getBandForOffset(offset: number): PropBand {
+  const absOffset = Math.abs(offset);
+  if (absOffset >= 6.0) return 'D';
+  if (absOffset >= 3.0) return 'C';
+  if (absOffset >= 1.6) return 'B';
+  return 'A';
+}
+
 function populateChunkProps(
   segments: RoadSegment[],
   startSeg: number,
@@ -672,65 +692,131 @@ function populateChunkProps(
       );
       continue;
     }
+
+    // Pylons (Phase 3 corridors) and jihanki (Phase 4 vignettes) are not emitted from chunks
+    if (rule.kind === 'pylon' || rule.kind === 'jihanki') {
+      continue;
+    }
+
+    const band: PropBand =
+      rule.band ?? (rule.offset !== undefined ? getBandForOffset(rule.offset) : 'A');
+    const isRhythmic = rule.rhythmic ?? (band === 'A');
     const stepBeats = Math.max(1, Math.round(rule.everyBeats));
-    const baseOffset = rule.offset ?? (
-      rule.kind === 'building'
-        ? 2.3
-        : rule.kind === 'pylon'
-          ? 2.6
-          : rule.kind === 'billboard' || rule.kind === 'vms'
-            ? 1.85
-            : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'suspension-tower')
-              ? 0
-              : rule.kind === 'shrub'
-                ? 1.35
-                : rule.kind === 'sign'
-                  ? 1.38
-                  : rule.kind === 'palm' || rule.kind === 'phonebooth'
-                  ? 1.48
-                  : 1.42
-    );
+    const defaultScaleJitter = isRhythmic ? 0 : 0.2;
+    const scaleJitter = rule.scaleJitter ?? defaultScaleJitter;
 
     let altToggle = 0;
     for (let beat = 0; beat < totalBeats; beat += stepBeats) {
-      const segIdx = startSeg + Math.min(segCount - 1, Math.round(beat * segmentsPerBeat));
-      const seg = segments[segIdx];
-      if (!seg) continue;
+      // 1. Longitudinal anchor & jitter (longitudinal jitter in beats for non-rhythmic rules, clamped inside chunk)
+      const beatJitter =
+        !isRhythmic && rule.jitter?.beats ? rng.range(-rule.jitter.beats, rule.jitter.beats) : 0;
+      const anchorBeat = Math.max(0, Math.min(totalBeats - 0.001, beat + beatJitter));
 
-      const variant = rng.rangeInt(0, 2);
-      const curveSign: -1 | 1 =
-        Math.abs(seg.curve) > 0.2 ? (seg.curve > 0 ? 1 : -1) : mirrorSign;
+      // 2. Base lateral offset: if band set and offset absent, sample inside band range; if offset set, use it
+      let baseOffset: number;
+      if (rule.offset !== undefined) {
+        baseOffset = rule.offset;
+      } else if (rule.band !== undefined) {
+        const range = PROP_BAND_RANGES[rule.band];
+        baseOffset = rng.range(range.min, range.max);
+      } else {
+        baseOffset =
+          rule.kind === 'building'
+            ? 3.8
+            : rule.kind === 'billboard'
+              ? 2.2
+              : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'suspension-tower')
+                ? 0
+                : rule.kind === 'shrub'
+                  ? 1.8
+                  : rule.kind === 'sign'
+                    ? 1.35
+                    : rule.kind === 'palm'
+                      ? 1.95
+                      : 1.35;
+      }
 
-      switch (rule.placement) {
-        case 'both':
-          if (baseOffset === 0) {
-            seg.sprites.push({ kind: rule.kind, offset: 0, variant });
-          } else {
-            seg.sprites.push(
-              { kind: rule.kind, offset: -baseOffset, variant },
-              { kind: rule.kind, offset: baseOffset, variant: (variant + 1) % 3 },
-            );
+      // Lateral jitter
+      const latJitter =
+        rule.jitter?.lateral ? rng.range(-rule.jitter.lateral, rule.jitter.lateral) : 0;
+      let anchorOffset = baseOffset === 0 ? 0 : baseOffset + latJitter;
+
+      if (baseOffset !== 0 && rule.band) {
+        const range = PROP_BAND_RANGES[rule.band];
+        anchorOffset = Math.max(range.min, Math.min(range.max, anchorOffset));
+      }
+      if (rule.kind === 'shrub') {
+        anchorOffset = Math.max(1.6, anchorOffset);
+      }
+
+      // 3. Clusters (n = rng in [min, max] members spread around the anchor)
+      const memberCount = rule.cluster ? rng.rangeInt(rule.cluster.min, rule.cluster.max) : 1;
+      const altSide = altToggle % 2 === 0 ? -1 : 1;
+      altToggle++;
+
+      for (let m = 0; m < memberCount; m++) {
+        let mBeat = anchorBeat;
+        let mOffset = anchorOffset;
+
+        if (rule.cluster && m > 0) {
+          mBeat = Math.max(
+            0,
+            Math.min(
+              totalBeats - 0.001,
+              anchorBeat + rng.range(-rule.cluster.spreadBeats * 0.5, rule.cluster.spreadBeats * 0.5),
+            ),
+          );
+          mOffset =
+            anchorOffset +
+            rng.range(-rule.cluster.spreadLateral * 0.5, rule.cluster.spreadLateral * 0.5);
+          if (baseOffset !== 0 && rule.band) {
+            const range = PROP_BAND_RANGES[rule.band];
+            mOffset = Math.max(range.min, Math.min(range.max, mOffset));
           }
-          break;
-        case 'left':
-          seg.sprites.push({ kind: rule.kind, offset: -baseOffset * mirrorSign, variant });
-          break;
-        case 'right':
-          seg.sprites.push({ kind: rule.kind, offset: baseOffset * mirrorSign, variant });
-          break;
-        case 'alternating': {
-          const side = altToggle % 2 === 0 ? -1 : 1;
-          altToggle++;
-          seg.sprites.push({ kind: rule.kind, offset: side * baseOffset, variant });
-          break;
+          if (rule.kind === 'shrub') {
+            mOffset = Math.max(1.6, mOffset);
+          }
         }
-        case 'outside-curve':
-          // Outside of a right-hand curve (+curve) is on the left (-offset)
-          seg.sprites.push({ kind: rule.kind, offset: -curveSign * baseOffset, variant });
-          break;
-        case 'inside-curve':
-          seg.sprites.push({ kind: rule.kind, offset: curveSign * baseOffset, variant });
-          break;
+
+        const segIdx =
+          startSeg + Math.min(segCount - 1, Math.max(0, Math.round(mBeat * segmentsPerBeat)));
+        const seg = segments[segIdx];
+        if (!seg) continue;
+
+        const variant = rng.rangeInt(0, 2);
+        const scale = scaleJitter > 0 ? Math.max(0.2, 1 + rng.range(-scaleJitter, scaleJitter)) : 1;
+        const curveSign: -1 | 1 =
+          Math.abs(seg.curve) > 0.2 ? (seg.curve > 0 ? 1 : -1) : mirrorSign;
+
+        switch (rule.placement) {
+          case 'both':
+            if (baseOffset === 0) {
+              seg.sprites.push({ kind: rule.kind, offset: 0, variant, scale });
+            } else {
+              const rightScale =
+                scaleJitter > 0 ? Math.max(0.2, 1 + rng.range(-scaleJitter, scaleJitter)) : scale;
+              seg.sprites.push(
+                { kind: rule.kind, offset: -mOffset, variant, scale },
+                { kind: rule.kind, offset: mOffset, variant: (variant + 1) % 3, scale: rightScale },
+              );
+            }
+            break;
+          case 'left':
+            seg.sprites.push({ kind: rule.kind, offset: -mOffset * mirrorSign, variant, scale });
+            break;
+          case 'right':
+            seg.sprites.push({ kind: rule.kind, offset: mOffset * mirrorSign, variant, scale });
+            break;
+          case 'alternating':
+            seg.sprites.push({ kind: rule.kind, offset: altSide * mOffset, variant, scale });
+            break;
+          case 'outside-curve':
+            seg.sprites.push({ kind: rule.kind, offset: -curveSign * mOffset, variant, scale });
+            break;
+          case 'inside-curve':
+            seg.sprites.push({ kind: rule.kind, offset: curveSign * mOffset, variant, scale });
+            break;
+        }
       }
     }
   }

@@ -91,8 +91,11 @@ export function App() {
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
     wasPausedBeforeModalRef.current = false;
-    void audio.unlock().then(() => setAudioUnlocked(true));
+    audio.restartFromBeginning();
     gameRef.current?.setPaused(false);
+    void audio.unlock().then(() => {
+      setAudioUnlocked(true);
+    });
   }, [audio]);
 
   const handleReturnToMainMenu = () => {
@@ -108,8 +111,10 @@ export function App() {
   const handleResumeFromTrackLoader = () => {
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
-    wasPausedBeforeModalRef.current = false;
-    gameRef.current?.setPaused(false);
+    if (gameStarted) {
+      wasPausedBeforeModalRef.current = false;
+      gameRef.current?.setPaused(false);
+    }
   };
 
   useEffect(() => {
@@ -208,6 +213,14 @@ export function App() {
           preloader={preloader}
           onGameReady={(game) => {
             gameRef.current = game;
+            const params = new URLSearchParams(window.location.search);
+            const stageParam = params.get('stage') ?? params.get('palette');
+            if (stageParam !== null) {
+              const idx = stageParam === 'sunset' || stageParam === 'og_future_funk' ? 1 : parseInt(stageParam, 10);
+              if (!Number.isNaN(idx)) {
+                game.setStagePaletteIndex(idx);
+              }
+            }
             if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {
               game.setPaused(true);
             }
@@ -283,7 +296,7 @@ export function App() {
             onStartDrive={handleStartDrive}
             onOpenCassetteDeck={() => {
               void audio.unlock().then(() => setAudioUnlocked(true));
-              setIsInitialSelect(false);
+              setIsInitialSelect(true);
               setTrackLoaderOpen(true);
             }}
             onOpenInspector={() => setInspectorOpen(true)}

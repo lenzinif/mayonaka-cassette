@@ -923,8 +923,9 @@ export class Background {
         !this.cachedWaterGrad
       ) {
         const wGrad = ctx.createLinearGradient(0, seaTopY, 0, horizonY);
-        wGrad.addColorStop(0, COLOR_WATER_DEEP);
-        wGrad.addColorStop(0.55, hexToRgba(palette.skyHorizon, 0.45));
+        wGrad.addColorStop(0, hexToRgba(palette.skyHorizon, 0.40));
+        wGrad.addColorStop(0.28, COLOR_WATER_DEEP);
+        wGrad.addColorStop(0.65, hexToRgba(palette.skyHorizon, 0.35));
         wGrad.addColorStop(1, hexToRgba(palette.grass[0], 0.95));
         this.cachedWaterCtx = ctx;
         this.cachedWaterHorizonY = horizonY;
@@ -934,9 +935,9 @@ export class Background {
       ctx.fillStyle = this.cachedWaterGrad;
       ctx.fillRect(0, seaTopY, width, seaH + 2);
 
-      // Distant calm sea horizon line
+      // Distant calm sea horizon line (delicate, light and soft)
       ctx.fillStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
-      ctx.globalAlpha = 0.5 + pulse * 0.25;
+      ctx.globalAlpha = 0.35 + pulse * 0.18;
       ctx.fillRect(0, seaTopY, width, 1);
       ctx.globalAlpha = 1;
 

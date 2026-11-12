@@ -276,4 +276,18 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     }
     expect(mock.rectCalls).toBeGreaterThan(100);
   });
+
+  it('renders all prop kinds with scaled ppu (0.2x to 2.0x scale factors) without NaN or throw', () => {
+    const mock = createMockCanvas();
+    const testScales = [0.2, 0.5, 0.8, 1.0, 1.25, 1.6, 2.0];
+    for (const kind of allProps) {
+      for (const scale of testScales) {
+        const ppu = 0.02 * scale;
+        expect(() => {
+          drawProp(mock.ctx, kind, 320, 240, ppu, 1, 0, 0);
+        }).not.toThrow();
+      }
+    }
+    expect(mock.rectCalls).toBeGreaterThan(100);
+  });
 });

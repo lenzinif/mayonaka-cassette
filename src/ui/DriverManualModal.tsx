@@ -207,7 +207,7 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
                 <div className="rounded border border-amber-400/30 bg-[#241305] p-2.5">
                   <div className="font-bold text-amber-300 uppercase">SPILL PENALTY</div>
                   <p className="mt-1 text-amber-100/75">
-                    Panic braking or jerky swerves slosh soda over the rim, deducting 10% Groove and adding tape slack.
+                    Panic braking or jerky swerves slosh soda over the rim, deducting 20% Groove and adding tape slack.
                   </p>
                 </div>
               </div>
@@ -215,7 +215,7 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
               <div className="rounded border border-fuchsia-500/30 bg-[#180535] p-2.5 text-[11px]">
                 <div className="font-bold text-fuchsia-300 uppercase">CUP SKINS [V]</div>
                 <p className="mt-1 text-fuchsia-200/80">
-                  Cycle classic Melon Soda, Ramune Blue, Sakura Pink, Electric Grape, Sunset Orange, or Diet Zero.
+                  Cycle classic Melon Soda, Tofu Water Cup, Pocari Sweat, or Boss Coffee.
                 </p>
               </div>
             </div>
@@ -228,8 +228,8 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
                 <div className="flex justify-between"><span>THROTTLE:</span><span className="text-pink-300 font-bold">[W] / [UP]</span></div>
                 <div className="flex justify-between"><span>BRAKE / DRIFT:</span><span className="text-pink-300 font-bold">[S] / [DOWN]</span></div>
                 <div className="flex justify-between"><span>STEER:</span><span className="text-pink-300 font-bold">[A] / [D]</span></div>
-                <div className="flex justify-between"><span>SHIFT UP:</span><span className="text-pink-300 font-bold">[SPACE] / [E]</span></div>
-                <div className="flex justify-between"><span>SHIFT DOWN:</span><span className="text-pink-300 font-bold">[SHIFT] / [Q]</span></div>
+                <div className="flex justify-between"><span>SHIFT UP:</span><span className="text-pink-300 font-bold">[SPACE]</span></div>
+                <div className="flex justify-between"><span>SHIFT DOWN:</span><span className="text-pink-300 font-bold">[SHIFT]</span></div>
                 <div className="flex justify-between"><span>AUTO-SHIFT:</span><span className="text-pink-300 font-bold">[G]</span></div>
                 <div className="flex justify-between"><span>TOFU MODE:</span><span className="text-pink-300 font-bold">[T]</span></div>
                 <div className="flex justify-between"><span>CUP SKIN:</span><span className="text-pink-300 font-bold">[V]</span></div>
@@ -240,12 +240,14 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
               <div className="space-y-1.5 rounded border border-amber-400/30 bg-[#191004] p-2.5">
                 <div className="font-bold text-amber-300 border-b border-amber-400/20 pb-1 uppercase">GAMEPAD</div>
                 <div className="flex justify-between"><span>STEERING:</span><span className="text-amber-200 font-bold">LEFT STICK / D-PAD</span></div>
-                <div className="flex justify-between"><span>THROTTLE:</span><span className="text-amber-200 font-bold">RT / R2 / [A]</span></div>
-                <div className="flex justify-between"><span>BRAKE:</span><span className="text-amber-200 font-bold">LT / L2 / [X]</span></div>
-                <div className="flex justify-between"><span>DRIFT:</span><span className="text-amber-200 font-bold">[B] / CIRCLE</span></div>
+                <div className="flex justify-between"><span>THROTTLE:</span><span className="text-amber-200 font-bold">RT</span></div>
+                <div className="flex justify-between"><span>BRAKE:</span><span className="text-amber-200 font-bold">LT</span></div>
+                <div className="flex justify-between"><span>DRIFT:</span><span className="text-amber-200 font-bold">[A] / [X]</span></div>
+                <div className="flex justify-between"><span>CUP SKIN:</span><span className="text-amber-200 font-bold">[B] / CIRCLE</span></div>
+                <div className="flex justify-between"><span>TOFU MODE:</span><span className="text-amber-200 font-bold">[Y] / TRIANGLE</span></div>
                 <div className="flex justify-between"><span>SHIFT UP/DN:</span><span className="text-amber-200 font-bold">RB / LB</span></div>
+                <div className="flex justify-between"><span>AUTO-SHIFT:</span><span className="text-amber-200 font-bold">SELECT / BACK</span></div>
                 <div className="flex justify-between"><span>PAUSE:</span><span className="text-amber-200 font-bold">START / MENU</span></div>
-                <div className="flex justify-between"><span>RUMBLE:</span><span className="text-emerald-300 font-bold">ROAD HAPTICS</span></div>
               </div>
             </div>
           )}
