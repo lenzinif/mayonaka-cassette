@@ -135,6 +135,10 @@ Rules:
   - **Stage 2 (Natural End Reached):** If the audio file reaches its natural duration before crossing the fork, rather than an abrupt 8-bar rewind/CD skip, the source gracefully washes out while a BPM-synced **Dub Tape Delay** (dotted-eighth `3/16` echo with low-pass filtering and feedback) rings out until the fork is crossed.
 - Running ahead: reaching the fork early starts the 4-bar crossfade early (as a DJ would).
 
+### 3.1 Planned: Chunk Environment Archetypes (Future Scope)
+
+To prevent props from feeling contextually out of place (for instance vending machines appearing along empty mountain touge passes), future iterations will introduce explicit **environment archetypes** (`urbano`, `semiurbano`, `rurale`, `foresta`, `deserto`, `costiero`) on `RoadChunk` definitions. This will govern which vignette prefabs (including re-enabling *jihanki* strictly in urban/semi-urban service zones), roadside buildings, and lateral foliage corridors can co-occur within each chunk. *Jihanki* spawning is temporarily paused until this archetype system is implemented.
+
 ---
 
 ## 4. Beat-Shift Gearbox (M5)

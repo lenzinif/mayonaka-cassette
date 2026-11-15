@@ -1,33 +1,33 @@
-name: Segnalazione bug
-description: Segnala un malfunzionamento, un difetto visivo o un problema tecnico.
+name: Bug Report
+description: Report a bug, visual glitch, or technical issue.
 labels: ["bug"]
 body:
   - type: textarea
     id: bug-description
     attributes:
-      label: Cosa è successo?
-      placeholder: Descrivi il problema e il comportamento atteso...
+      label: What happened?
+      placeholder: Describe the issue and the expected behavior...
     validations:
       required: true
   - type: textarea
     id: steps-to-reproduce
     attributes:
-      label: Passaggi per riprodurre il problema
+      label: Steps to reproduce
       placeholder: |
-        1. Premi Play
-        2. Carica il brano X
-        3. Premi Shift alla battuta Y...
+        1. Press Play
+        2. Load track X
+        3. Press Shift on beat Y...
     validations:
       required: true
   - type: input
     id: environment
     attributes:
-      label: Browser e sistema operativo
-      placeholder: Es. Chrome 124 su Windows 11, display 144 Hz
+      label: Browser and OS
+      placeholder: e.g. Chrome 124 on Windows 11, 144 Hz display
     validations:
       required: true
   - type: textarea
     id: console-errors
     attributes:
-      label: Eventuali errori nella console (F12)
+      label: Console errors (F12), if any
       render: shell

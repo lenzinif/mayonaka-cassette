@@ -52,7 +52,7 @@ Aggiungere varietà agli ostacoli e alle decorazioni nei `RoadChunks`:
   - [x] Cartelloni e palazzi in stile Akihabara con insegne a lama verticali animate a tempo di beat (`building`).
   - [x] Tre stili architettonici urbani: Akiba Megamart, Grattacielo Cyber-Glass a fasce e Showa Block con cartellone al neon a tetto (`カセット`).
 - [x] Arredo autostradale e scenografia giapponese (Fase 4):
-  - [x] Distributori automatici (*jihanki*) illuminati a bordo strada con lattine calde/fredde e particelle dedicate.
+  - [ ] Distributori automatici (*jihanki*) illuminati a bordo strada: **temporaneamente rimossi/sospesi dallo spawn** finché non verrà implementato il sistema di archetipi ambientali per chunk (`urbano` / `semiurbano`).
   - [x] Cabine telefoniche pubbliche verdi (*kōshū denwa*) con vetrate trasparenti e luce interna.
   - [x] Portali a scavalco autostradale Shuto (*gantry*) bilingue e tabelloni a messaggio variabile (*vms*) con messaggi di prova LED ambra.
   - [x] Traliccio ad alta tensione a Delta con cavi aerei catenari e isolatori in ceramica (`pylon`).
@@ -78,6 +78,7 @@ Aggiungere scenari alternativi caricati tra una canzone e l'altra o al cambio di
 - [ ] Mount Haruna / Touge notturno: strada di montagna tra i pini, tornanti stretti, nebbia viola sui crinali e luna piena.
 - [x] Cyber Megacity: asfalto bagnato con riflessi di luce, pioggia leggera e atmosfera notturna (`akiba_night` con meteo dinamico).
 - [ ] Transizioni di palette: dissolvenza graduale dei colori tra cielo e orizzonte durante il passaggio tra i brani.
+- [ ] **Sistema di Archetipi Ambientali per Chunk (Futuro / Out-of-Scope corrente):** categorizzare i `RoadChunk` (es. `urbano`, `semiurbano`, `rurale`, `foresta`, `deserto`, `costiero`) affinché la densità, i prop stradali, i vignette (incluso il ritorno contestuale dei *jihanki*) e i corridoi di vegetazione siano coerenti col carattere ambientale del chunk.
 
 ---
 

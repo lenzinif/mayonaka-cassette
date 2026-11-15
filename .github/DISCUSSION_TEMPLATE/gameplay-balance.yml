@@ -4,33 +4,33 @@ body:
   - type: dropdown
     id: mechanic
     attributes:
-      label: Elemento da discutere
+      label: Mechanic to discuss
       options:
-        - Beat-shift e finestre temporali (PERFECT / GOOD)
-        - Fisica melon soda e Tofu Mode (sensibilità al jerk e sversamento)
-        - Tenuta e controsterzo in derapata
-        - Rapporti del cambio e velocità di punta
-        - Traffico kei truck e collisioni
-        - Sincronia strada-musica (drop e bivi)
-        - Altro
+        - Beat-shift and timing windows (PERFECT / GOOD)
+        - Melon Soda physics and Tofu Mode (jerk sensitivity and spilling)
+        - Drift grip and counter-steering
+        - Gear ratios and top speed
+        - Kei truck traffic and collisions
+        - Road-music sync (drops and stage forks)
+        - Other
     validations:
       required: true
   - type: textarea
     id: current-feel
     attributes:
-      label: Comportamento attuale durante la guida
-      placeholder: Es. In 3ª marcia il controsterzo fa traboccare la soda troppo facilmente, oppure i kei truck compaiono troppo tardi dopo le curve cieche...
+      label: Current driving feel
+      placeholder: e.g. In 3rd gear, counter-steering makes the soda spill too easily, or kei trucks appear too late after blind corners...
     validations:
       required: true
   - type: textarea
     id: proposed-tuning
     attributes:
-      label: Modifica suggerita
-      placeholder: Es. Aumentare la tolleranza del GOOD su schermi a 60 Hz, oppure ammorbidire lo smorzamento della soda...
+      label: Suggested tweak
+      placeholder: e.g. Widen the GOOD timing window on 60 Hz displays, or soften the soda damping...
     validations:
       required: false
   - type: input
     id: environment
     attributes:
-      label: Periferica e sistema (opzionale)
-      placeholder: Es. Tastiera USB, controller Xbox, schermo 144 Hz, Chrome su Windows
+      label: Input device and system (optional)
+      placeholder: e.g. USB keyboard, Xbox controller, 144 Hz display, Chrome on Windows
