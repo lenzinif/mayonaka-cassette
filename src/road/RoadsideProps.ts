@@ -2175,18 +2175,34 @@ function drawSign(
     ctx.closePath();
     ctx.fill();
 
-    // Black sharp curve arrow glyph
+    // Black directional curve arrow glyph (↱ for right curve when on left shoulder, ↰ for left curve)
     if (diam >= 8) {
       ctx.fillStyle = '#080414';
-      const arrowH = Math.max(2, Math.round(diam * 0.45));
-      const arrowW = Math.max(2, Math.round(diam * 0.35));
-      const dir = side < 0 ? -1 : 1;
-      const ax = rx + dir * Math.round(arrowW * 0.2);
-      const ay = signCenterY - Math.round(arrowH * 0.35);
+      const turnDir = side < 0 ? 1 : -1;
+      const stemW = Math.max(2, Math.round(diam * 0.14));
+      const stemX = Math.round(rx - turnDir * diam * 0.08 - stemW * 0.5);
+      const stemTopY = Math.round(signCenterY - r * 0.26);
+      const stemBotY = Math.round(signCenterY + r * 0.48);
 
-      ctx.fillRect(Math.round(ax - arrowW * 0.5), ay, arrowW, 2);
-      ctx.fillRect(Math.round(ax - arrowW * 0.5), ay, 2, arrowH);
-      ctx.fillRect(Math.round(ax - arrowW * 0.5), ay + arrowH - 2, arrowW, 2);
+      // Vertical entry shaft
+      ctx.fillRect(stemX, stemTopY, stemW, Math.max(2, stemBotY - stemTopY));
+
+      // Horizontal turn arm bending into the upcoming curve direction
+      const bendW = Math.max(2, Math.round(r * 0.42));
+      const bendX = turnDir > 0 ? stemX : Math.round(stemX + stemW - bendW);
+      ctx.fillRect(bendX, stemTopY, bendW, stemW);
+
+      // Triangular arrowhead pointing in turnDir
+      const headBaseX = turnDir > 0 ? bendX + bendW - 1 : bendX + 1;
+      const headTipX = headBaseX + turnDir * Math.max(3, Math.round(r * 0.34));
+      const headCenterY = stemTopY + Math.round(stemW * 0.5);
+      const headHalfH = Math.max(2, Math.round(r * 0.24));
+      ctx.beginPath();
+      ctx.moveTo(headBaseX, headCenterY - headHalfH);
+      ctx.lineTo(headTipX, headCenterY);
+      ctx.lineTo(headBaseX, headCenterY + headHalfH);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 }

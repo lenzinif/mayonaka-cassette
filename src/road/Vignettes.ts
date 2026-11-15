@@ -54,85 +54,81 @@ export interface RoadChunkVignetteSlot {
  */
 export const VIGNETTE_PREFABS: Record<VignetteId, VignettePrefab> = {
   /**
-   * Japanese roadside vending machine corner (Jihanki Corner):
-   * Low lit shop kiosk facade set slightly back, with 3 vending machines in a row along the road,
-   * a green NTT phone booth at one end, a bench at the other, and a warm streetlamp.
+   * Roadside convenience corner (rest area without jihanki, awaiting future chunk environment archetypes):
+   * Low lit shop kiosk facade set back with an NTT phone booth, wooden bench, streetlamp, and foliage.
    */
   'jihanki-corner': {
     id: 'jihanki-corner',
-    description: 'Angolo distributori con chiosco, 3 macchinette allineate, cabina telefonica e panchina',
+    description: 'Angolo sosta con chiosco illuminato, cabina telefonica, panchina, lampione e arbusti',
     band: 'B',
-    baseOffset: 2.5,
+    baseOffset: 2.6,
     members: [
-      { kind: 'lamp', dSeg: -2, dOffset: -0.2 },
-      { kind: 'phonebooth', dSeg: -1, dOffset: 0.1 },
-      { kind: 'kiosk', dSeg: 1, dOffset: 0.55 },
-      { kind: 'jihanki', dSeg: 0, dOffset: 0.0, variant: 0 },
-      { kind: 'jihanki', dSeg: 1, dOffset: 0.0, variant: 1 },
-      { kind: 'jihanki', dSeg: 2, dOffset: 0.0, variant: 0 },
-      { kind: 'bench', dSeg: 3, dOffset: 0.1 },
+      { kind: 'lamp', dSeg: -10, dOffset: -0.7 },
+      { kind: 'phonebooth', dSeg: -5, dOffset: 0.1 },
+      { kind: 'kiosk', dSeg: 0, dOffset: 0.55 },
+      { kind: 'bench', dSeg: 6, dOffset: 0.15 },
+      { kind: 'shrub', dSeg: 12, dOffset: 0.4 },
     ],
   },
 
   /**
    * Suburban bus stop shelter:
-   * Glass-backed shelter with bench, illuminated timetable sign, an adjacent cold-drink jihanki,
-   * streetlamp, and decorative greenery.
+   * Glass-backed shelter with bench, illuminated timetable sign, NTT phone booth,
+   * streetlamp, and decorative greenery spaced cleanly in depth.
    */
   'bus-stop': {
     id: 'bus-stop',
-    description: 'Pensilina fermata autobus con panca, tabella orari, distributore e lampione',
+    description: 'Pensilina fermata autobus con panca, cabina telefonica, lampione e verde dedicato',
     band: 'B',
-    baseOffset: 2.1,
+    baseOffset: 2.3,
     members: [
-      { kind: 'lamp', dSeg: -1, dOffset: -0.2 },
-      { kind: 'bus-stop', dSeg: 0, dOffset: 0.0 },
-      { kind: 'bench', dSeg: 0, dOffset: 0.15 },
-      { kind: 'jihanki', dSeg: 1, dOffset: 0.05, variant: 1 },
-      { kind: 'shrub', dSeg: 2, dOffset: 0.25 },
+      { kind: 'lamp', dSeg: -10, dOffset: -0.6 },
+      { kind: 'bus-stop', dSeg: -3, dOffset: 0.0 },
+      { kind: 'bench', dSeg: 2, dOffset: 0.2 },
+      { kind: 'phonebooth', dSeg: 7, dOffset: 0.1 },
+      { kind: 'shrub', dSeg: 12, dOffset: 0.45 },
     ],
   },
 
   /**
    * Highway Parking Area (PA):
-   * Illuminated roof canopy over rest bays, 3 jihanki in a row, a kiosk shop, shrubs, and twin light poles.
+   * Illuminated roof canopy over rest bays, kiosk shop, phone booth, bench, shrubs, and twin light poles.
    */
   'parking-area': {
     id: 'parking-area',
-    description: 'Piccola area di sosta autostradale (PA) con pensilina illuminata, 3 distributori e chiosco',
+    description: 'Piccola area di sosta autostradale (PA) con pensilina illuminata, chiosco, cabina e panchina',
     band: 'C',
-    baseOffset: 3.6,
+    baseOffset: 3.8,
     members: [
-      { kind: 'lamp', dSeg: -2, dOffset: -0.3 },
-      { kind: 'shrub', dSeg: -2, dOffset: 0.3 },
-      { kind: 'canopy', dSeg: 0, dOffset: 0.35 },
-      { kind: 'jihanki', dSeg: -1, dOffset: 0.0, variant: 0 },
-      { kind: 'jihanki', dSeg: 0, dOffset: 0.0, variant: 1 },
-      { kind: 'jihanki', dSeg: 1, dOffset: 0.0, variant: 0 },
-      { kind: 'kiosk', dSeg: 2, dOffset: 0.4 },
-      { kind: 'shrub', dSeg: 3, dOffset: 0.3 },
-      { kind: 'lamp', dSeg: 4, dOffset: -0.3 },
+      { kind: 'lamp', dSeg: -10, dOffset: -1.1 },
+      { kind: 'shrub', dSeg: -7, dOffset: 0.5 },
+      { kind: 'bench', dSeg: -4, dOffset: 0.15 },
+      { kind: 'canopy', dSeg: 0, dOffset: 0.4 },
+      { kind: 'kiosk', dSeg: 5, dOffset: 0.6 },
+      { kind: 'phonebooth', dSeg: 9, dOffset: 0.2 },
+      { kind: 'shrub', dSeg: 12, dOffset: 0.5 },
+      { kind: 'lamp', dSeg: 14, dOffset: -1.1 },
     ],
   },
 
   /**
    * Roadside Shinto Shrine Gate (Torii):
    * Traditional vermilion torii set back in Band C flanked by twin glowing stone lanterns (toro),
-   * evergreen shrubs, and coastal palms.
+   * evergreen shrubs, and biome trees spaced to frame the approach.
    */
   'shrine-gate': {
     id: 'shrine-gate',
     description: 'Santuario con torii rosso vermiglio arretrato tra lanterne di pietra e vegetazione',
     band: 'C',
-    baseOffset: 3.8,
+    baseOffset: 4.1,
     members: [
-      { kind: 'tree', dSeg: -3, dOffset: 0.5 },
-      { kind: 'shrub', dSeg: -2, dOffset: 0.25 },
-      { kind: 'toro', dSeg: -1, dOffset: 0.05 },
-      { kind: 'torii', dSeg: 0, dOffset: 0.45 },
-      { kind: 'toro', dSeg: 1, dOffset: 0.05 },
-      { kind: 'shrub', dSeg: 2, dOffset: 0.25 },
-      { kind: 'tree', dSeg: 3, dOffset: 0.5 },
+      { kind: 'tree', dSeg: -10, dOffset: 0.7 },
+      { kind: 'shrub', dSeg: -7, dOffset: 0.35 },
+      { kind: 'toro', dSeg: -4, dOffset: 0.0 },
+      { kind: 'torii', dSeg: 0, dOffset: 0.55 },
+      { kind: 'toro', dSeg: 4, dOffset: 0.0 },
+      { kind: 'shrub', dSeg: 8, dOffset: 0.35 },
+      { kind: 'tree', dSeg: 12, dOffset: 0.7 },
     ],
   },
 };

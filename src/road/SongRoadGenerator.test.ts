@@ -150,12 +150,35 @@ describe('SongRoadGenerator', () => {
     it('executes zero-pop-in horizon stitching with quantized rumble steps and C1 continuity', () => {
       const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
       const drawDistance = 200;
-      const currentZ = 20 * road.barLengthWorld;
+      const rumbleStep = 2 * RUMBLE_LENGTH;
+      const copyCount = drawDistance - 24;
+      let stitchBar = -1;
+      for (let b = 0; b < road.totalBars; b++) {
+        const fromIdx = Math.floor((b * road.barLengthWorld) / road.segmentLength);
+        const rawDeltaSegs = Math.floor((3.8 * road.barLengthWorld) / road.segmentLength);
+        const deltaSegs = rumbleStep * Math.round(rawDeltaSegs / rumbleStep);
+        const toIdx = fromIdx + deltaSegs;
+        if (deltaSegs < 12 || toIdx + drawDistance + 16 >= road.segments.length) continue;
+        let windowValid = true;
+        for (let n = 0; n < copyCount; n++) {
+          const srcEnv = road.segments[fromIdx + n]?.env ?? 'standard';
+          const destEnv = road.canonical.env[toIdx + n] ?? 'standard';
+          if (srcEnv === 'bridge' || destEnv === 'bridge' || srcEnv !== destEnv) {
+            windowValid = false;
+            break;
+          }
+        }
+        if (windowValid) {
+          stitchBar = b;
+          break;
+        }
+      }
+      expect(stitchBar).toBeGreaterThanOrEqual(0);
+      const currentZ = stitchBar * road.barLengthWorld;
       const rawTargetZ = currentZ + 3.8 * road.barLengthWorld;
 
       const fromSegIndex = Math.floor(currentZ / road.segmentLength);
       // Record visible window geometry before stitch
-      const copyCount = drawDistance - 24;
       const preCurve: number[] = [];
       const preStripe: number[] = [];
       const preDeltaY: number[] = [];

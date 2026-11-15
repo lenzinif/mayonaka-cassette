@@ -116,17 +116,20 @@ describe('Composite Vignettes (Vignettes.ts)', () => {
     }
   });
 
-  it('ensures every jihanki in prefabs has another vignette member within ±6 segments on the same side', () => {
+  it('temporarily excludes jihanki from vignette prefabs and spaces remaining members cleanly', () => {
     for (const id of vignetteIds) {
       const prefab = VIGNETTE_PREFABS[id];
       const jihankiMembers = prefab.members.filter((m) => m.kind === 'jihanki');
-      if (jihankiMembers.length === 0) continue;
+      expect(jihankiMembers).toHaveLength(0);
+      expect(prefab.members.length).toBeGreaterThanOrEqual(2);
 
-      for (const jm of jihankiMembers) {
-        const neighbors = prefab.members.filter(
-          (m) => m !== jm && Math.abs(m.dSeg - jm.dSeg) <= 6,
-        );
-        expect(neighbors.length).toBeGreaterThanOrEqual(1);
+      // Members must stay within a wider, non-clumped longitudinal window and avoid same-segment collisions
+      const seenOffsets = new Set<string>();
+      for (const m of prefab.members) {
+        expect(Math.abs(m.dSeg)).toBeLessThanOrEqual(16);
+        const key = `${m.dSeg}:${m.kind}`;
+        expect(seenOffsets.has(key)).toBe(false);
+        seenOffsets.add(key);
       }
     }
   });
@@ -249,48 +252,35 @@ describe('Composite Vignettes (Vignettes.ts)', () => {
       expect(vignettePropCount1).toBe(vignettePropCount2);
     });
 
-    it('ensures jihanki only appear inside vignettes (never isolated: within ±6 segments of another member on the same side)', () => {
+    it('spawns zero jihanki on generated roads while placing remaining vignettes cleanly', () => {
       const seeds = ['test-seed-a', 'test-seed-b', 'test-seed-c', 'wangan-seed-99'];
 
       for (const seed of seeds) {
         const road = generateSongRoad(mockBeatMap, { seed });
+        let jihankiCount = 0;
+        let activeVignetteProps = 0;
 
         for (let i = 0; i < road.segments.length; i++) {
           const seg = road.segments[i]!;
           for (const sp of seg.sprites) {
-            if (sp.kind !== 'jihanki') continue;
-
-            const spSideSign = sp.offset > 0 ? 1 : -1;
-            // Find another vignette member within ±6 segments on the same side
-            let foundCompanion = false;
-            const startS = Math.max(0, i - 6);
-            const endS = Math.min(road.segments.length - 1, i + 6);
-
-            for (let s = startS; s <= endS; s++) {
-              for (const other of road.segments[s]!.sprites) {
-                if (s === i && other === sp) continue;
-                if (other.offset * spSideSign <= 0) continue; // must be on same side
-                // Vignette member kinds that companion a jihanki
-                if (
-                  other.kind === 'jihanki' ||
-                  other.kind === 'kiosk' ||
-                  other.kind === 'bench' ||
-                  other.kind === 'phonebooth' ||
-                  other.kind === 'bus-stop' ||
-                  other.kind === 'canopy' ||
-                  other.kind === 'lamp' ||
-                  other.kind === 'shrub'
-                ) {
-                  foundCompanion = true;
-                  break;
-                }
-              }
-              if (foundCompanion) break;
+            if (sp.kind === 'jihanki') {
+              jihankiCount++;
             }
-
-            expect(foundCompanion).toBe(true);
+            if (
+              sp.kind === 'bus-stop' ||
+              sp.kind === 'canopy' ||
+              sp.kind === 'kiosk' ||
+              sp.kind === 'bench' ||
+              sp.kind === 'phonebooth' ||
+              sp.kind === 'torii'
+            ) {
+              activeVignetteProps++;
+            }
           }
         }
+
+        expect(jihankiCount).toBe(0);
+        expect(activeVignetteProps).toBeGreaterThan(0);
       }
     });
 

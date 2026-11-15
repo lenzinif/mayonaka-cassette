@@ -139,9 +139,9 @@ export function buildTestTrack(): Track {
     .downhillToEnd();
 
   const end = b.count;
-  // Palms alternate sides every few segments; lamps line the road edge; billboards are rarer.
-  b.sprites('palm', (i) => (i % 12 < 6 ? -1.7 : 1.7) * (1 + (i % 5) * 0.12), 6, 10, end);
+  // Palms alternate sides every few segments with organic mid-verge depth; lamps line the road edge; billboards sit further back.
+  b.sprites('palm', (i) => (i % 12 < 6 ? -2.6 : 2.6) * (1 + (i % 5) * 0.14), 6, 10, end);
   b.sprites('lamp', (i) => ((i / 24) % 2 < 1 ? -1.3 : 1.3), 24, 0, end);
-  b.sprites('billboard', (i) => (i % 2 === 0 ? -2.6 : 2.6), 97, 40, end);
+  b.sprites('billboard', (i) => (i % 2 === 0 ? -3.2 : 3.2), 97, 40, end);
   return b.build();
 }

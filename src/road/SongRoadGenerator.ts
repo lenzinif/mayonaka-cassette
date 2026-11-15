@@ -250,8 +250,19 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
         chunk,
         mirrorSign,
         rng,
-        curveScale,
       );
+
+      // Geometry-driven directional curve chevrons & warning signs on all non-bridge chunks
+      if (chunk.env !== 'bridge') {
+        const chevronRule = chunk.props.find((p) => p.kind === 'chevron');
+        populateChunkChevrons(
+          segments,
+          chunkStartSeg,
+          chunkSegCount,
+          segmentsPerBeat,
+          chevronRule?.offset ?? 1.3,
+        );
+      }
 
       placedChunks.push({
         chunkId: chunk.id,
@@ -624,138 +635,152 @@ function selectChunk(
  * Chevrons never appear on straight road sections when not approaching a curve,
  * and NEVER appear during the middle or exit of curves.
  */
+/**
+ * Searches backward from `fromSegIdx` for a straight road segment (`|curve| <= 0.15`) to
+ * place a single curve hazard diamond warning sign (`sign` variant 2) ahead of the bend.
+ */
 function tryPlaceWarningSign(
   segments: RoadSegment[],
-  segIdx: number,
+  fromSegIdx: number,
+  minSearchSegIdx: number,
+  minClearSegs: number,
   offset: number,
 ): void {
-  if (segIdx < 0 || segIdx >= segments.length) return;
-  const seg = segments[segIdx];
-  if (!seg) return;
-  // Warning sign only on straight road leading up to curve, never inside another curve
-  if (Math.abs(seg.curve) > 0.15) return;
-  // Avoid duplicate warning sign or chevron on the same segment
-  if (seg.sprites.some((sp) => sp.kind === 'sign' || sp.kind === 'chevron')) return;
-  seg.sprites.push({ kind: 'sign', offset, variant: 2 });
+  const start = Math.min(segments.length - 1, fromSegIdx);
+  const stop = Math.max(0, minSearchSegIdx);
+
+  for (let s = start; s >= stop; s--) {
+    const seg = segments[s];
+    if (!seg || seg.env === 'bridge') continue;
+    // Warning sign only on straight road leading up to curve, never inside another curve
+    if (Math.abs(seg.curve) > 0.15) continue;
+
+    // Avoid duplicate warning sign or chevron nearby
+    let hasNearby = false;
+    const scanA = Math.max(0, s - minClearSegs);
+    const scanB = Math.min(segments.length - 1, s + minClearSegs);
+    for (let k = scanA; k <= scanB; k++) {
+      const checkSeg = segments[k];
+      if (checkSeg?.sprites.some((sp) => sp.kind === 'sign' || sp.kind === 'chevron')) {
+        hasNearby = true;
+        break;
+      }
+    }
+    if (hasNearby) continue;
+
+    seg.sprites.push({ kind: 'sign', offset, variant: 2 });
+    return;
+  }
 }
 
 /**
- * Populates Japanese-style directional curve chevrons (矢羽根) along the outside of sharp/medium curves,
- * and warning signs in the approach.
+ * Geometry-driven Japanese-style curve signage & directional delineators (矢羽根):
  *
- * Rules:
- * - Real curves (|effective curve| >= CURVE.MEDIUM * 0.85): chevrons placed inside the curve
- *   from |seg.curve| >= 0.3*|target| until exit on the outside shoulder (right curve => left shoulder < 0).
- *   Spacing: HARD curves (>= CURVE.HARD * 0.8) every ~half beat, MEDIUM curves every ~1 beat.
- *   Plus one diamond curve-warning sign ~1 bar before the start (if straight and no duplicates).
- *   Sequence encoded in variant as dir + 2 * seqIndex for chase lights.
- * - EASY curves (1.5 <= |effective curve| < CURVE.MEDIUM * 0.85): at most one yellow diamond warning sign
- *   ~1 bar before the 30% point; no chevrons.
- * - Very gentle curves (< 1.5): no signs or chevrons.
+ * Scans real contiguous curve lobes inside `[startSeg, startSeg + segCount)` so every
+ * qualifying bend is marked accurately regardless of manual `chunk.props` lists:
+ * - Very gentle curves (`lobePeak < 1.5`): neither signs nor chevrons.
+ * - Gentle/EASY curves (`1.5 <= lobePeak < CURVE.MEDIUM * 0.85`): at most one yellow diamond
+ *   warning sign ahead of entry; ZERO chevrons.
+ * - Medium/Hard curves (`lobePeak >= CURVE.MEDIUM * 0.85`): one warning sign ~1.8 beats before
+ *   the curve body, plus single-arrow chase chevrons ONLY across the developed curve body
+ *   (`|seg.curve| >= 0.60 * lobePeak`), never ahead on the straight entry ramp.
  */
 function populateChunkChevrons(
   segments: RoadSegment[],
   startSeg: number,
   segCount: number,
   segmentsPerBeat: number,
-  chunk: RoadChunk,
-  mirrorSign: -1 | 1,
   baseOffset = 1.3,
-  curveScale = 1.0,
 ): void {
-  const actualBars = segCount / (segmentsPerBeat * 4);
-  const barScale = actualBars / chunk.bars;
-  const segmentsPerBar = Math.round(segmentsPerBeat * 4);
+  const endSeg = Math.min(segments.length, startSeg + segCount);
+  const segmentsPerBar = Math.max(4, Math.round(segmentsPerBeat * 4));
+  const leadSegs = Math.max(6, Math.round(segmentsPerBeat * 1.8));
+  const signClearSegs = Math.max(4, Math.round(segmentsPerBeat * 1.5));
 
   const mediumThreshold = CURVE.MEDIUM * 0.85;
   const hardThreshold = CURVE.HARD * 0.8;
   const easyMinThreshold = 1.5;
 
-  let mCursorSeg = startSeg;
-  for (let mIdx = 0; mIdx < chunk.maneuvers.length; mIdx++) {
-    const m = chunk.maneuvers[mIdx]!;
-    const isLastManeuverInChunk = mIdx === chunk.maneuvers.length - 1;
-    const mSegCount = isLastManeuverInChunk
-      ? startSeg + segCount - mCursorSeg
-      : Math.max(4, Math.round(m.bars * barScale * segmentsPerBar));
-
-    if (mSegCount <= 0) continue;
-
-    const targetCurve = m.curve * mirrorSign * curveScale;
-    const absTarget = Math.abs(targetCurve);
-
-    // 1. Very gentle curves: nothing
-    if (absTarget < easyMinThreshold) {
-      mCursorSeg += mSegCount;
+  let cursor = startSeg;
+  while (cursor < endSeg) {
+    const startSample = segments[cursor];
+    if (!startSample || Math.abs(startSample.curve) < 1.0) {
+      cursor++;
       continue;
     }
 
-    const threshold30 = 0.3 * absTarget;
-    let first30Seg = -1;
-    for (let s = mCursorSeg; s < mCursorSeg + mSegCount; s++) {
-      const seg = segments[s];
-      if (seg && Math.abs(seg.curve) >= threshold30) {
-        first30Seg = s;
+    const curveSign: -1 | 1 = startSample.curve > 0 ? 1 : -1;
+    const lobeStart = cursor;
+    let lobePeak = 0;
+    let lobeEnd = cursor;
+
+    while (cursor < endSeg) {
+      const s = segments[cursor];
+      if (!s || Math.abs(s.curve) < 1.0 || (s.curve > 0 ? 1 : -1) !== curveSign) {
         break;
       }
+      const absC = Math.abs(s.curve);
+      if (absC > lobePeak) lobePeak = absC;
+      lobeEnd = cursor;
+      cursor++;
     }
 
-    const isRight = targetCurve > 0;
-    const outsideOffset = isRight ? -baseOffset : baseOffset;
-
-    // 2. EASY curves: at most ONE yellow diamond curve-warning sign ~1 bar before 30% target point
-    if (absTarget < mediumThreshold) {
-      if (first30Seg !== -1) {
-        const warningSegIdx = first30Seg - segmentsPerBar;
-        tryPlaceWarningSign(segments, warningSegIdx, outsideOffset);
-      }
-      mCursorSeg += mSegCount;
+    // 1. Very gentle curves: neither signs nor chevrons
+    if (lobePeak < easyMinThreshold) {
       continue;
     }
 
-    // 3. Real curves (absTarget >= CURVE.MEDIUM * 0.85):
-    if (first30Seg !== -1) {
-      // (a) One diamond warning sign ~1 bar before the start
-      const warningSegIdx = first30Seg - segmentsPerBar;
-      tryPlaceWarningSign(segments, warningSegIdx, outsideOffset);
+    const isRight = curveSign > 0;
+    const outsideOffset = isRight ? -baseOffset : baseOffset;
+    const bodyThreshold = 0.6 * lobePeak;
 
-      // (b) Find exit point where |seg.curve| drops below 0.3 * |target|
-      let curveEndSeg = first30Seg;
-      for (let s = first30Seg; s < mCursorSeg + mSegCount; s++) {
-        const seg = segments[s];
-        if (seg && Math.abs(seg.curve) >= threshold30) {
-          curveEndSeg = s;
-        } else {
-          break;
-        }
-      }
-
-      // (c) Step spacing: HARD-ish every ~half beat, MEDIUM every ~1 beat
-      const isHard = absTarget >= hardThreshold;
-      const stepSegs = Math.max(1, Math.round(segmentsPerBeat * (isHard ? 0.5 : 1.0)));
-      const dir = isRight ? 0 : 1;
-      let seqIndex = 0;
-
-      for (let sIdx = first30Seg; sIdx <= curveEndSeg; sIdx += stepSegs) {
-        const seg = segments[sIdx];
-        if (!seg) continue;
-        if (!seg.sprites.some((sp) => sp.kind === 'chevron')) {
-          const variant = dir + 2 * seqIndex;
-          seg.sprites.push({ kind: 'chevron', offset: outsideOffset, variant });
-          seqIndex++;
-        }
+    let bodyStart = -1;
+    let bodyEnd = -1;
+    for (let s = lobeStart; s <= lobeEnd; s++) {
+      const seg = segments[s];
+      if (seg && Math.abs(seg.curve) >= bodyThreshold) {
+        if (bodyStart === -1) bodyStart = s;
+        bodyEnd = s;
       }
     }
 
-    mCursorSeg += mSegCount;
+    if (bodyStart === -1) {
+      continue;
+    }
+
+    // Place a single yellow diamond curve warning sign ~1.8 beats before the developed curve body
+    const preferredWarnSeg = bodyStart - leadSegs;
+    const minSearchSeg = Math.max(startSeg > 0 ? startSeg - Math.round(segmentsPerBar * 0.5) : 0, bodyStart - segmentsPerBar);
+    tryPlaceWarningSign(segments, preferredWarnSeg, minSearchSeg, signClearSegs, outsideOffset);
+
+    // 2. EASY / light sweepers: warning sign only, NEVER chevrons
+    if (lobePeak < mediumThreshold) {
+      continue;
+    }
+
+    // 3. Real curves (`lobePeak >= CURVE.MEDIUM * 0.85`): single-arrow chase chevrons inside the developed curve
+    const isHard = lobePeak >= hardThreshold;
+    const stepSegs = Math.max(4, Math.round(segmentsPerBeat * (isHard ? 0.5 : 1.0)));
+    const dir = isRight ? 0 : 1;
+    let seqIndex = 0;
+
+    for (let sIdx = bodyStart; sIdx <= bodyEnd; sIdx += stepSegs) {
+      const seg = segments[sIdx];
+      if (!seg || seg.env === 'bridge') continue;
+      if (!seg.sprites.some((sp) => sp.kind === 'chevron')) {
+        const variant = dir + 2 * seqIndex;
+        seg.sprites.push({ kind: 'chevron', offset: outsideOffset, variant });
+        seqIndex++;
+      }
+    }
   }
 }
 
 function getBandForOffset(offset: number): PropBand {
   const absOffset = Math.abs(offset);
   if (absOffset >= 6.0) return 'D';
-  if (absOffset >= 3.0) return 'C';
-  if (absOffset >= 1.6) return 'B';
+  if (absOffset >= 3.5) return 'C';
+  if (absOffset >= 1.85) return 'B';
   return 'A';
 }
 
@@ -767,27 +792,12 @@ function populateChunkProps(
   chunk: RoadChunk,
   mirrorSign: -1 | 1,
   rng: SeededRandom,
-  curveScale = 1.0,
 ): void {
   const totalBeats = Math.floor(segCount / Math.max(1, segmentsPerBeat));
 
   for (const rule of chunk.props) {
-    if (rule.kind === 'chevron') {
-      populateChunkChevrons(
-        segments,
-        startSeg,
-        segCount,
-        segmentsPerBeat,
-        chunk,
-        mirrorSign,
-        rule.offset ?? 1.3,
-        curveScale,
-      );
-      continue;
-    }
-
-    // Pylons (Phase 3 corridors) and jihanki (Phase 4 vignettes) are not emitted from chunks
-    if (rule.kind === 'pylon' || rule.kind === 'jihanki') {
+    // Chevrons (Phase 2 geometry pass), pylons (Phase 3 corridors), and jihanki (removed) are not emitted from chunk rules
+    if (rule.kind === 'chevron' || rule.kind === 'pylon' || rule.kind === 'jihanki') {
       continue;
     }
 
@@ -815,17 +825,17 @@ function populateChunkProps(
       } else {
         baseOffset =
           rule.kind === 'building'
-            ? 3.8
+            ? 4.0
             : rule.kind === 'billboard'
-              ? 2.2
+              ? 2.4
               : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'suspension-tower')
                 ? 0
                 : rule.kind === 'shrub'
-                  ? 1.8
+                  ? 2.6
                   : rule.kind === 'sign'
                     ? 1.35
                     : (rule.kind === 'palm' || rule.kind === 'tree')
-                      ? 1.95
+                      ? 2.9
                       : 1.35;
       }
 
@@ -839,7 +849,10 @@ function populateChunkProps(
         anchorOffset = Math.max(range.min, Math.min(range.max, anchorOffset));
       }
       if (rule.kind === 'shrub') {
-        anchorOffset = Math.max(1.6, anchorOffset);
+        anchorOffset = Math.max(1.85, anchorOffset);
+      }
+      if (chunk.env === 'bridge' && anchorOffset !== 0) {
+        anchorOffset = Math.min(2.8, anchorOffset);
       }
 
       // 3. Clusters (n = rng in [min, max] members spread around the anchor)
@@ -867,7 +880,10 @@ function populateChunkProps(
             mOffset = Math.max(range.min, Math.min(range.max, mOffset));
           }
           if (rule.kind === 'shrub') {
-            mOffset = Math.max(1.6, mOffset);
+            mOffset = Math.max(1.85, mOffset);
+          }
+          if (chunk.env === 'bridge' && mOffset !== 0) {
+            mOffset = Math.min(2.8, mOffset);
           }
         }
 

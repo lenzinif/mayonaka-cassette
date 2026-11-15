@@ -4,16 +4,20 @@ import type { RoadSegment, RoadSprite } from './RoadSegment';
 import type { PlacedRoadChunk } from './SongRoadGenerator';
 
 export interface PopulatePowerLinesOptions {
-  /** Target fraction of eligible non-bridge road to cover with power lines (default: 0.50). */
+  /** Target fraction of eligible non-bridge road to cover with power lines (default: 0.34). */
   coverageRatio?: number;
   /** Minimum consecutive chunks in a single run (default: 1). */
   minRunChunks?: number;
-  /** Maximum consecutive chunks in a single run (default: 4). */
+  /** Maximum consecutive chunks in a single run (default: 3). */
   maxRunChunks?: number;
   /** Reserved bars before track end for stage fork approach (default: FORK_APPROACH_BARS = 6). */
   forkApproachBars?: number;
-  /** Tower spacing in bars for runs >= 4 bars (default: 2). */
+  /** Optional explicit tower spacing in bars (overrides beat-based spacing if provided). */
   spacingBars?: number;
+  /** Beats per bar for beat-subdivision spacing (default: 4). */
+  beatsPerBar?: number;
+  /** Optional explicit tower spacing in beats (default: 2 or 3 beats per corridor). */
+  spacingBeats?: number;
   /** Whether to place a rare high-voltage road crossing (at most 1 per song, default: true). */
   crossingEnabled?: boolean;
 }
@@ -55,10 +59,12 @@ export function populatePowerLines(
     return;
   }
 
-  const coverageRatio = opts?.coverageRatio ?? 0.5;
-  const maxRunChunks = opts?.maxRunChunks ?? 4;
+  const coverageRatio = opts?.coverageRatio ?? 0.34;
+  const maxRunChunks = opts?.maxRunChunks ?? 3;
   const forkApproachBars = opts?.forkApproachBars ?? FORK_APPROACH_BARS;
   const crossingEnabled = opts?.crossingEnabled ?? true;
+  const beatsPerBar = opts?.beatsPerBar ?? 4;
+  const segmentsPerBeat = Math.max(2, Math.round(segmentsPerBar / beatsPerBar));
 
   const totalBars = Math.floor(segments.length / segmentsPerBar);
   const maxBar = Math.max(0, totalBars - forkApproachBars);
@@ -103,9 +109,21 @@ export function populatePowerLines(
     return;
   }
 
-  const targetCoveredBars = Math.round(totalEligibleBars * coverageRatio);
+  const maxCeilingBars =
+    totalEligibleBars < 6
+      ? Math.max(2, Math.ceil(totalEligibleBars * 0.45))
+      : Math.floor(totalEligibleBars * 0.42);
+  const minFloorBars =
+    totalEligibleBars < 6
+      ? Math.min(totalEligibleBars, 2)
+      : Math.ceil(totalEligibleBars * 0.2);
+  const targetCoveredBars = Math.min(
+    maxCeilingBars,
+    Math.max(minFloorBars, Math.round(totalEligibleBars * coverageRatio)),
+  );
+  const maxRunBars = Math.min(12, Math.max(4, maxCeilingBars));
 
-  // 3. Partition eligible sequences into section-aligned candidate runs (1..N chunks)
+  // 3. Partition eligible sequences into multi-chunk corridor candidates (spanning 1..3 chunks)
   interface CandidateRun {
     chunks: PlacedRoadChunk[];
     startBar: number;
@@ -119,28 +137,27 @@ export function populatePowerLines(
     let chunkIdx = 0;
     while (chunkIdx < seq.length) {
       const firstChunk = seq[chunkIdx]!;
-      const role = firstChunk.role;
-
-      // Group consecutive chunks sharing the same musical role within maxRunChunks
       const runChunks: PlacedRoadChunk[] = [firstChunk];
+      let runEndBar = Math.min(maxBar, firstChunk.startBar + firstChunk.bars);
       chunkIdx++;
 
-      while (
-        chunkIdx < seq.length &&
-        seq[chunkIdx]!.role === role &&
-        runChunks.length < maxRunChunks
-      ) {
-        runChunks.push(seq[chunkIdx]!);
+      while (chunkIdx < seq.length && runChunks.length < maxRunChunks) {
+        const nextChunk = seq[chunkIdx]!;
+        const nextEndBar = Math.min(maxBar, nextChunk.startBar + nextChunk.bars);
+        if (nextEndBar - firstChunk.startBar > maxRunBars) {
+          break;
+        }
+        runChunks.push(nextChunk);
+        runEndBar = nextEndBar;
         chunkIdx++;
       }
 
-      const startBar = runChunks[0]!.startBar;
-      const lastChunk = runChunks[runChunks.length - 1]!;
-      const endBar = Math.min(maxBar, lastChunk.startBar + lastChunk.bars);
-      const bars = endBar - startBar;
+      const startBar = firstChunk.startBar;
+      const clampedEndBar = Math.min(runEndBar, startBar + maxCeilingBars);
+      const bars = clampedEndBar - startBar;
 
       if (bars >= 2) {
-        candidates.push({ chunks: runChunks, startBar, endBar, bars });
+        candidates.push({ chunks: runChunks, startBar, endBar: clampedEndBar, bars });
       }
     }
   }
@@ -149,84 +166,111 @@ export function populatePowerLines(
     return;
   }
 
-  // 4. Select candidate runs to satisfy ~40-60% coverage target
+  // 4. Select candidate corridors within [minFloorBars, maxCeilingBars] with natural open gaps
   const selectedRuns: CandidateRun[] = [];
   let coveredBars = 0;
 
-  // Pass A: Stochastic selection with ~55% pick rate per section block
+  // Pass A: Stochastic selection preferring distinct separated corridors across chunks
   for (const candidate of candidates) {
-    if (coveredBars + candidate.bars <= targetCoveredBars * 1.2) {
-      if (rng.bool(0.55)) {
+    const prevRun = selectedRuns[selectedRuns.length - 1];
+    const hasGap = !prevRun || candidate.startBar - prevRun.endBar >= 4;
+    if (hasGap && coveredBars + candidate.bars <= maxCeilingBars) {
+      if (coveredBars < targetCoveredBars && rng.bool(0.62)) {
         selectedRuns.push(candidate);
         coveredBars += candidate.bars;
       }
     }
   }
 
-  // Pass B: If coverage is below 40% floor, add remaining candidate runs until target is reached
-  if (coveredBars / totalEligibleBars < 0.4) {
+  // Pass B: Guarantee coverage floor without exceeding maxCeilingBars
+  if (coveredBars < minFloorBars) {
     for (const candidate of candidates) {
-      if (!selectedRuns.includes(candidate)) {
+      if (selectedRuns.includes(candidate)) continue;
+      const room = maxCeilingBars - coveredBars;
+      if (room < 2) break;
+
+      if (candidate.bars <= room) {
         selectedRuns.push(candidate);
         coveredBars += candidate.bars;
-        if (coveredBars / totalEligibleBars >= 0.42) {
-          break;
-        }
+      } else {
+        const trimmedBars = Math.min(room, Math.max(2, targetCoveredBars - coveredBars));
+        selectedRuns.push({
+          chunks: candidate.chunks,
+          startBar: candidate.startBar,
+          endBar: candidate.startBar + trimmedBars,
+          bars: trimmedBars,
+        });
+        coveredBars += trimmedBars;
+      }
+
+      if (coveredBars >= targetCoveredBars || coveredBars >= minFloorBars) {
+        break;
       }
     }
   }
 
-  // 5. Place power pylon sprites for each selected run
+  // Sort runs chronologically along track
+  selectedRuns.sort((a, b) => a.startBar - b.startBar);
+
+  // 5. Place continuous beat-spaced power pylon sprites for each selected corridor
   let nextChainId = 1;
   const occupiedBars = new Set<number>();
+  const maxAllowedSeg = maxBar * segmentsPerBar;
 
   for (const run of selectedRuns) {
     const chainId = nextChainId++;
     const side = rng.bool() ? 1 : -1;
-    const baseMag = rng.range(3.8, 6.2);
+    const baseMag = rng.range(3.9, 6.1);
     const baseOffset = side * baseMag;
-    const driftTotal = side * rng.range(-0.3, 0.3);
+    const driftTotal = side * rng.range(-0.35, 0.35);
 
-    const spacingBars = run.bars <= 3 ? 1 : (opts?.spacingBars ?? 2);
-    const towerBars: number[] = [];
+    const spacingBeats = opts?.spacingBeats ?? (rng.bool(0.65) ? 2 : 3);
+    const stepSegs =
+      opts?.spacingBars !== undefined
+        ? Math.max(4, Math.round(opts.spacingBars * segmentsPerBar))
+        : Math.max(6, spacingBeats * segmentsPerBeat);
 
-    for (let b = run.startBar; b <= run.endBar; b += spacingBars) {
-      towerBars.push(b);
-    }
-
-    // Ensure the terminal anchor lands at or near the run end
-    if (towerBars.length >= 2) {
-      const lastB = towerBars[towerBars.length - 1]!;
-      if (run.endBar - lastB >= 1) {
-        towerBars.push(run.endBar);
-      }
-    }
-
-    // Filter down to valid road segments (non-bridge and within track bounds)
-    const validBars: number[] = [];
-    for (const b of towerBars) {
-      const segIdx = b * segmentsPerBar;
-      if (segIdx >= 0 && segIdx < segments.length && segments[segIdx]?.env !== 'bridge') {
-        validBars.push(b);
-      }
-    }
-
-    if (validBars.length < 2) {
+    const runStartSeg = run.startBar * segmentsPerBar;
+    const runEndSeg = Math.min(maxAllowedSeg, run.endBar * segmentsPerBar - segmentsPerBeat);
+    const spanSegs = runEndSeg - runStartSeg;
+    if (spanSegs < 4) {
       continue;
     }
 
-    const towerCount = validBars.length;
+    const spanCount = Math.max(1, Math.round(spanSegs / stepSegs));
+    const validSegs: number[] = [];
+    for (let i = 0; i <= spanCount; i++) {
+      const segIdx = Math.round(runStartSeg + (spanSegs * i) / spanCount);
+      if (
+        segIdx >= 0 &&
+        segIdx < segments.length &&
+        segIdx <= maxAllowedSeg &&
+        segments[segIdx]?.env !== 'bridge' &&
+        (validSegs.length === 0 || validSegs[validSegs.length - 1] !== segIdx)
+      ) {
+        validSegs.push(segIdx);
+      }
+    }
+
+    if (validSegs.length < 2) {
+      continue;
+    }
+
+    for (let b = run.startBar; b < run.endBar; b++) {
+      occupiedBars.add(b);
+    }
+
+    const towerCount = validSegs.length;
     for (let i = 0; i < towerCount; i++) {
-      const bar = validBars[i]!;
+      const segIdx = validSegs[i]!;
+      const bar = Math.floor(segIdx / segmentsPerBar);
       occupiedBars.add(bar);
 
-      const segIdx = bar * segmentsPerBar;
       const seg = segments[segIdx]!;
-
       const t = towerCount > 1 ? i / (towerCount - 1) : 0;
       const offset = Number((baseOffset + driftTotal * t).toFixed(3));
       // Variant: 1 = terminal/anchor (first & last), 0 = suspension (intermediate)
-      const variant = (i === 0 || i === towerCount - 1) ? 1 : 0;
+      const variant = i === 0 || i === towerCount - 1 ? 1 : 0;
 
       const sprite: RoadSprite = {
         kind: 'pylon',

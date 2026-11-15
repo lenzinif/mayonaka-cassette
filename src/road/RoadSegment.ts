@@ -48,9 +48,9 @@ export type SegmentEnvironment =
 
 /**
  * Depth bands for roadside props (docs/DESIGN.md §2 Fase 1):
- * - A: Shoulder (1.10–1.45) — rhythmic functional fixtures (lamps, signs, gantries, chevrons), collidable.
- * - B: Verge (1.6–3.0) — organic greenery & billboards (shrubs, palms, billboards), collidable.
- * - C: Near field (3.0–6.0) — low buildings & near structures, organic, non-collidable.
+ * - A: Shoulder (1.15–1.45) — rhythmic functional fixtures (lamps, signs, gantries, chevrons), collidable.
+ * - B: Verge (1.85–3.8) — organic greenery & billboards (shrubs, trees, billboards), collidable within <3.0.
+ * - C: Near field (3.5–8.5) — groves, low buildings & power pylons, organic, non-collidable.
  * - D: Far field (6.0–14.0) — tall city skyline towers & backdrops, dense organic, non-collidable.
  */
 export type PropBand = 'A' | 'B' | 'C' | 'D';
@@ -61,9 +61,9 @@ export interface PropBandRange {
 }
 
 export const PROP_BAND_RANGES: Record<PropBand, PropBandRange> = {
-  A: { min: 1.1, max: 1.45 },
-  B: { min: 1.6, max: 3.0 },
-  C: { min: 3.0, max: 6.0 },
+  A: { min: 1.15, max: 1.45 },
+  B: { min: 1.85, max: 3.8 },
+  C: { min: 3.5, max: 8.5 },
   D: { min: 6.0, max: 14.0 },
 } as const;
 
