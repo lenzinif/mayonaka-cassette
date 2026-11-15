@@ -86,16 +86,27 @@ export function App() {
     };
   }, [audio, audioUnlocked]);
 
+  const closeTrackLoader = useCallback(() => {
+    audio.stopPreview(gameStarted);
+    setIsInitialSelect(false);
+    setTrackLoaderOpen(false);
+  }, [audio, gameStarted]);
+
   const handleStartDrive = useCallback(() => {
+    audio.stopPreview(false);
     setGameStarted(true);
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
     wasPausedBeforeModalRef.current = false;
-    void audio.unlock().then(() => setAudioUnlocked(true));
+    audio.restartFromBeginning();
     gameRef.current?.setPaused(false);
+    void audio.unlock().then(() => {
+      setAudioUnlocked(true);
+    });
   }, [audio]);
 
   const handleReturnToMainMenu = () => {
+    audio.stopPreview(false);
     setGameStarted(false);
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
@@ -106,10 +117,13 @@ export function App() {
   };
 
   const handleResumeFromTrackLoader = () => {
+    audio.stopPreview(gameStarted);
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
-    wasPausedBeforeModalRef.current = false;
-    gameRef.current?.setPaused(false);
+    if (gameStarted) {
+      wasPausedBeforeModalRef.current = false;
+      gameRef.current?.setPaused(false);
+    }
   };
 
   useEffect(() => {
@@ -149,11 +163,7 @@ export function App() {
       } else if (e.code === 'KeyM' && !inspectorOpen && gameStarted) {
         e.preventDefault();
         if (trackLoaderOpen) {
-          if (isInitialSelect) {
-            handleStartDrive();
-          } else {
-            setTrackLoaderOpen(false);
-          }
+          closeTrackLoader();
         } else {
           setIsInitialSelect(false);
           setTrackLoaderOpen(true);
@@ -165,11 +175,7 @@ export function App() {
         if (trackLoaderOpen) {
           e.preventDefault();
           e.stopPropagation();
-          if (isInitialSelect) {
-            handleStartDrive();
-          } else {
-            setTrackLoaderOpen(false);
-          }
+          closeTrackLoader();
         } else if (inspectorOpen) {
           e.preventDefault();
           e.stopPropagation();
@@ -183,7 +189,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, isInitialSelect, handleStartDrive]);
+  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, closeTrackLoader]);
 
   const handleSelectTrack = (item: PlaylistItem) => {
     void audio.unlock().then(() => setAudioUnlocked(true));
@@ -208,6 +214,25 @@ export function App() {
           preloader={preloader}
           onGameReady={(game) => {
             gameRef.current = game;
+            const params = new URLSearchParams(window.location.search);
+            const stageParam = params.get('stage') ?? params.get('palette');
+            if (stageParam !== null) {
+              const norm = stageParam.trim().toLowerCase();
+              const namedMap: Record<string, number> = {
+                night: 0,
+                mayonaka: 0,
+                sunset: 1,
+                og_future_funk: 1,
+                akiba_night: 2,
+                weeb_funk: 2,
+                akiba: 2,
+                vaporfunk: 3,
+              };
+              const idx = norm in namedMap ? namedMap[norm]! : parseInt(norm, 10);
+              if (!Number.isNaN(idx)) {
+                game.setStagePaletteIndex(idx);
+              }
+            }
             if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {
               game.setPaused(true);
             }
@@ -259,18 +284,14 @@ export function App() {
         <TrackLoader
           open={trackLoaderOpen}
           library={library}
+          audio={audio}
           isInitialSelect={isInitialSelect}
           onStartDrive={handleStartDrive}
           onResumeDrive={handleResumeFromTrackLoader}
           onSelectTrack={handleSelectTrack}
           onUpdateBeatMap={handleUpdateBeatMap}
-          onClose={() => {
-            if (isInitialSelect) {
-              handleStartDrive();
-            } else {
-              setTrackLoaderOpen(false);
-            }
-          }}
+          onPreviewUnlocked={() => setAudioUnlocked(true)}
+          onClose={closeTrackLoader}
         />
         {inspectorOpen && <BeatMapInspector onClose={() => setInspectorOpen(false)} />}
         {!gameStarted && !inspectorOpen && (
@@ -283,7 +304,7 @@ export function App() {
             onStartDrive={handleStartDrive}
             onOpenCassetteDeck={() => {
               void audio.unlock().then(() => setAudioUnlocked(true));
-              setIsInitialSelect(false);
+              setIsInitialSelect(true);
               setTrackLoaderOpen(true);
             }}
             onOpenInspector={() => setInspectorOpen(true)}

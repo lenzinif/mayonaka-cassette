@@ -131,4 +131,28 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
     expect(html).toContain('type="file"');
     expect(html).toContain('class="sr-only"');
   });
+
+  it('renders Cassette Deck preview transport, 4-beat LEDs, beat click toggle, scrubber, and row preview buttons', () => {
+    const library = new TrackLibrary();
+    const html = renderToString(
+      createElement(TrackLoader, {
+        open: true,
+        library,
+        onSelectTrack: vi.fn(),
+        onUpdateBeatMap: vi.fn(),
+        onClose: vi.fn(),
+      }),
+    );
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+
+    expect(text).toContain('PLAY PREVIEW');
+    expect(text).toContain('SKIP TO DROP');
+    expect(text).toContain('BEAT CLICK: OFF');
+    expect(text).toContain('SYNTH PREVIEW');
+    expect(html).toContain('aria-label="4-beat bar indicator"');
+    expect(html).toContain('aria-label="Track preview position"');
+    expect(html).toContain('aria-label="Preview Neon Horizon (Synth Fallback)"');
+    expect(html).toContain('aria-label="Preview Midnight Wangan 88 (Synth VIP)"');
+    expect(html).toContain('title="Explain what BPM, Tap Tempo, and Beat -1 / +1 do"');
+  });
 });

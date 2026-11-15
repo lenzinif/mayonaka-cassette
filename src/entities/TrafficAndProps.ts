@@ -69,6 +69,9 @@ function propHitHalfWidth(kind: PropKind): number {
     case 'billboard':
       return 0.35;
     case 'palm':
+    case 'tree':
+    case 'street-tree':
+    case 'pine':
       return 0.16;
     case 'lamp':
       return 0.14;
@@ -85,13 +88,25 @@ function propHitHalfWidth(kind: PropKind): number {
       // Overhead structures span across the roadway; player drives right under
       return 0;
     case 'chevron':
-      return 0.22;
+      return 0.14;
     case 'pylon':
       return 0.4;
     case 'shrub':
       return 0.16;
     case 'sign':
       return 0.18;
+    case 'kiosk':
+      return 0.6;
+    case 'bench':
+      return 0.2;
+    case 'bus-stop':
+      return 0.35;
+    case 'canopy':
+      return 0.7;
+    case 'torii':
+      return 0.4;
+    case 'toro':
+      return 0.15;
   }
 }
 
@@ -556,6 +571,8 @@ export class TrafficManager {
       const seg = track.segments[(prevSegIdx + s) % segCount]!;
       for (let i = 0; i < seg.sprites.length; i++) {
         const sp = seg.sprites[i]!;
+        // Only props in bands A and B (|offset| < 3.0) are collidable; near-field C and far-field D never collide
+        if (Math.abs(sp.offset) >= 3.0) continue;
         const effectiveOffset = getEffectivePropOffset(
           sp.offset,
           seg.p1.worldZ,
@@ -563,7 +580,7 @@ export class TrafficManager {
           forkZoneStartZ,
           forkChoice,
         );
-        const hitW = propHitHalfWidth(sp.kind);
+        const hitW = propHitHalfWidth(sp.kind) * (sp.scale ?? 1);
         if (Math.abs(car.x - effectiveOffset) < hitW) {
           const floorSpeed = maxSpeed * 0.25;
           const signedDiff = car.x - effectiveOffset;

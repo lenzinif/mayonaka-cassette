@@ -139,7 +139,8 @@ export class SongRoadSyncController {
     if (this.horizonStitchCooldown > 0) return 0;
 
     // Do not stitch if an upcoming drop marker is already visible in front of the car
-    const safeAheadWorldZ = Math.floor(tuning.drawDistance * 0.75) * track.segmentLength;
+    const drawDistSegs = Math.floor(tuning.drawDistance);
+    const safeAheadWorldZ = Math.floor(drawDistSegs * 0.75) * track.segmentLength;
     for (let i = 0; i < track.dropMarkers.length; i++) {
       const dm = track.dropMarkers[i]!;
       if (
@@ -147,6 +148,19 @@ export class SongRoadSyncController {
         dm.worldZ >= position &&
         dm.worldZ <= position + safeAheadWorldZ
       ) {
+        return 0;
+      }
+    }
+
+    // Do not stitch while the camera or near visible window is on a bridge (env === 'bridge'),
+    // so monumental suspension bridge towers, cables, and expansion joints are never cut mid-span.
+    const curSegIdx = Math.floor(position / track.segmentLength);
+    const nearBridgeSegs = Math.min(
+      track.segments.length,
+      curSegIdx + Math.max(1, drawDistSegs - 24),
+    );
+    for (let s = Math.max(0, curSegIdx); s < nearBridgeSegs; s += 8) {
+      if (track.segments[s]!.env === 'bridge') {
         return 0;
       }
     }

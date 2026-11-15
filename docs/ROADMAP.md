@@ -25,7 +25,7 @@ Ridisegnare il cruscotto con elementi grafici anni '80 e ottimizzare la telemetr
   - [x] Tachimetro e contagiri a segmenti digitali verdi e turchesi, ispirati ai cruscotti giapponesi dell'epoca (Toyota Soarer, Subaru XT).
   - [x] Indicatore di marcia retroilluminato per il beat-shift.
 - [x] Indicatore del Groove a cassetta:
-  - [x] Disegnare la barra del Groove come una musicassetta in pixel art, con le bobine che ruotano a seconda della velocità e del livello di Groove (`LOW`, `MEDIUM`, `HIGH`, `SSS`).
+  - [x] Disegnare la barra del Groove come una musicassetta in pixel art, con le bobine che ruotano a seconda della velocità e del livello di Groove (`LOW`, `MEDIUM`, `HIGH`, `OVERDRIVE`).
   - [x] Animazione del nastro allentato in caso di impatto o calo di Groove.
 - [x] Indicatori di ritmo:
   - [x] Riposizionare i giudizi (`PERFECT`, `GOOD`, `EARLY`, `LATE`) sui montanti o vicino alle marce, lasciando libera la visuale della strada.
@@ -52,18 +52,17 @@ Aggiungere varietà agli ostacoli e alle decorazioni nei `RoadChunks`:
   - [x] Cartelloni e palazzi in stile Akihabara con insegne a lama verticali animate a tempo di beat (`building`).
   - [x] Tre stili architettonici urbani: Akiba Megamart, Grattacielo Cyber-Glass a fasce e Showa Block con cartellone al neon a tetto (`カセット`).
 - [x] Arredo autostradale e scenografia giapponese (Fase 4):
-  - [x] Distributori automatici (*jihanki*) illuminati a bordo strada con lattine calde/fredde e particelle dedicate.
+  - [ ] Distributori automatici (*jihanki*) illuminati a bordo strada: **temporaneamente rimossi/sospesi dallo spawn** finché non verrà implementato il sistema di archetipi ambientali per chunk (`urbano` / `semiurbano`).
   - [x] Cabine telefoniche pubbliche verdi (*kōshū denwa*) con vetrate trasparenti e luce interna.
   - [x] Portali a scavalco autostradale Shuto (*gantry*) bilingue e tabelloni a messaggio variabile (*vms*) con messaggi di prova LED ambra.
   - [x] Traliccio ad alta tensione a Delta con cavi aerei catenari e isolatori in ceramica (`pylon`).
   - [x] Frecce direzionali animate a ritmo di musica per le curve cieche (`chevron`).
   - [x] Arbusti e siepi a bordo carreggiata a doppia sagoma (siepe a cupola e *niwaki* a palchi asimmetrici).
   - [x] Segnaletica stradale normale: limite circolare 80 km/h, uscita autostradale verde Shuto C1, rombo giallo di pericolo curva (`sign`).
-- [x] Gallerie e sovrappassi (Ponti & Tunnel):
+- [x] Sovrappassi e ponti scenografici:
   - [x] **Ponte A (Cavalcavia / Overpass a scavalco):** Struttura sopraelevata in cemento armato con travature in acciaio e piloni di sostegno laterali sotto cui l'auto transita a tutta velocità (`offset: 0`).
   - [x] **Ponte B (Sezione su Ponte Sospeso / Rainbow Bridge):** Tratto di strada con barriere metalliche a traliccio continuo sul bordo asfalto, torri monumentali ad arco bianco/arancio e tiranti diagonali illuminati.
-  - [x] **Tunnel A (Portale d'Ingresso Tunnel):** Imboccatura monumentale ad arco in cemento armato con bande riflettenti di sagoma giallo/nere e luci di galleria.
-  - [x] **Tunnel B (Interno Galleria con Luci al Neon):** Centine ad arco continuo a soffitto con tubi al neon arancioni al sodio o ciano che sfilano in rapida successione prospettica a ritmo di musica.
+  - [-] **Gallerie e Tunnel:** Inizialmente prototipati e poi rimossi nella v0.2.0 (commit `517b41f`) per preservare la visuale aperta dell'orizzonte e del cielo synthwave; l'esperienza autostradale si concentra su skyline aperti e ponti monumentali.
 - [ ] Varietà nel traffico:
   - [ ] Nuovi veicoli oltre al kei truck: berline squadrate anni '80, furgoni per le consegne e motociclette con scia luminosa.
 
@@ -75,9 +74,11 @@ Aggiungere scenari alternativi caricati tra una canzone e l'altra o al cambio di
 
 - [x] Tokyo Midnight Expressway (Shuto / Wangan): skyline con grattacieli pixelati, luci rosse sulle torri di trasmissione e asfalto scuro con riflessi blu e viola (`night` / `MAYONAKA BAY`).
 - [x] Sunset Coastal Highway: costa al tramonto arancione e magenta, sole basso a strisce, palme e gradiente marino (`og_future_funk` / `SUNSET BOULEVARD`).
+  - [ ] **Raffinamento orizzonte & skyline (Questione Aperta):** Come verificato nel confronto con Mayonaka Bay (in cui l'apertura centrale sul mare funziona ottimamente) e Akiba Night (dove la città continua ha senso non essendoci il mare), in Sunset Boulevard la silhouette continua dei 32 edifici bassi forma una fascia scura orizzontale che occlude il mare e il riflesso solare. Allineare Sunset Boulevard al modello Mayonaka Bay: settore centrale (`x: 240..380`) a mare aperto libero (`th = 0`), edifici bassi relegati solo ai fianchi costieri (`x: 120..200` e `420..500`) e silhouette calda in controluce prugna/viola (`#240a38`) anziché nero.
 - [ ] Mount Haruna / Touge notturno: strada di montagna tra i pini, tornanti stretti, nebbia viola sui crinali e luna piena.
 - [x] Cyber Megacity: asfalto bagnato con riflessi di luce, pioggia leggera e atmosfera notturna (`akiba_night` con meteo dinamico).
 - [ ] Transizioni di palette: dissolvenza graduale dei colori tra cielo e orizzonte durante il passaggio tra i brani.
+- [ ] **Sistema di Archetipi Ambientali per Chunk (Futuro / Out-of-Scope corrente):** categorizzare i `RoadChunk` (es. `urbano`, `semiurbano`, `rurale`, `foresta`, `deserto`, `costiero`) affinché la densità, i prop stradali, i vignette (incluso il ritorno contestuale dei *jihanki*) e i corridoi di vegetazione siano coerenti col carattere ambientale del chunk.
 
 ---
 

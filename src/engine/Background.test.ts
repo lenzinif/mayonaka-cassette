@@ -138,13 +138,55 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
 
   it('renders Sunset Boulevard (palette.id === "og_future_funk") with calm sea horizon and golden sun reflection', () => {
     const bg = new Background();
-    const mock = createMockCanvasContext();
+    const calls: Array<{ fillStyle: string | CanvasGradient | CanvasPattern; y: number; h: number }> = [];
+    const noop = () => {};
+    const grad = { addColorStop: noop };
+    let currentFillStyle: string | CanvasGradient | CanvasPattern = '#000';
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      get fillStyle() {
+        return currentFillStyle;
+      },
+      set fillStyle(v: string | CanvasGradient | CanvasPattern) {
+        currentFillStyle = v;
+      },
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      clip: noop,
+      clearRect: noop,
+      drawImage: noop,
+      moveTo: noop,
+      lineTo: noop,
+      arc: noop,
+      rect: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: (_x: number, y: number, _w: number, h: number) => {
+        calls.push({ fillStyle: currentFillStyle, y, h });
+      },
+      createLinearGradient: () => grad,
+      createRadialGradient: () => grad,
+    } as unknown as CanvasRenderingContext2D;
 
-    bg.render(mock.ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
+    bg.render(ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
 
     // In Sunset Boulevard, sea surface and sun reflections call fillRect heavily
-    expect(mock.fillRectCalls + mock.rectCalls).toBeGreaterThan(70);
-    expect(mock.fillCalls).toBeGreaterThan(0);
+    expect(calls.length).toBeGreaterThan(70);
+
+    // Sea horizon line (y === horizonY - 26 = 180 - 26, h === 1) uses warm light golden-cream mountainRim (#fff2c2)
+    // and never clashing cyan (#05d9e8)
+    const horizonLine = calls.find(c => c.y === 180 - 26 && c.h === 1);
+    expect(horizonLine).toBeDefined();
+    expect(horizonLine?.fillStyle).toBe(PALETTE_OG_FUTURE_FUNK.mountainRim);
+    expect(horizonLine?.fillStyle).toBe('#fff2c2');
+
+    const cyanCalls = calls.filter(c => c.fillStyle === '#05d9e8');
+    expect(cyanCalls.length).toBe(0);
   });
 
   it('renders Sunset Boulevard sea reflections strictly BEHIND the skyline buildings', () => {
@@ -191,10 +233,10 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
 
     bg.render(ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
 
-    // In Sunset Boulevard, COLOR_NIGHT_SKYLINE (#080417) is used for building silhouettes
+    // In Sunset Boulevard, COLOR_SUNSET_SKYLINE (#240a38) is used for building silhouettes
     const buildingIndices: number[] = [];
     calls.forEach((c, i) => {
-      if (c.fillStyle === '#080417') {
+      if (c.fillStyle === '#240a38') {
         buildingIndices.push(i);
       }
     });
@@ -213,6 +255,57 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     });
 
     expect(postBuildingWaterReflections.length).toBe(0);
+  });
+
+  it('leaves the central bay (x: 240..380) open in Sunset Boulevard while flanking buildings frame the coast', () => {
+    const bg = new Background();
+    const rects: Array<{ fillStyle: string | CanvasGradient | CanvasPattern; x: number; w: number }> = [];
+    const noop = () => {};
+    const grad = { addColorStop: noop };
+    let currentFillStyle: string | CanvasGradient | CanvasPattern = '#000';
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      get fillStyle() {
+        return currentFillStyle;
+      },
+      set fillStyle(v: string | CanvasGradient | CanvasPattern) {
+        currentFillStyle = v;
+      },
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      clip: noop,
+      clearRect: noop,
+      drawImage: noop,
+      moveTo: noop,
+      lineTo: noop,
+      arc: noop,
+      rect: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: (x: number, _y: number, w: number) => {
+        rects.push({ fillStyle: currentFillStyle, x, w });
+      },
+      createLinearGradient: () => grad,
+      createRadialGradient: () => grad,
+    } as unknown as CanvasRenderingContext2D;
+
+    bg.render(ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
+
+    const skylineRects = rects.filter(r => r.fillStyle === '#240a38');
+    expect(skylineRects.length).toBeGreaterThan(0);
+
+    // No skyline silhouettes should overlap the central open sea bay (x: 240..380)
+    const centerSkylineRects = skylineRects.filter(r => r.x + r.w > 240 && r.x < 380);
+    expect(centerSkylineRects.length).toBe(0);
+
+    // Both left (x: 120..220) and right (x: 400..500) coastal flanks must be populated
+    expect(skylineRects.some(r => r.x >= 120 && r.x < 240)).toBe(true);
+    expect(skylineRects.some(r => r.x >= 400 && r.x <= 500)).toBe(true);
   });
 
   it('renders Akiba Night Rush (palette.id === "akiba_night") with dark cobalt ridges and vibrant towers', () => {

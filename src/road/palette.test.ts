@@ -10,6 +10,7 @@ import {
   PALETTE_SUNSET_BOULEVARD,
   PALETTE_VAPORFUNK,
   PALETTE_WEEB_FUNK,
+  SCENERY_TOUGE,
   STAGE_PALETTES,
   type StagePalette,
 } from './palette';
@@ -52,6 +53,16 @@ function validatePalette(palette: StagePalette): void {
     expect(palette.starColors[0]).toMatch(HEX_COLOR_REGEX);
     expect(palette.starColors[1]).toMatch(HEX_COLOR_REGEX);
   }
+
+  expect(palette.scenery).toBeDefined();
+  expect(['coastal', 'city', 'touge']).toContain(palette.scenery.id);
+  expect(['palm', 'street-tree', 'pine']).toContain(palette.scenery.tree);
+  expect(palette.scenery.shrubTint).toHaveLength(3);
+  for (const c of palette.scenery.shrubTint) {
+    expect(c).toMatch(HEX_COLOR_REGEX);
+  }
+  expect(palette.scenery.buildingDensity).toBeGreaterThanOrEqual(0);
+  expect(palette.scenery.buildingDensity).toBeLessThanOrEqual(1);
 }
 
 describe('StagePalettes (Future Funk Presets)', () => {
@@ -60,6 +71,36 @@ describe('StagePalettes (Future Funk Presets)', () => {
     expect(STAGE_PALETTES[0]).toBe(PALETTE_NIGHT_FUNK);
     expect(STAGE_PALETTES[1]).toBe(PALETTE_OG_FUTURE_FUNK);
     expect(STAGE_PALETTES[2]).toBe(PALETTE_AKIBA_NIGHT);
+  });
+
+  it('configures biome scenery themes correctly for coastal, city, and touge stages', () => {
+    // City stages
+    expect(PALETTE_NIGHT_FUNK.scenery.id).toBe('city');
+    expect(PALETTE_NIGHT_FUNK.scenery.tree).toBe('street-tree');
+    expect(PALETTE_NIGHT_FUNK.scenery.buildingDensity).toBe(1.0);
+
+    expect(PALETTE_AKIBA_NOON.scenery.id).toBe('city');
+    expect(PALETTE_AKIBA_NOON.scenery.tree).toBe('street-tree');
+    expect(PALETTE_AKIBA_NOON.scenery.buildingDensity).toBe(1.0);
+
+    expect(PALETTE_AKIBA_NIGHT.scenery.id).toBe('city');
+    expect(PALETTE_AKIBA_NIGHT.scenery.tree).toBe('street-tree');
+    expect(PALETTE_AKIBA_NIGHT.scenery.buildingDensity).toBe(1.0);
+
+    // Coastal stages
+    expect(PALETTE_OG_FUTURE_FUNK.scenery.id).toBe('coastal');
+    expect(PALETTE_OG_FUTURE_FUNK.scenery.tree).toBe('palm');
+    expect(PALETTE_OG_FUTURE_FUNK.scenery.buildingDensity).toBe(0.35);
+
+    expect(PALETTE_VAPORFUNK.scenery.id).toBe('coastal');
+    expect(PALETTE_VAPORFUNK.scenery.tree).toBe('palm');
+    expect(PALETTE_VAPORFUNK.scenery.buildingDensity).toBe(0.25);
+
+    // Touge theme
+    expect(SCENERY_TOUGE.id).toBe('touge');
+    expect(SCENERY_TOUGE.tree).toBe('pine');
+    expect(SCENERY_TOUGE.buildingDensity).toBe(0.05);
+    expect(SCENERY_TOUGE.shrubTint).toHaveLength(3);
   });
 
   it('validates PALETTE_NIGHT_FUNK structure and attributes (Mayonaka Bay)', () => {
@@ -79,6 +120,7 @@ describe('StagePalettes (Future Funk Presets)', () => {
     expect(PALETTE_OG_FUTURE_FUNK.rumble).toEqual(['#ff2a75', '#ffd319']);
     expect(PALETTE_OG_FUTURE_FUNK.lane).toBe('#fff2c2');
     expect(PALETTE_OG_FUTURE_FUNK.horizonGlow).toBe('#ffd447');
+    expect(PALETTE_OG_FUTURE_FUNK.mountainRim).toBe('#fff2c2');
     validatePalette(PALETTE_OG_FUTURE_FUNK);
   });
 

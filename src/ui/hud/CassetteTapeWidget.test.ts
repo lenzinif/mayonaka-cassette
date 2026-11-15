@@ -66,12 +66,12 @@ describe('CassetteTapeWidget', () => {
     expect(text).not.toContain('TYPE IV // FUTURE FUNK FLOW');
   });
 
-  it('renders Master Overdrive variant on SSS tier', () => {
+  it('renders Master Overdrive variant on OVERDRIVE tier', () => {
     const text = renderClean(
       createElement(CassetteTapeWidget, {
         ...defaultProps,
         groove: 95,
-        grooveTier: 'SSS',
+        grooveTier: 'OVERDRIVE',
       }),
     );
 

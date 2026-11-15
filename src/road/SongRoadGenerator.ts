@@ -1,11 +1,21 @@
 import { barDurationSec, type BeatMap, type BeatSection, type SectionRole } from '@src/audio/BeatMap';
-import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
+import { FORK_APPROACH_BARS, RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { DEFAULT_TUNING, tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
 import { getChunksForRole, ROAD_CHUNKS, type RoadChunk } from './RoadChunks';
 import { easeIn, easeInOut } from './RoadProjection';
-import { createPoint, type RoadSegment, type RoadSprite, type SegmentEnvironment, type Track } from './RoadSegment';
-import { HILL } from './TrackBuilder';
+import {
+  createPoint,
+  PROP_BAND_RANGES,
+  type PropBand,
+  type RoadSegment,
+  type RoadSprite,
+  type SegmentEnvironment,
+  type Track,
+} from './RoadSegment';
+import { CURVE, HILL } from './TrackBuilder';
+import { populatePowerLines } from './SceneryCorridors';
+import { placeVignette, VIGNETTE_PREFABS } from './Vignettes';
 
 export interface CanonicalSegmentData {
   /** Curvatura originale di ciascun segmento (lunghezza = segments.length). */
@@ -16,6 +26,8 @@ export interface CanonicalSegmentData {
   readonly p2WorldY: Float64Array;
   /** Copia immutabile delle liste di sprite originali per segmento. */
   readonly sprites: readonly (readonly RoadSprite[])[];
+  /** Ambiente originale (`'standard'` | `'bridge'`) di ciascun segmento. */
+  readonly env: readonly SegmentEnvironment[];
 }
 
 export interface PlacedRoadChunk {
@@ -240,6 +252,18 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
         rng,
       );
 
+      // Geometry-driven directional curve chevrons & warning signs on all non-bridge chunks
+      if (chunk.env !== 'bridge') {
+        const chevronRule = chunk.props.find((p) => p.kind === 'chevron');
+        populateChunkChevrons(
+          segments,
+          chunkStartSeg,
+          chunkSegCount,
+          segmentsPerBeat,
+          chevronRule?.offset ?? 1.3,
+        );
+      }
+
       placedChunks.push({
         chunkId: chunk.id,
         role: sec.role,
@@ -266,12 +290,19 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     }
   }
 
+  // Populate continuous roadside power line corridors (docs/DESIGN.md §2 Fase 3)
+  populatePowerLines(segments, placedChunks, segmentsPerBar, rng);
+
+  // Populate composite roadside vignettes (docs/DESIGN.md §2 Fase 4)
+  populateSongRoadVignettes(segments, placedChunks, catalog, segmentsPerBeat, totalBars, rng);
+
   // Pre-allocate immutable canonical blueprint for zero-GC runtime restoration & horizon stitching
   const count = segments.length;
   const canonicalCurve = new Float64Array(count);
   const canonicalP1WorldY = new Float64Array(count);
   const canonicalP2WorldY = new Float64Array(count);
   const canonicalSprites: (readonly RoadSprite[])[] = new Array(count);
+  const canonicalEnv: SegmentEnvironment[] = new Array(count);
 
   for (let i = 0; i < count; i++) {
     const s = segments[i]!;
@@ -279,6 +310,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     canonicalP1WorldY[i] = s.p1.worldY;
     canonicalP2WorldY[i] = s.p2.worldY;
     canonicalSprites[i] = s.sprites.slice();
+    canonicalEnv[i] = s.env ?? 'standard';
   }
 
   const canonical: CanonicalSegmentData = {
@@ -286,6 +318,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     p1WorldY: canonicalP1WorldY,
     p2WorldY: canonicalP2WorldY,
     sprites: canonicalSprites,
+    env: canonicalEnv,
   };
 
   return {
@@ -397,6 +430,17 @@ export function stitchHorizonToTargetZ(
 
   // Zone 1: Solid visible window (0 .. copyCount - 1), where copyCount = drawDistance - 24
   const copyCount = Math.max(1, drawDistance - 24);
+
+  // Never stitch if the visible source window is already on or showing a suspension bridge,
+  // or if the stitched destination window would split a bridge / mismatch source and destination env.
+  for (let n = 0; n < copyCount; n++) {
+    const srcEnv = track.segments[fromSegIndex + n]?.env ?? 'standard';
+    const destEnv = track.canonical.env[toSegIndex + n] ?? 'standard';
+    if (srcEnv === 'bridge' || destEnv === 'bridge' || srcEnv !== destEnv) {
+      return null;
+    }
+  }
+
   const deltaY =
     track.canonical.p1WorldY[toSegIndex]! - track.segments[fromSegIndex]!.p1.worldY;
 
@@ -407,17 +451,12 @@ export function stitchHorizonToTargetZ(
     destSeg.curve = srcSeg.curve;
     destSeg.p1.worldY = srcSeg.p1.worldY + deltaY;
     destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
+    destSeg.env = srcSeg.env;
 
-    // Preserve drop marker neon billboards if the destination segment is a drop marker (zero GC Set scan)
+    // Preserve drop marker neon billboards if the destination segment is a drop marker (zero GC)
     const isDestDropMarker = isDropMarkerSegment(track.dropMarkers, toSegIndex + n);
     if (isDestDropMarker) {
-      const dropBillboards = track.canonical.sprites[toSegIndex + n]!.filter(
-        (s) => s.kind === 'billboard',
-      );
-      destSeg.sprites = [
-        ...srcSeg.sprites.filter((s) => s.kind !== 'billboard'),
-        ...dropBillboards,
-      ];
+      destSeg.sprites = track.canonical.sprites[toSegIndex + n] as RoadSprite[];
     } else {
       destSeg.sprites = srcSeg.sprites;
     }
@@ -445,8 +484,9 @@ export function stitchHorizonToTargetZ(
     seg.p2.worldY = nextY;
     prevY = nextY;
 
-    // Restore canonical sprites in the horizon fog without array allocation
+    // Restore canonical sprites and environment in the horizon fog without array allocation
     seg.sprites = track.canonical.sprites[segIdx] as RoadSprite[];
+    seg.env = track.canonical.env[segIdx]!;
   }
 
   // Restore canonical geometry only for the previously dirtied stitch window outside the new active window (zero GC)
@@ -462,6 +502,7 @@ export function stitchHorizonToTargetZ(
       seg.p1.worldY = track.canonical.p1WorldY[i]!;
       seg.p2.worldY = track.canonical.p2WorldY[i]!;
       seg.sprites = track.canonical.sprites[i] as RoadSprite[];
+      seg.env = track.canonical.env[i]!;
     }
     const afterStart = Math.max(prevStart, newEnd);
     for (let i = afterStart; i < prevEnd; i++) {
@@ -470,6 +511,7 @@ export function stitchHorizonToTargetZ(
       seg.p1.worldY = track.canonical.p1WorldY[i]!;
       seg.p2.worldY = track.canonical.p2WorldY[i]!;
       seg.sprites = track.canonical.sprites[i] as RoadSprite[];
+      seg.env = track.canonical.env[i]!;
     }
   }
   track.dirtyStitchRange = { start: newStart, end: newEnd };
@@ -501,6 +543,7 @@ export function restoreCanonicalTrack(track: SongTrack): void {
     s.p1.worldY = canonical.p1WorldY[i]!;
     s.p2.worldY = canonical.p2WorldY[i]!;
     s.sprites = canonical.sprites[i] as RoadSprite[];
+    s.env = canonical.env[i]!;
   }
   track.dirtyStitchRange = undefined;
 }
@@ -592,60 +635,153 @@ function selectChunk(
  * Chevrons never appear on straight road sections when not approaching a curve,
  * and NEVER appear during the middle or exit of curves.
  */
+/**
+ * Searches backward from `fromSegIdx` for a straight road segment (`|curve| <= 0.15`) to
+ * place a single curve hazard diamond warning sign (`sign` variant 2) ahead of the bend.
+ */
+function tryPlaceWarningSign(
+  segments: RoadSegment[],
+  fromSegIdx: number,
+  minSearchSegIdx: number,
+  minClearSegs: number,
+  offset: number,
+): void {
+  const start = Math.min(segments.length - 1, fromSegIdx);
+  const stop = Math.max(0, minSearchSegIdx);
+
+  for (let s = start; s >= stop; s--) {
+    const seg = segments[s];
+    if (!seg || seg.env === 'bridge') continue;
+    // Warning sign only on straight road leading up to curve, never inside another curve
+    if (Math.abs(seg.curve) > 0.15) continue;
+
+    // Avoid duplicate warning sign or chevron nearby
+    let hasNearby = false;
+    const scanA = Math.max(0, s - minClearSegs);
+    const scanB = Math.min(segments.length - 1, s + minClearSegs);
+    for (let k = scanA; k <= scanB; k++) {
+      const checkSeg = segments[k];
+      if (checkSeg?.sprites.some((sp) => sp.kind === 'sign' || sp.kind === 'chevron')) {
+        hasNearby = true;
+        break;
+      }
+    }
+    if (hasNearby) continue;
+
+    seg.sprites.push({ kind: 'sign', offset, variant: 2 });
+    return;
+  }
+}
+
+/**
+ * Geometry-driven Japanese-style curve signage & directional delineators (矢羽根):
+ *
+ * Scans real contiguous curve lobes inside `[startSeg, startSeg + segCount)` so every
+ * qualifying bend is marked accurately regardless of manual `chunk.props` lists:
+ * - Very gentle curves (`lobePeak < 1.5`): neither signs nor chevrons.
+ * - Gentle/EASY curves (`1.5 <= lobePeak < CURVE.MEDIUM * 0.85`): at most one yellow diamond
+ *   warning sign ahead of entry; ZERO chevrons.
+ * - Medium/Hard curves (`lobePeak >= CURVE.MEDIUM * 0.85`): one warning sign ~1.8 beats before
+ *   the curve body, plus single-arrow chase chevrons ONLY across the developed curve body
+ *   (`|seg.curve| >= 0.60 * lobePeak`), never ahead on the straight entry ramp.
+ */
 function populateChunkChevrons(
   segments: RoadSegment[],
   startSeg: number,
   segCount: number,
   segmentsPerBeat: number,
-  chunk: RoadChunk,
-  mirrorSign: -1 | 1,
-  baseOffset: number,
+  baseOffset = 1.3,
 ): void {
-  const actualBars = segCount / (segmentsPerBeat * 4);
-  const barScale = actualBars / chunk.bars;
+  const endSeg = Math.min(segments.length, startSeg + segCount);
+  const segmentsPerBar = Math.max(4, Math.round(segmentsPerBeat * 4));
+  const leadSegs = Math.max(6, Math.round(segmentsPerBeat * 1.8));
+  const signClearSegs = Math.max(4, Math.round(segmentsPerBeat * 1.5));
 
-  let mCursorSeg = startSeg;
-  for (let mIdx = 0; mIdx < chunk.maneuvers.length; mIdx++) {
-    const m = chunk.maneuvers[mIdx]!;
-    const isLastManeuverInChunk = mIdx === chunk.maneuvers.length - 1;
-    const mSegCount = isLastManeuverInChunk
-      ? startSeg + segCount - mCursorSeg
-      : Math.max(4, Math.round(m.bars * barScale * segmentsPerBeat * 4));
+  const mediumThreshold = CURVE.MEDIUM * 0.85;
+  const hardThreshold = CURVE.HARD * 0.8;
+  const easyMinThreshold = 1.5;
 
-    if (mSegCount <= 0) continue;
+  let cursor = startSeg;
+  while (cursor < endSeg) {
+    const startSample = segments[cursor];
+    if (!startSample || Math.abs(startSample.curve) < 1.0) {
+      cursor++;
+      continue;
+    }
 
-    const targetCurve = m.curve * mirrorSign;
+    const curveSign: -1 | 1 = startSample.curve > 0 ? 1 : -1;
+    const lobeStart = cursor;
+    let lobePeak = 0;
+    let lobeEnd = cursor;
 
-    // Only place warning chevrons for genuine curves (curve >= 0.8 in magnitude)
-    if (Math.abs(targetCurve) >= 0.8) {
-      const isRight = targetCurve > 0;
-      // Variant 0: Right (>>>), Variant 1: Left (<<<)
-      const variant = isRight ? 0 : 1;
-      // Outside shoulder: left shoulder (-baseOffset) for right turn, right shoulder (+baseOffset) for left turn
-      const offset = isRight ? -baseOffset : baseOffset;
+    while (cursor < endSeg) {
+      const s = segments[cursor];
+      if (!s || Math.abs(s.curve) < 1.0 || (s.curve > 0 ? 1 : -1) !== curveSign) {
+        break;
+      }
+      const absC = Math.abs(s.curve);
+      if (absC > lobePeak) lobePeak = absC;
+      lobeEnd = cursor;
+      cursor++;
+    }
 
-      // Place warning chevrons strictly in the approach leading into the curve
-      const beatOffsets = [-3.5, -2.5, -1.5, -0.5];
-      for (const bo of beatOffsets) {
-        const segIdx = mCursorSeg + Math.round(bo * segmentsPerBeat);
-        // Must be strictly before the curve begins and within valid segment range
-        if (segIdx < 0 || segIdx >= mCursorSeg || segIdx >= segments.length) continue;
-        const seg = segments[segIdx];
-        if (!seg) continue;
+    // 1. Very gentle curves: neither signs nor chevrons
+    if (lobePeak < easyMinThreshold) {
+      continue;
+    }
 
-        // Chevrons must only go before a curve on straight road (never inside another curve)
-        if (Math.abs(seg.curve) > 0.15) continue;
+    const isRight = curveSign > 0;
+    const outsideOffset = isRight ? -baseOffset : baseOffset;
+    const bodyThreshold = 0.6 * lobePeak;
 
-        // Prevent duplicate chevrons on the same segment
-        const hasChevron = seg.sprites.some((s) => s.kind === 'chevron');
-        if (!hasChevron) {
-          seg.sprites.push({ kind: 'chevron', offset, variant });
-        }
+    let bodyStart = -1;
+    let bodyEnd = -1;
+    for (let s = lobeStart; s <= lobeEnd; s++) {
+      const seg = segments[s];
+      if (seg && Math.abs(seg.curve) >= bodyThreshold) {
+        if (bodyStart === -1) bodyStart = s;
+        bodyEnd = s;
       }
     }
 
-    mCursorSeg += mSegCount;
+    if (bodyStart === -1) {
+      continue;
+    }
+
+    // Place a single yellow diamond curve warning sign ~1.8 beats before the developed curve body
+    const preferredWarnSeg = bodyStart - leadSegs;
+    const minSearchSeg = Math.max(startSeg > 0 ? startSeg - Math.round(segmentsPerBar * 0.5) : 0, bodyStart - segmentsPerBar);
+    tryPlaceWarningSign(segments, preferredWarnSeg, minSearchSeg, signClearSegs, outsideOffset);
+
+    // 2. EASY / light sweepers: warning sign only, NEVER chevrons
+    if (lobePeak < mediumThreshold) {
+      continue;
+    }
+
+    // 3. Real curves (`lobePeak >= CURVE.MEDIUM * 0.85`): single-arrow chase chevrons inside the developed curve
+    const isHard = lobePeak >= hardThreshold;
+    const stepSegs = Math.max(4, Math.round(segmentsPerBeat * (isHard ? 0.5 : 1.0)));
+    const dir = isRight ? 0 : 1;
+    let seqIndex = 0;
+
+    for (let sIdx = bodyStart; sIdx <= bodyEnd; sIdx += stepSegs) {
+      const seg = segments[sIdx];
+      if (!seg || seg.env === 'bridge') continue;
+      if (!seg.sprites.some((sp) => sp.kind === 'chevron')) {
+        const variant = dir + 2 * seqIndex;
+        seg.sprites.push({ kind: 'chevron', offset: outsideOffset, variant });
+        seqIndex++;
+      }
+    }
   }
+}
+
+function getBandForOffset(offset: number): PropBand {
+  const absOffset = Math.abs(offset);
+  if (absOffset >= 6.0) return 'D';
+  if (absOffset >= 3.5) return 'C';
+  if (absOffset >= 1.85) return 'B';
+  return 'A';
 }
 
 function populateChunkProps(
@@ -660,77 +796,322 @@ function populateChunkProps(
   const totalBeats = Math.floor(segCount / Math.max(1, segmentsPerBeat));
 
   for (const rule of chunk.props) {
-    if (rule.kind === 'chevron') {
-      populateChunkChevrons(
-        segments,
-        startSeg,
-        segCount,
-        segmentsPerBeat,
-        chunk,
-        mirrorSign,
-        rule.offset ?? 1.35,
-      );
+    // Chevrons (Phase 2 geometry pass), pylons (Phase 3 corridors), and jihanki (removed) are not emitted from chunk rules
+    if (rule.kind === 'chevron' || rule.kind === 'pylon' || rule.kind === 'jihanki') {
       continue;
     }
+
+    const band: PropBand =
+      rule.band ?? (rule.offset !== undefined ? getBandForOffset(rule.offset) : 'A');
+    const isRhythmic = rule.rhythmic ?? (band === 'A');
     const stepBeats = Math.max(1, Math.round(rule.everyBeats));
-    const baseOffset = rule.offset ?? (
-      rule.kind === 'building'
-        ? 2.3
-        : rule.kind === 'pylon'
-          ? 2.6
-          : rule.kind === 'billboard' || rule.kind === 'vms'
-            ? 1.85
-            : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'suspension-tower')
-              ? 0
-              : rule.kind === 'shrub'
-                ? 1.35
-                : rule.kind === 'sign'
-                  ? 1.38
-                  : rule.kind === 'palm' || rule.kind === 'phonebooth'
-                  ? 1.48
-                  : 1.42
-    );
+    const defaultScaleJitter = isRhythmic ? 0 : 0.2;
+    const scaleJitter = rule.scaleJitter ?? defaultScaleJitter;
 
     let altToggle = 0;
     for (let beat = 0; beat < totalBeats; beat += stepBeats) {
-      const segIdx = startSeg + Math.min(segCount - 1, Math.round(beat * segmentsPerBeat));
-      const seg = segments[segIdx];
-      if (!seg) continue;
+      // 1. Longitudinal anchor & jitter (longitudinal jitter in beats for non-rhythmic rules, clamped inside chunk)
+      const beatJitter =
+        !isRhythmic && rule.jitter?.beats ? rng.range(-rule.jitter.beats, rule.jitter.beats) : 0;
+      const anchorBeat = Math.max(0, Math.min(totalBeats - 0.001, beat + beatJitter));
 
-      const variant = rng.rangeInt(0, 2);
-      const curveSign: -1 | 1 =
-        Math.abs(seg.curve) > 0.2 ? (seg.curve > 0 ? 1 : -1) : mirrorSign;
+      // 2. Base lateral offset: if band set and offset absent, sample inside band range; if offset set, use it
+      let baseOffset: number;
+      if (rule.offset !== undefined) {
+        baseOffset = rule.offset;
+      } else if (rule.band !== undefined) {
+        const range = PROP_BAND_RANGES[rule.band];
+        baseOffset = rng.range(range.min, range.max);
+      } else {
+        baseOffset =
+          rule.kind === 'building'
+            ? 4.0
+            : rule.kind === 'billboard'
+              ? 2.4
+              : (rule.kind === 'gantry' || rule.kind === 'overpass' || rule.kind === 'suspension-tower')
+                ? 0
+                : rule.kind === 'shrub'
+                  ? 2.6
+                  : rule.kind === 'sign'
+                    ? 1.35
+                    : (rule.kind === 'palm' || rule.kind === 'tree')
+                      ? 2.9
+                      : 1.35;
+      }
 
-      switch (rule.placement) {
-        case 'both':
-          if (baseOffset === 0) {
-            seg.sprites.push({ kind: rule.kind, offset: 0, variant });
-          } else {
-            seg.sprites.push(
-              { kind: rule.kind, offset: -baseOffset, variant },
-              { kind: rule.kind, offset: baseOffset, variant: (variant + 1) % 3 },
-            );
+      // Lateral jitter
+      const latJitter =
+        rule.jitter?.lateral ? rng.range(-rule.jitter.lateral, rule.jitter.lateral) : 0;
+      let anchorOffset = baseOffset === 0 ? 0 : baseOffset + latJitter;
+
+      if (baseOffset !== 0 && rule.band) {
+        const range = PROP_BAND_RANGES[rule.band];
+        anchorOffset = Math.max(range.min, Math.min(range.max, anchorOffset));
+      }
+      if (rule.kind === 'shrub') {
+        anchorOffset = Math.max(1.85, anchorOffset);
+      }
+      if (chunk.env === 'bridge' && anchorOffset !== 0) {
+        anchorOffset = Math.min(2.8, anchorOffset);
+      }
+
+      // 3. Clusters (n = rng in [min, max] members spread around the anchor)
+      const memberCount = rule.cluster ? rng.rangeInt(rule.cluster.min, rule.cluster.max) : 1;
+      const altSide = altToggle % 2 === 0 ? -1 : 1;
+      altToggle++;
+
+      for (let m = 0; m < memberCount; m++) {
+        let mBeat = anchorBeat;
+        let mOffset = anchorOffset;
+
+        if (rule.cluster && m > 0) {
+          mBeat = Math.max(
+            0,
+            Math.min(
+              totalBeats - 0.001,
+              anchorBeat + rng.range(-rule.cluster.spreadBeats * 0.5, rule.cluster.spreadBeats * 0.5),
+            ),
+          );
+          mOffset =
+            anchorOffset +
+            rng.range(-rule.cluster.spreadLateral * 0.5, rule.cluster.spreadLateral * 0.5);
+          if (baseOffset !== 0 && rule.band) {
+            const range = PROP_BAND_RANGES[rule.band];
+            mOffset = Math.max(range.min, Math.min(range.max, mOffset));
           }
-          break;
-        case 'left':
-          seg.sprites.push({ kind: rule.kind, offset: -baseOffset * mirrorSign, variant });
-          break;
-        case 'right':
-          seg.sprites.push({ kind: rule.kind, offset: baseOffset * mirrorSign, variant });
-          break;
-        case 'alternating': {
-          const side = altToggle % 2 === 0 ? -1 : 1;
-          altToggle++;
-          seg.sprites.push({ kind: rule.kind, offset: side * baseOffset, variant });
+          if (rule.kind === 'shrub') {
+            mOffset = Math.max(1.85, mOffset);
+          }
+          if (chunk.env === 'bridge' && mOffset !== 0) {
+            mOffset = Math.min(2.8, mOffset);
+          }
+        }
+
+        const segIdx =
+          startSeg + Math.min(segCount - 1, Math.max(0, Math.round(mBeat * segmentsPerBeat)));
+        const seg = segments[segIdx];
+        if (!seg) continue;
+
+        const variant = rng.rangeInt(0, 2);
+        const scale = scaleJitter > 0 ? Math.max(0.2, 1 + rng.range(-scaleJitter, scaleJitter)) : 1;
+        const curveSign: -1 | 1 =
+          Math.abs(seg.curve) > 0.2 ? (seg.curve > 0 ? 1 : -1) : mirrorSign;
+
+        switch (rule.placement) {
+          case 'both':
+            if (baseOffset === 0) {
+              seg.sprites.push({ kind: rule.kind, offset: 0, variant, scale });
+            } else {
+              const rightScale =
+                scaleJitter > 0 ? Math.max(0.2, 1 + rng.range(-scaleJitter, scaleJitter)) : scale;
+              seg.sprites.push(
+                { kind: rule.kind, offset: -mOffset, variant, scale },
+                { kind: rule.kind, offset: mOffset, variant: (variant + 1) % 3, scale: rightScale },
+              );
+            }
+            break;
+          case 'left':
+            seg.sprites.push({ kind: rule.kind, offset: -mOffset * mirrorSign, variant, scale });
+            break;
+          case 'right':
+            seg.sprites.push({ kind: rule.kind, offset: mOffset * mirrorSign, variant, scale });
+            break;
+          case 'alternating':
+            seg.sprites.push({ kind: rule.kind, offset: altSide * mOffset, variant, scale });
+            break;
+          case 'outside-curve':
+            seg.sprites.push({ kind: rule.kind, offset: -curveSign * mOffset, variant, scale });
+            break;
+          case 'inside-curve':
+            seg.sprites.push({ kind: rule.kind, offset: curveSign * mOffset, variant, scale });
+            break;
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Populates composite roadside vignettes along the track (docs/DESIGN.md §2 Fase 4).
+ *
+ * Rules:
+ * - One vignette per chunk at most.
+ * - Spacing rule: avoids two consecutive chunks with vignettes, targets ~1 vignette per 16–32 bars (min 12 bars).
+ * - Excludes bridge chunks and the final stage fork approach zone.
+ * - Chooses beat-aligned anchors preferring straight-ish stretches (|curve| small).
+ * - Avoids placing vignettes within ±2 segments of a power line pylon on the same side.
+ * - Cleans conflicting non-rhythmic Band B/C props on that side in the vignette window.
+ */
+export function populateSongRoadVignettes(
+  segments: RoadSegment[],
+  placedChunks: readonly PlacedRoadChunk[],
+  catalog: readonly RoadChunk[],
+  segmentsPerBeat: number,
+  totalBars: number,
+  rng: SeededRandom,
+): void {
+  if (segments.length === 0 || placedChunks.length === 0 || segmentsPerBeat <= 0) {
+    return;
+  }
+
+  const forkApproachStartBar = totalBars - FORK_APPROACH_BARS;
+  let lastVignetteChunkIdx = -1;
+  let lastVignetteBar = -999;
+
+  for (let cIdx = 0; cIdx < placedChunks.length; cIdx++) {
+    const pChunk = placedChunks[cIdx]!;
+
+    // Global spacing rules:
+    // 1. Avoid two consecutive chunks with vignettes
+    if (lastVignetteChunkIdx !== -1 && cIdx === lastVignetteChunkIdx + 1) {
+      continue;
+    }
+    // 2. Minimum distance in bars (~1 vignette per 16-32 bars; enforce >= 12 bars between vignettes)
+    if (lastVignetteBar !== -999 && pChunk.startBar - lastVignetteBar < 12) {
+      continue;
+    }
+    // 3. Exclude fork approach zone near track end
+    if (
+      pChunk.startBar >= forkApproachStartBar ||
+      pChunk.startBar + pChunk.bars > forkApproachStartBar
+    ) {
+      continue;
+    }
+
+    const chunk = catalog.find((c) => c.id === pChunk.chunkId);
+    if (!chunk || !chunk.vignettes || chunk.vignettes.length === 0) {
+      continue;
+    }
+
+    // Bridge check: no vignettes on bridge chunks
+    if (chunk.env === 'bridge') {
+      continue;
+    }
+    let hasBridgeSeg = false;
+    for (let s = pChunk.startSegment; s < pChunk.startSegment + pChunk.segmentCount; s++) {
+      if (segments[s]?.env === 'bridge') {
+        hasBridgeSeg = true;
+        break;
+      }
+    }
+    if (hasBridgeSeg) continue;
+
+    // Roll candidate vignette slot (max ONE per chunk)
+    for (const slot of chunk.vignettes) {
+      const roll = rng.range(0, 1);
+      if (roll >= slot.chance) {
+        continue;
+      }
+
+      const prefab = VIGNETTE_PREFABS[slot.prefab];
+      if (!prefab) continue;
+
+      // Candidate anchor search: test beat-aligned segments inside chunk, preferring straightest stretch
+      let minDSeg = 0;
+      let maxDSeg = 0;
+      for (const m of prefab.members) {
+        if (m.dSeg < minDSeg) minDSeg = m.dSeg;
+        if (m.dSeg > maxDSeg) maxDSeg = m.dSeg;
+      }
+
+      const startBeat = 2;
+      const endBeat = Math.max(startBeat, pChunk.bars * 4 - 3);
+
+      interface AnchorCandidate {
+        segIdx: number;
+        curveAbs: number;
+        curve: number;
+      }
+
+      const candidates: AnchorCandidate[] = [];
+      for (let b = startBeat; b <= endBeat; b += 2) {
+        const segIdx = pChunk.startSegment + Math.round(b * segmentsPerBeat);
+        if (segIdx < 0 || segIdx >= segments.length) continue;
+        const curve = segments[segIdx]!.curve;
+        candidates.push({
+          segIdx,
+          curveAbs: Math.abs(curve),
+          curve,
+        });
+      }
+
+      // Sort by smallest curvature first (prefer straight stretches)
+      candidates.sort((a, b) => a.curveAbs - b.curveAbs);
+
+      let placed = false;
+      for (const cand of candidates) {
+        // Determine sides to test based on slot.side
+        const sidesToTest: (-1 | 1)[] = [];
+        const mirrorFactor = pChunk.mirrored ? -1 : 1;
+
+        if (slot.side === 'left') {
+          sidesToTest.push((-1 * mirrorFactor) as -1 | 1);
+        } else if (slot.side === 'right') {
+          sidesToTest.push((1 * mirrorFactor) as -1 | 1);
+        } else if (slot.side === 'outside-curve') {
+          const outside: -1 | 1 =
+            cand.curve > 0.05 ? -1 : cand.curve < -0.05 ? 1 : rng.bool() ? 1 : -1;
+          sidesToTest.push(outside);
+        } else if (slot.side === 'inside-curve') {
+          const inside: -1 | 1 =
+            cand.curve > 0.05 ? 1 : cand.curve < -0.05 ? -1 : rng.bool() ? 1 : -1;
+          sidesToTest.push(inside);
+        } else {
+          // 'any' or undefined: try random side first, then other side
+          const firstSide: -1 | 1 = rng.bool() ? 1 : -1;
+          sidesToTest.push(firstSide, (-firstSide) as -1 | 1);
+        }
+
+        for (const testSide of sidesToTest) {
+          // Pylon conflict check:
+          // "vignettes must not be placed where a pylon tower of a power line sits within ±2 segments on the same side"
+          let pylonConflict = false;
+          const checkStart = Math.max(0, cand.segIdx + minDSeg - 2);
+          const checkEnd = Math.min(segments.length - 1, cand.segIdx + maxDSeg + 2);
+
+          for (let s = checkStart; s <= checkEnd; s++) {
+            const seg = segments[s];
+            if (!seg) continue;
+            for (let spIdx = 0; spIdx < seg.sprites.length; spIdx++) {
+              const sp = seg.sprites[spIdx]!;
+              if (sp.kind === 'pylon' && sp.offset * testSide > 0) {
+                pylonConflict = true;
+                break;
+              }
+            }
+            if (pylonConflict) break;
+          }
+
+          if (pylonConflict) continue;
+
+          // Check window bounds: avoid placing members beyond track ends
+          if (cand.segIdx + minDSeg < 0 || cand.segIdx + maxDSeg >= segments.length) {
+            continue;
+          }
+
+          // Place vignette
+          placeVignette(
+            segments,
+            cand.segIdx,
+            testSide,
+            prefab.baseOffset,
+            prefab,
+            rng,
+            segmentsPerBeat,
+          );
+
+          lastVignetteChunkIdx = cIdx;
+          lastVignetteBar = pChunk.startBar;
+          placed = true;
           break;
         }
-        case 'outside-curve':
-          // Outside of a right-hand curve (+curve) is on the left (-offset)
-          seg.sprites.push({ kind: rule.kind, offset: -curveSign * baseOffset, variant });
-          break;
-        case 'inside-curve':
-          seg.sprites.push({ kind: rule.kind, offset: curveSign * baseOffset, variant });
-          break;
+
+        if (placed) break;
+      }
+
+      if (placed) {
+        // Max one vignette per chunk
+        break;
       }
     }
   }

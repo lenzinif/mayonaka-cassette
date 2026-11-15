@@ -94,6 +94,93 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
     expect(car.bumpVx).toBeCloseTo(-tuning.propBounceImpulse, 1);
   });
 
+  it('never collides with Band C or Band D props (|offset| >= 3.0)', () => {
+    const track = buildTestTrack();
+    const seg = track.segments[10]!;
+    seg.sprites = [
+      { kind: 'building', offset: 3.5, variant: 0 },
+      { kind: 'building', offset: -8.0, variant: 1 },
+    ];
+
+    const tm = new TrafficManager();
+    const car = new PlayerCar();
+    car.x = 3.5;
+    car.speed = tuning.maxSpeed * 0.8;
+
+    const events: CollisionEvent[] = [];
+    const z = 10 * track.segmentLength;
+    tm.update(1 / 120, track, car, z - 100, z + 10, (e) => events.push(e));
+
+    // Car drives right at offset 3.5, but Band C prop must never collide
+    expect(events).toHaveLength(0);
+
+    // Test Band D at -8.0
+    car.x = -8.0;
+    tm.update(1 / 120, track, car, z - 100, z + 10, (e) => events.push(e));
+    expect(events).toHaveLength(0);
+  });
+
+  it('scales prop collision hit width by sprite scale', () => {
+    const track = buildTestTrack();
+    const seg = track.segments[10]!;
+    const z = 10 * track.segmentLength;
+
+    // Small scale: palm (hitHalfWidth = 0.16) with scale 0.5 -> effective hitW = 0.08
+    seg.sprites = [{ kind: 'palm', offset: 1.5, variant: 0, scale: 0.5 }];
+    const tm1 = new TrafficManager();
+    const car1 = new PlayerCar();
+    car1.x = 1.6; // distance is 0.10, > 0.08 -> no hit
+    car1.speed = tuning.maxSpeed * 0.8;
+    const events1: CollisionEvent[] = [];
+    tm1.update(1 / 120, track, car1, z - 100, z + 10, (e) => events1.push(e));
+    expect(events1).toHaveLength(0);
+
+    // Large scale: palm with scale 2.0 -> effective hitW = 0.32
+    seg.sprites = [{ kind: 'palm', offset: 1.5, variant: 0, scale: 2.0 }];
+    const tm2 = new TrafficManager();
+    const car2 = new PlayerCar();
+    car2.x = 1.6; // distance is 0.10, < 0.32 -> hit!
+    car2.speed = tuning.maxSpeed * 0.8;
+    const events2: CollisionEvent[] = [];
+    tm2.update(1 / 120, track, car2, z - 100, z + 10, (e) => events2.push(e));
+    expect(events2).toHaveLength(1);
+    const ev = events2[0];
+    expect(ev?.obstacle).toBe('prop');
+    if (ev?.obstacle === 'prop') {
+      expect(ev.propKind).toBe('palm');
+    }
+  });
+
+  it('collides with Band A chevrons using narrow single-post half-width (0.14)', () => {
+    const track = buildTestTrack();
+    const seg = track.segments[10]!;
+    const z = 10 * track.segmentLength;
+
+    seg.sprites = [{ kind: 'chevron', offset: 1.3, variant: 0 }];
+    const tm = new TrafficManager();
+
+    // Distance 0.16 > 0.14 -> no hit
+    const carMiss = new PlayerCar();
+    carMiss.x = 1.3 - 0.16;
+    carMiss.speed = tuning.maxSpeed * 0.8;
+    const missEvents: CollisionEvent[] = [];
+    tm.update(1 / 120, track, carMiss, z - 100, z + 10, (e) => missEvents.push(e));
+    expect(missEvents).toHaveLength(0);
+
+    // Distance 0.10 < 0.14 -> hit!
+    const carHit = new PlayerCar();
+    carHit.x = 1.3 - 0.10;
+    carHit.speed = tuning.maxSpeed * 0.8;
+    const hitEvents: CollisionEvent[] = [];
+    tm.update(1 / 120, track, carHit, z - 100, z + 10, (e) => hitEvents.push(e));
+    expect(hitEvents).toHaveLength(1);
+    const hitEv = hitEvents[0];
+    expect(hitEv?.obstacle).toBe('prop');
+    if (hitEv?.obstacle === 'prop') {
+      expect(hitEv.propKind).toBe('chevron');
+    }
+  });
+
   it('translates visible trucks by deltaZ without pop-in during an A2 horizon stitch', () => {
     const track = buildTestTrack();
     const tm = new TrafficManager();

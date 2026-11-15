@@ -160,8 +160,12 @@ export function HUD({
           showToast('GAME RESUMED', 1200, 'pink');
         }
       } else if (event.type === 'grooveTierChanged') {
-        const tierName = event.tier === 'SSS' ? 'FUNKY OVERDRIVE' : event.tier;
-        showToast(`GROOVE TIER // ${tierName}`, 1700, event.tier === 'SSS' ? 'emerald' : 'pink');
+        const tierName = event.tier === 'OVERDRIVE' ? 'FUNKY OVERDRIVE' : event.tier;
+        showToast(
+          `GROOVE TIER // ${tierName}`,
+          1700,
+          event.tier === 'OVERDRIVE' ? 'emerald' : 'pink',
+        );
       } else if (event.type === 'tofuModeToggled') {
         showToast(
           event.active

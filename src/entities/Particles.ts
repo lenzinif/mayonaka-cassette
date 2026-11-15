@@ -31,6 +31,9 @@ const MAX_PARTICLES = 140;
 
 const PROP_DEBRIS_COLORS: Readonly<Record<PropKind, readonly [string, string, string]>> = {
   palm: ['#14f1d9', '#ff3cac', '#5b2d86'],
+  tree: ['#06d6a0', '#ffd166', '#2d1b4e'],
+  'street-tree': ['#aacc00', '#00f5d4', '#2c223b'],
+  pine: ['#1b4332', '#80ffdb', '#140d1f'],
   lamp: ['#fff3b0', '#ffd319', '#05d9e8'],
   billboard: ['#ff2a6d', '#05d9e8', '#ffd319'],
   building: ['#ff2a85', '#00f5d4', '#241938'],
@@ -44,6 +47,12 @@ const PROP_DEBRIS_COLORS: Readonly<Record<PropKind, readonly [string, string, st
   sign: ['#e63946', '#ffffff', '#1d3557'],
   overpass: ['#5c5478', '#ffd166', '#1f1b2c'],
   'suspension-tower': ['#ff4800', '#f8f9fa', '#2b2342'],
+  kiosk: ['#ff007f', '#ffd166', '#1c1230'],
+  bench: ['#0077b6', '#8d5b4c', '#100d1c'],
+  'bus-stop': ['#00f5d4', '#ff007f', '#fff4cc'],
+  canopy: ['#00f5d4', '#ffd166', '#251c3a'],
+  torii: ['#d90429', '#ffd166', '#100c1c'],
+  toro: ['#ffbe0b', '#685f7d', '#272233'],
 };
 
 /**
@@ -175,7 +184,7 @@ export class ParticleSystem {
       const smokeRate = 48 * (0.5 + speedRatio * 0.6);
       this.smokeAccum += dt * smokeRate;
       const slideDir = -car.driftDir; // smoke trails opposite to drift nose direction
-      const isChargedDrift = car.driftTime >= 0.75 || grooveTier === 'SSS';
+      const isChargedDrift = car.driftTime >= 0.75 || grooveTier === 'OVERDRIVE';
 
       while (this.smokeAccum >= 1) {
         this.smokeAccum -= 1;

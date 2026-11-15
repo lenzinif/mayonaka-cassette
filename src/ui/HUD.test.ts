@@ -42,7 +42,7 @@ function createMockSnapshot(overrides: Partial<TelemetrySnapshot> = {}): Telemet
     lastShiftTier: 'PERFECT',
     lastShiftDeltaMs: -12,
     groove: 88,
-    grooveTier: 'SSS',
+    grooveTier: 'OVERDRIVE',
     tofuMode: true,
     sodaSkin: 'melon-soda',
     sodaDanger: 0.42,
@@ -119,7 +119,7 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     expect(text).toContain('214');
     expect(text).toContain('KM/H');
     expect(text).toContain('GROOVE FLUX');
-    expect(text).toContain('TIER: SSS');
+    expect(text).toContain('TIER: OVERDRIVE');
   });
 
   it('renders session telemetry and personal best inside PauseMenu when paused', () => {

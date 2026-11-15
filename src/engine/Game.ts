@@ -492,6 +492,7 @@ export class Game {
     this.activeRoadBeatMap = beatMap;
     this.syncController.resetForTrack(!resetPosition && prevLength > 0);
     this.forkController.resetForNewRoad();
+    this.lastBridgeJointSegment = -1;
     this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
 
     if (resetPosition) {
@@ -533,6 +534,7 @@ export class Game {
     this.activeRoadBeatMap = beatMap;
     this.syncController.resetForTrack(true);
     this.forkController.resetForStageTransition();
+    this.lastBridgeJointSegment = -1;
     this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
 
     // Flow State (AGENTS.md Pillar 3): preserve vehicle momentum and continuous driving state
@@ -971,6 +973,7 @@ export class Game {
     this.view.width = width;
     this.view.height = height;
     this.view.beatPulse = this.beatPulse;
+    this.view.beatIndex = Math.floor(this.audioBeatIndex);
     this.view.alpha = alpha;
 
     const forkZoneStartZ = this.getForkZoneStartZ();

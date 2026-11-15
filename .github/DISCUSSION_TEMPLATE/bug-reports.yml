@@ -4,23 +4,23 @@ body:
   - type: markdown
     attributes:
       value: |
-        ### 🐛 Segnalazione Bug
-        Per consentirci di riprodurre, tracciare e correggere rapidamente i problemi tecnici, ti invitiamo a utilizzare il nostro **Issue Tracker** ufficiale:
+        ### 🐛 Bug Report
+        To help us reproduce, track, and fix technical issues quickly, please use our official **Issue Tracker**:
 
-        👉 **[Apri una Segnalazione Bug su GitHub Issues](https://github.com/lenzinif/mayonaka-cassette/issues/new?template=bug_report.yml)**
+        👉 **[Open a Bug Report on GitHub Issues](https://github.com/lenzinif/mayonaka-cassette/issues/new?template=bug_report.yml)**
 
-        Se invece preferisci parlarne qui con la community prima di aprire un ticket, puoi compilare i campi sottostanti.
+        If you prefer to discuss it here with the community before opening a ticket, you can fill out the fields below.
   - type: textarea
     id: bug-summary
     attributes:
-      label: Descrizione del problema
-      placeholder: Cosa è successo e cosa ti saresti aspettato invece?
+      label: Problem description
+      placeholder: What happened, and what did you expect to happen instead?
     validations:
       required: true
   - type: input
     id: environment
     attributes:
-      label: Browser e dispositivo (opzionale)
-      placeholder: Es. Chrome 124 su Windows 11, schermo 144 Hz
+      label: Browser and device (optional)
+      placeholder: e.g. Chrome 124 on Windows 11, 144 Hz display
     validations:
       required: false

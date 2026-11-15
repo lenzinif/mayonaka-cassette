@@ -4,19 +4,19 @@ body:
   - type: input
     id: idea-summary
     attributes:
-      label: Proposta in sintesi
-      placeholder: Es. Aggiungere un tracciato autostradale sotto la pioggia con riflessi al neon
+      label: Summary
+      placeholder: e.g. Add a rainy highway stage with neon reflections
     validations:
       required: true
   - type: textarea
     id: idea-details
     attributes:
-      label: Descrizione
-      placeholder: Spiega il funzionamento e come si inserisce nel gioco...
+      label: Description
+      placeholder: Explain how it works and how it fits into the game...
     validations:
       required: true
   - type: textarea
     id: visual-references
     attributes:
-      label: Riferimenti visivi o musicali (opzionale)
-      placeholder: Link a video, brani musicali o immagini di riferimento...
+      label: Visual or musical references (optional)
+      placeholder: Links to videos, music tracks, or reference images...

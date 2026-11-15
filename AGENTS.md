@@ -43,16 +43,21 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 ```text
 /
 ├── docs/
-│   └── DESIGN.md              # Mechanic specs & design decisions (source of truth for gameplay)
+│   ├── DESIGN.md              # Mechanic specs & design decisions (source of truth for gameplay)
+│   ├── ROADMAP.md             # Development roadmap and task checklists
+│   ├── SPACETIME_SYNC_PLAN.md # A1 micro-elastic pacing + A2 horizon phase stitching
+│   └── OUTRO_EXTENSION_PROPOSALS.md # Stage 1 Tape Drag + Stage 2 Dub Delay Wash
 ├── public/
-│   ├── audio/                 # Bundled .mp3 tracks + companion BeatMap .json
-│   └── sprites/               # Sprite sheets (cars, roadside props, parallax layers)
+│   ├── audio/                 # Companion BeatMap .json (audio uses procedural synth fallback or user files)
+│   └── sprites/               # Sprite sheets and SVG atlases
 ├── test-tracks/               # GITIGNORED local analysis corpus (+ ground-truth.json). Never commit audio.
 ├── src/
 │   ├── config/
 │   │   ├── constants.ts       # Fixed resolution, fixed step (1/120s), segment length
 │   │   └── tuning.ts          # Live-tunable feel parameters & DebugPanel metadata
 │   ├── core/
+│   │   ├── AssetPreloader.ts  # Manifest preloader with procedural greybox fallbacks
+│   │   ├── AutopilotDriver.ts # AI demonstration driver for attract mode & test automation
 │   │   ├── FixedStepper.ts    # Accumulator-based fixed-timestep stepper
 │   │   ├── GameLoop.ts        # requestAnimationFrame loop with deltaTime clamping
 │   │   ├── InputManager.ts    # Keyboard/Gamepad polling state + timestamped press edges
@@ -60,34 +65,46 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 │   │   └── TelemetryBridge.ts # Throttled event emitter syncing Engine -> React HUD
 │   ├── engine/
 │   │   ├── Background.ts      # Procedural synthwave sky, striped sun, parallax mountains
-│   │   └── Game.ts            # Pure TS game orchestrator (.update(dt) & .render(ctx))
+│   │   ├── Game.ts            # Pure TS game orchestrator (.update(dt) & .render(ctx))
+│   │   ├── PlaylistRunManager.ts # Stage sequencing, score tracking, lap timing
+│   │   ├── SongRoadSyncController.ts # Hybrid Spacetime Sync (A1 micro-elastic pace + A2 horizon stitching)
+│   │   └── StageForkController.ts # Stage fork approach, crossfade trigger, branch selection
 │   ├── road/
-│   │   ├── palette.ts         # Stage colour palettes (vaporwave / night / coastal)
+│   │   ├── palette.ts         # Stage colour palettes (night / og_future_funk / akiba_night / vaporfunk)
 │   │   ├── RoadSegment.ts     # Segment types (curve, y-elevation, stripe, sprites[])
 │   │   ├── RoadProjection.ts  # 3D-to-2D camera projection & easing helpers
 │   │   ├── RoadRenderer.ts    # Two-pass projection + Painter's Algorithm renderer
-│   │   ├── RoadsideProps.ts   # Procedural greybox roadside props (palms, lamps, billboards)
+│   │   ├── RoadsideProps.ts   # Procedural roadside props (palms, lamps, signs, bridges, jihanki)
 │   │   ├── TrackBuilder.ts    # Declarative builders for straight, hill, curve, fork
 │   │   ├── RoadChunks.ts      # Hand-authored bar-length road "chunks" tagged by energy/role
 │   │   └── SongRoadGenerator.ts # BeatMap + seed -> chunk sequence -> RoadSegment[]
 │   ├── audio/
 │   │   ├── BeatMap.ts         # BeatMap types, JSON validation, bar/section helpers
 │   │   ├── BeatClock.ts       # Deterministic BPM beat/bar calculator on the audio clock
-│   │   ├── FunkAudioEngine.ts # Web Audio graph (Source -> BiquadFilter -> Gain -> Destination)
+│   │   ├── FunkAudioEngine.ts # Web Audio graph (Source -> BiquadFilter -> Gain -> Destination) + Dub Wash
 │   │   ├── TrackAnalyzer.ts   # One-time offline BPM / first-beat / energy / section analysis
 │   │   ├── analysis.worker.ts # DSP worker (receives decoded PCM; no AudioContext inside)
 │   │   └── TrackLibrary.ts    # File import, content hashing, IndexedDB BeatMap cache, playlists
 │   ├── entities/
 │   │   ├── PlayerCar.ts       # Speed, X-offset, drift state, Groove meter math & car renderer
-│   │   ├── Gearbox.ts         # 4-speed fake torque curve, RPM, beat-shift judgement, auto-shift assist
-│   │   ├── MelonSoda.ts       # Jerk-driven liquid surface physics, spill events, canvas inset renderer
+│   │   ├── Gearbox.ts         # 6-speed fake torque curve, RPM, beat-shift judgement, auto-shift assist
+│   │   ├── MelonSoda.ts       # Jerk-driven liquid surface physics, spill events, canvas inset (Tofu Mode)
+│   │   ├── Particles.ts       # Neon tire smoke, collision sparks, and soda droplets
 │   │   └── TrafficAndProps.ts # Roadside obstacle collisions & AI kei trucks
 │   ├── ui/
+│   │   ├── hud/
+│   │   │   ├── VfdDigidash.tsx       # 1980s VFD digital dashboard (speed, gear gate 1..6, RPM)
+│   │   │   ├── CassetteTapeWidget.tsx # Pixel-art cassette Groove meter with rotating reels & tape slack
+│   │   │   └── RhythmBezel.tsx       # Pulse bezel & timing judgements (PERFECT/GOOD/DOWNBEAT)
 │   │   ├── CanvasStage.tsx    # Mounts 640x360 canvas and manages GameLoop lifecycle
 │   │   ├── DebugPanel.tsx     # Live feel-tuning sliders (?debug / F2) & JSON export
 │   │   ├── BeatMapInspector.tsx # Dev tool (?analyze): corpus analysis results vs ground truth
 │   │   ├── TrackLoader.tsx    # Drag & drop / file picker, analysis progress, BPM ×2 / ÷2 / tap fix
-│   │   ├── HUD.tsx            # Speedometer, gear/RPM, Groove cassette bar
+│   │   ├── HUD.tsx            # Overlay root subscribing to TelemetryBridge
+│   │   ├── MainMenu.tsx       # 1980s arcade attract menu, FM 88.4 radio marquee, cassette library
+│   │   ├── PauseMenu.tsx      # Zero-scroll arcade pause menu & cockpit settings
+│   │   ├── DriverManualModal.tsx # 1980s retro driver's manual (beat-shift, drift, melon soda, controls)
+│   │   ├── QuickOptionsModal.tsx # Lightweight in-game settings modal
 │   │   ├── RadioSelector.tsx  # Stage fork: pick next playlist track & title toast
 │   │   └── CRTOverlay.tsx     # Pure CSS scanline / VHS vignette overlay
 │   ├── App.tsx                # Mounts <CanvasStage/>, <HUD/>, and <DebugPanel/>
@@ -123,7 +140,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
   - **M3a — Analysis spike (gate):** `BeatMap`, `TrackAnalyzer` + `analysis.worker.ts`, `BeatMapInspector` (`?analyze`) run against the local `test-tracks/` corpus. **Exit criteria** in `docs/DESIGN.md` §2.4. If unmet, fall back to tap-tempo-first import before continuing.
   - **M3b — Audio engine:** `FunkAudioEngine`, `BeatClock` (audio clock + latency compensation), `TrackLibrary` (hashing, IndexedDB cache, playlists), `TrackLoader` UI with BPM correction, synthesized fallback loop + bundled royalty-free track JSON, speed-linked low-pass sweep, turntable pitch dip, BPM road/sky pulse.
 - **M4 (Song-Driven Road):** `SeededRandom`, `RoadChunks` vocabulary, section-aware `SongRoadGenerator` (build-ups → climbs cresting on the drop, drops → fast straights/sweepers, breakdowns → technical curves), road length = song length.
-- **M5 (Groove & Rhythm Driving):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `SSS`) with hysteresis, `Gearbox` beat-shift (+ auto-shift assist), `MelonSoda` always-on liquid physics + Tofu Mode, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD with gear/RPM, `CRTOverlay`.
+- **M5 (Groove & Rhythm Driving):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `OVERDRIVE`) with hysteresis, `Gearbox` 6-speed beat-shift (+ auto-shift assist), `MelonSoda` liquid meniscus physics & spill dynamics in Tofu Mode, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD with gear gate 1..6 / RPM, `CRTOverlay`.
 - **M6 (Playlist Run & Forks):** Playlist = sequence of stages; forks choose the next playlist track via `RadioSelector`; 4-bar DJ crossfade; end-of-run grade screen; local per-song best scores keyed by content hash.
-- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, melon soda glass, drift/collision particles.
-- **M8 (Polish & Release):** Gamepad polling, asset preloader, tab-visibility pause, performance profiling, static deployment.
+- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, melon soda glass, drift smoke / collision particles, overpasses and suspension bridges.
+- **M8 (Polish & Release):** W3C Gamepad API polling, asset preloader with non-blocking greybox fallbacks, tab-visibility pause, 60+ FPS zero-GC optimization, static deployment.

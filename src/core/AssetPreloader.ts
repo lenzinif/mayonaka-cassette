@@ -8,6 +8,13 @@
  */
 
 import { BUNDLED_BEATMAPS, getOrSynthesizeFutureFunkLoopPcm } from '@src/audio/FunkAudioEngine';
+import { PALETTE_NIGHT_FUNK } from '@src/road/palette';
+import { RoadRenderer } from '@src/road/RoadRenderer';
+import { drawProp } from '@src/road/RoadsideProps';
+import { createPoint, type PropKind, type Track } from '@src/road/RoadSegment';
+
+const DETECTED_HARDWARE_SAMPLE_RATE = 48000;
+let bridgeRenderersWarmedUp = false;
 
 export type AssetKind = 'image' | 'json' | 'synth';
 
@@ -219,11 +226,112 @@ export class AssetPreloader {
   }
 
   private async warmupSynth(): Promise<void> {
-    // Warm up procedural synth loops in advance so in-game track starts and loops are 0ms.
+    // 1. Warm up procedural synth loops in advance so in-game track starts and loops are 0ms.
     for (const bm of BUNDLED_BEATMAPS) {
-      getOrSynthesizeFutureFunkLoopPcm(bm.bpm, 48000, 8);
+      getOrSynthesizeFutureFunkLoopPcm(bm.bpm, DETECTED_HARDWARE_SAMPLE_RATE, 8);
       // Yield to the browser paint cycle between tracks
       await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    // 2. Warm up V8 JIT once for heavy procedural bridge & roadside prop renderers (suspension-tower,
+    // overpass, gantry, bridge parapets) on an offscreen 640x360 canvas so approaching the first bridge
+    // in-game never triggers a first-time JIT compilation stall.
+    if (!bridgeRenderersWarmedUp) {
+      bridgeRenderersWarmedUp = true;
+      this.warmupBridgeRenderers();
+    }
+  }
+
+  private warmupBridgeRenderers(): void {
+    if (typeof document === 'undefined') return;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 640;
+      canvas.height = 360;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const allKinds: readonly PropKind[] = [
+        'suspension-tower',
+        'overpass',
+        'gantry',
+        'vms',
+        'building',
+        'billboard',
+        'palm',
+        'tree',
+        'street-tree',
+        'pine',
+        'lamp',
+        'chevron',
+        'jihanki',
+        'phonebooth',
+        'pylon',
+        'shrub',
+        'sign',
+        'kiosk',
+        'bench',
+        'bus-stop',
+        'canopy',
+        'torii',
+        'toro',
+      ];
+      const ppuScales = [0.004, 0.015, 0.035];
+      const pulses = [0.1, 0.6];
+      for (let i = 0; i < allKinds.length; i++) {
+        const kind = allKinds[i]!;
+        for (let v = 0; v < 3; v++) {
+          for (let s = 0; s < ppuScales.length; s++) {
+            const ppu = ppuScales[s]!;
+            const pulse = pulses[(v + s) % 2]!;
+            drawProp(ctx, kind, 320, 260, ppu, 1, v, pulse);
+            drawProp(ctx, kind, 320, 260, ppu, -1, v, pulse);
+          }
+        }
+      }
+
+      // Warm up RoadRenderer bridge parapet, bay water fill (y1 > 180), & expansion joint (index % 8 === 0 && w1 >= 22)
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segs = Array.from({ length: 24 }, (_, idx) => ({
+        index: idx,
+        p1: createPoint(0, idx * segLen),
+        p2: createPoint(0, (idx + 1) * segLen),
+        curve: 0,
+        stripe: (Math.floor(idx / 3) % 2 === 0 ? 0 : 1) as 0 | 1,
+        sprites:
+          idx === 4
+            ? [{ kind: 'suspension-tower' as const, offset: 0, variant: 0 }]
+            : idx === 8
+              ? [{ kind: 'suspension-tower' as const, offset: 0, variant: 1 }]
+              : [],
+        fog: 1,
+        env: 'bridge' as const,
+      }));
+      const dummyBridgeTrack: Track = {
+        segments: segs,
+        segmentLength: segLen,
+        length: segs.length * segLen,
+      };
+      renderer.render(
+        ctx,
+        dummyBridgeTrack,
+        {
+          position: 0,
+          playerX: 0,
+          cameraHeight: 1000,
+          cameraDepth: 0.84,
+          roadWidth: 2000,
+          drawDistance: 20,
+          fogDensity: 5,
+          width: 640,
+          height: 360,
+          beatPulse: 0.5,
+        },
+        PALETTE_NIGHT_FUNK,
+      );
+    } catch {
+      // Ignore in headless/non-canvas environments
     }
   }
 }

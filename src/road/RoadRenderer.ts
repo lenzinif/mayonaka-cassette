@@ -17,9 +17,10 @@ import {
   getEffectiveTruckLaneOffset,
   getTruckForkBranch,
   type RoadSegment,
+  type RoadSprite,
   type Track,
 } from './RoadSegment';
-import { drawProp } from './RoadsideProps';
+import { drawProp, getPylonAttachmentPoints, setPropTheme } from './RoadsideProps';
 
 /** Per-frame camera/view parameters. The caller owns and reuses this object. */
 export interface RoadView {
@@ -33,6 +34,7 @@ export interface RoadView {
   width: number;
   height: number;
   beatPulse?: number;
+  beatIndex?: number;
   /** World Z where the OutRun stage fork split begins (`undefined` when no fork is active). */
   forkZoneStartZ?: number;
   /** Currently selected branch at the stage fork (`'left'` = loop, `'right'` = next track). */
@@ -62,6 +64,19 @@ export class RoadRenderer {
   private readonly visible: RoadSegment[] = new Array<RoadSegment>(MAX_DRAW_DISTANCE);
   private readonly clipY = new Float32Array(MAX_DRAW_DISTANCE);
 
+  // --- Phase 3 Power Line Chain State (Zero GC) ---
+  private static readonly MAX_CHAIN_SLOTS = 8;
+  /** Meta per slot: [chainId, valid (0/1), variant, segIndex, wiredCount] */
+  private readonly chainSlotMeta = new Int32Array(RoadRenderer.MAX_CHAIN_SLOTS * 5);
+  /** 5 attachment points (x, y) per slot = 10 floats */
+  private readonly chainSlotPoints = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 10);
+  /** Screen position [screenX, screenY] per slot = 2 floats */
+  private readonly chainSlotPos = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 2);
+  /** Delta vector from farther tower [dx, dy] per slot = 2 floats */
+  private readonly chainSlotVec = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 2);
+  /** Scratch attachment points for current pylon = 10 floats */
+  private readonly currentPylonPoints = new Float32Array(10);
+
   /** Pre-allocated rendering statistics updated every frame without GC allocations (AGENTS.md §4.3). */
   readonly stats: RoadRenderStats = {
     drawnSegments: 0,
@@ -80,6 +95,8 @@ export class RoadRenderer {
     this.stats.drawnSegments = 0;
     this.stats.drawnProps = 0;
     this.stats.drawnTrucks = 0;
+    this.chainSlotMeta.fill(0);
+    setPropTheme(palette.scenery);
 
     const { segments, segmentLength, length: trackLength } = track;
     const { position, playerX, cameraDepth, roadWidth, width, height } = view;
@@ -186,6 +203,23 @@ export class RoadRenderer {
       // Smooth distant alpha fade-in (0.001 -> 0.006) to eliminate abrupt pop-in & flickering at the horizon
       const propAlpha = Math.min(1, Math.max(0, (scaledPpu - 0.001) / 0.005));
       const needsPropAlpha = propAlpha < 0.98;
+      // Clip props whose segment base is behind a closer hill crest so trunks/foundations never bleed through terrain
+      const needsCrestClip =
+        sprites.length > 0 &&
+        segClipY < height &&
+        p1.screenY > segClipY &&
+        typeof ctx.clip === 'function';
+
+      if (needsCrestClip) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(width, 0);
+        ctx.lineTo(width, segClipY);
+        ctx.lineTo(0, segClipY);
+        ctx.closePath();
+        ctx.clip();
+      }
 
       if (needsPropAlpha && sprites.length > 0) {
         ctx.globalAlpha = propAlpha;
@@ -194,6 +228,36 @@ export class RoadRenderer {
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       for (let i = 0; i < sprites.length; i++) {
         const s = sprites[i]!;
+
+        // Optional theme exclusion
+        if (palette.scenery.hideKinds?.has(s.kind)) continue;
+
+        // Band C/D building density skip (|offset| >= 3.0; collidable A/B buildings are never skipped)
+        if (
+          s.kind === 'building' &&
+          Math.abs(s.offset) >= 3.0 &&
+          palette.scenery.buildingDensity < 1.0
+        ) {
+          const densityHash =
+            (Math.imul(seg.index, 31) +
+              Math.imul(s.variant, 17) +
+              Math.round(Math.abs(s.offset) * 10)) &
+            0x7fffffff;
+          if ((densityHash % 1000) / 1000 >= palette.scenery.buildingDensity) {
+            continue;
+          }
+        }
+
+        // Biome coherence: resolve abstract slots ('tree') to concrete stage prop kinds
+        const resolvedKind = s.kind === 'tree' ? palette.scenery.tree : s.kind;
+        if (palette.scenery.hideKinds?.has(resolvedKind)) continue;
+
+        const spriteScale = s.scale ?? 1;
+        const propPpu = scaledPpu * spriteScale;
+
+        // Cheap distant LOD: skip far-field (Band D) props when scaledPpu is tiny (<0.0012)
+        if (Math.abs(s.offset) >= 6.0 && propPpu < 0.0012) continue;
+
         const effectiveOffset = getEffectivePropOffset(
           s.offset,
           p1.worldZ,
@@ -202,22 +266,52 @@ export class RoadRenderer {
           view.forkChoice,
         );
         const sx = p1.screenX + p1.screenW * effectiveOffset;
-        if (sx < -width * 0.35 || sx > width * 1.35) continue;
+
+        // Phase 3: Always register every visible pylon in the longitudinal wire chain regardless of lateral cull,
+        // so catenary spans never pop off when the near tower slides past the viewport edge.
+        if (resolvedKind === 'pylon' && s.chainId !== undefined) {
+          this.handlePylonChainWires(
+            ctx,
+            s,
+            sx,
+            p1.screenY,
+            propPpu,
+            seg.index,
+            segments.length,
+          );
+        }
+
+        // Approximate visual width in screen pixels for horizontal culling (widen for large offsets / large structures)
+        const propW =
+          resolvedKind === 'gantry' || resolvedKind === 'overpass' || resolvedKind === 'suspension-tower'
+            ? p1.screenW * 2.5
+            : resolvedKind === 'building'
+              ? Math.max(p1.screenW * 1.2, 5000 * propPpu)
+              : resolvedKind === 'pylon'
+                ? Math.max(48, 7000 * propPpu)
+                : Math.max(32, 2600 * propPpu);
+
+        if (sx + propW < 0 || sx - propW > width) continue;
+
         drawProp(
           ctx,
-          s.kind,
+          resolvedKind,
           sx,
           p1.screenY,
-          scaledPpu,
+          propPpu,
           effectiveOffset < 0 ? -1 : 1,
           s.variant,
           beatPulse,
+          view.beatIndex ?? 0,
         );
         this.stats.drawnProps++;
       }
 
       if (needsPropAlpha && sprites.length > 0) {
         ctx.globalAlpha = 1;
+      }
+      if (needsCrestClip) {
+        ctx.restore();
       }
 
       // AI Kei Trucks on this segment (diverging onto the left/right Y-fork branch)
@@ -312,8 +406,216 @@ export class RoadRenderer {
           tIdx = truck.nextInSegment;
         }
       }
+    }
 
+    // Phase 3 Edge case (b): extrapolate wires for nearest visible tower behind camera
+    this.extrapolateNearestPylonWires(ctx, width, height);
+  }
 
+  private handlePylonChainWires(
+    ctx: CanvasRenderingContext2D,
+    sprite: RoadSprite,
+    sx: number,
+    sy: number,
+    propPpu: number,
+    segIndex: number,
+    trackSegCount: number,
+  ): void {
+    const chainId = sprite.chainId!;
+    const variant = sprite.variant;
+
+    // 1. Compute 5 attachment points into pre-allocated scratch array (zero GC)
+    getPylonAttachmentPoints(sx, sy, propPpu, this.currentPylonPoints, 0, variant);
+
+    // 2. Find existing slot for this chainId
+    let slot = -1;
+    let emptySlot = -1;
+    for (let s = 0; s < RoadRenderer.MAX_CHAIN_SLOTS; s++) {
+      if (this.chainSlotMeta[s * 5 + 1] === 1) {
+        if (this.chainSlotMeta[s * 5] === chainId) {
+          slot = s;
+          break;
+        }
+      } else if (emptySlot === -1) {
+        emptySlot = s;
+      }
+    }
+
+    if (slot !== -1) {
+      // Previous (farther) tower exists in this chain!
+      const farVariant = this.chainSlotMeta[slot * 5 + 2]!;
+      const farSegIndex = this.chainSlotMeta[slot * 5 + 3]!;
+      const isCrossing = variant === 2 && farVariant === 2;
+      const rawDelta = Math.abs(farSegIndex - segIndex);
+      const segDelta =
+        trackSegCount > 0 ? Math.min(rawDelta, trackSegCount - rawDelta) : rawDelta;
+
+      // Connect all consecutive towers belonging to the same corridor run
+      if (isCrossing || segDelta <= 200) {
+        ctx.strokeStyle = '#2d1c4a';
+        ctx.lineWidth = 1;
+
+        const pOffset = slot * 10;
+        let drewAnyWire = false;
+        for (let k = 0; k < 5; k++) {
+          const xNear = this.currentPylonPoints[k * 2]!;
+          const yNear = this.currentPylonPoints[k * 2 + 1]!;
+          const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+          const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+
+          drewAnyWire = true;
+          const dx = xFar - xNear;
+          const dy = yFar - yNear;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          // Sag proportional to screen span distance (~0.08–0.12, min 1.5px)
+          const sagRatio = isCrossing ? 0.05 : 0.09;
+          const sag = Math.max(1.5, dist * sagRatio);
+          const midX = (xNear + xFar) * 0.5;
+          const midY = (yNear + yFar) * 0.5 + sag;
+
+          ctx.beginPath();
+          ctx.moveTo(xNear, yNear);
+          ctx.quadraticCurveTo(midX, midY, xFar, yFar);
+          ctx.stroke();
+        }
+
+        // Faint neon sheen highlight if close enough to screen
+        if (drewAnyWire && propPpu > 0.0035) {
+          ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+          for (let k = 0; k < 5; k++) {
+            const xNear = this.currentPylonPoints[k * 2]!;
+            const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+            const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+
+            const dx = xFar - xNear;
+            const dy = yFar - yNear;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const sagRatio = isCrossing ? 0.05 : 0.09;
+            const sag = Math.max(1.5, dist * sagRatio);
+            ctx.beginPath();
+            ctx.moveTo(xNear, yNear);
+            ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+            ctx.stroke();
+          }
+        }
+
+        this.chainSlotMeta[slot * 5 + 4] = this.chainSlotMeta[slot * 5 + 4]! + 1;
+      }
+
+      if (isCrossing) {
+        // Crossing is self-contained; free slot so it doesn't chain further
+        this.chainSlotMeta[slot * 5 + 1] = 0;
+        return;
+      }
+
+      // Record perspective delta vector for edge-case extrapolation: (near - far)
+      const farSx = this.chainSlotPos[slot * 2]!;
+      const farSy = this.chainSlotPos[slot * 2 + 1]!;
+      this.chainSlotVec[slot * 2] = sx - farSx;
+      this.chainSlotVec[slot * 2 + 1] = sy - farSy;
+
+      // Update slot with current (nearer) tower points
+      const pOffset = slot * 10;
+      for (let k = 0; k < 10; k++) {
+        this.chainSlotPoints[pOffset + k] = this.currentPylonPoints[k]!;
+      }
+      this.chainSlotPos[slot * 2] = sx;
+      this.chainSlotPos[slot * 2 + 1] = sy;
+      this.chainSlotMeta[slot * 5 + 2] = variant;
+      this.chainSlotMeta[slot * 5 + 3] = segIndex;
+    } else {
+      // First visible tower for this chain (farthest visible tower in Pass 2).
+      // Never draw cut-off horizon stubs: upcoming nearer towers in Pass 2 will connect to it.
+      const targetSlot = emptySlot !== -1 ? emptySlot : 0;
+      const pOffset = targetSlot * 10;
+
+      // Store current tower into target slot
+      this.chainSlotMeta[targetSlot * 5] = chainId;
+      this.chainSlotMeta[targetSlot * 5 + 1] = 1;
+      this.chainSlotMeta[targetSlot * 5 + 2] = variant;
+      this.chainSlotMeta[targetSlot * 5 + 3] = segIndex;
+      this.chainSlotMeta[targetSlot * 5 + 4] = 0;
+      this.chainSlotPos[targetSlot * 2] = sx;
+      this.chainSlotPos[targetSlot * 2 + 1] = sy;
+      this.chainSlotVec[targetSlot * 2] = 0;
+      this.chainSlotVec[targetSlot * 2 + 1] = 0;
+      for (let k = 0; k < 10; k++) {
+        this.chainSlotPoints[pOffset + k] = this.currentPylonPoints[k]!;
+      }
+    }
+  }
+
+  private extrapolateNearestPylonWires(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+  ): void {
+    ctx.strokeStyle = '#2d1c4a';
+    ctx.lineWidth = 1;
+
+    for (let s = 0; s < RoadRenderer.MAX_CHAIN_SLOTS; s++) {
+      if (this.chainSlotMeta[s * 5 + 1] !== 1) continue;
+      const variant = this.chainSlotMeta[s * 5 + 2];
+      // Skip terminal (1) and crossing (2): lines do not continue past terminal
+      if (variant === 1 || variant === 2) continue;
+
+      const wiredCount = this.chainSlotMeta[s * 5 + 4]!;
+      const towerX = this.chainSlotPos[s * 2]!;
+      const towerY = this.chainSlotPos[s * 2 + 1]!;
+
+      // Do not shoot extrapolated wires from a lone distant tower peeking over the horizon
+      if (wiredCount === 0 && towerY < height * 0.6) continue;
+
+      let vx = this.chainSlotVec[s * 2]!;
+      let vy = this.chainSlotVec[s * 2 + 1]!;
+
+      if (vx === 0 && vy === 0) {
+        // Only one tower of this chain was visible near the camera; extrapolate outward/downward
+        vx = towerX - width * 0.5;
+        vy = towerY - height * 0.35;
+      }
+
+      const vDist = Math.sqrt(vx * vx + vy * vy) || 1;
+      let dirX = vx / vDist;
+      let dirY = vy / vDist;
+
+      // Ensure downward/outward direction toward screen edge/bottom
+      if (dirY < 0.2) dirY = 0.2;
+      const norm = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
+      dirX /= norm;
+      dirY /= norm;
+
+      // Skip if the nearest tower is already off-screen pointing outward
+      if (
+        (towerX < -80 && dirX <= 0) ||
+        (towerX > width + 80 && dirX >= 0) ||
+        towerY > height + 80
+      ) {
+        continue;
+      }
+
+      // Compute exit length so extrapolated cables always extend beyond the viewport border
+      let tx = 1e6;
+      if (dirX > 0.001) tx = (width + 24 - towerX) / dirX;
+      else if (dirX < -0.001) tx = (-24 - towerX) / dirX;
+      const ty = dirY > 0.001 ? (height + 24 - towerY) / dirY : 1e6;
+      const extLen = Math.max(140, Math.min(width + height, Math.min(tx, ty) + 40));
+
+      const pOffset = s * 10;
+
+      for (let k = 0; k < 5; k++) {
+        const xNear = this.chainSlotPoints[pOffset + k * 2]!;
+        const yNear = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+        const exitX = xNear + dirX * extLen;
+        const exitY = yNear + dirY * extLen;
+
+        ctx.beginPath();
+        ctx.moveTo(xNear, yNear);
+        ctx.lineTo(exitX, exitY);
+        ctx.stroke();
+      }
     }
   }
 
@@ -330,12 +632,25 @@ export class RoadRenderer {
     isCameraOnBridge = false,
   ): void {
     const { p1, p2, stripe } = seg;
-    const x1 = p1.screenX;
-    const y1 = Math.min(p1.screenY, segClipY);
-    const w1 = p1.screenW;
+    let x1 = p1.screenX;
+    let y1 = p1.screenY;
+    let w1 = p1.screenW;
     const x2 = p2.screenX;
     const y2 = p2.screenY - 1; // 1px overlap hides anti-aliasing seams between slices
     const w2 = p2.screenW;
+
+    // Clip near edge to segClipY (screen bottom or hill crest) along the projected edge so
+    // lane lines, rumble strips, and road edges stay straight instead of flaring into a funnel.
+    if (y1 > segClipY) {
+      const spanY = p1.screenY - p2.screenY;
+      if (spanY > 0.0001) {
+        const clipT = clamp01((segClipY - p2.screenY) / spanY);
+        x1 = x2 + (p1.screenX - x2) * clipT;
+        w1 = w2 + (p1.screenW - w2) * clipT;
+      }
+      y1 = segClipY;
+    }
+
     const pulseScale = 1 + beatPulse * tuning.bpmPulseStrength * 0.28;
     const r1 = (w1 / Math.max(6, 2 * LANES)) * pulseScale;
     const r2 = (w2 / Math.max(6, 2 * LANES)) * pulseScale;
@@ -351,7 +666,7 @@ export class RoadRenderer {
         ctx.fillStyle = '#060b1e';
         ctx.fillRect(0, waterY2, width, y1 - waterY2);
       }
-    } else if (stripe === 0 || y2 < 180) {
+    } else {
       ctx.fillStyle = palette.grass[stripe];
       ctx.fillRect(0, y2, width, y1 - y2);
     }

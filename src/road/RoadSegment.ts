@@ -19,6 +19,9 @@ export interface ProjectedPoint {
 
 export type PropKind =
   | 'palm'
+  | 'tree'
+  | 'street-tree'
+  | 'pine'
   | 'lamp'
   | 'billboard'
   | 'building'
@@ -31,17 +34,47 @@ export type PropKind =
   | 'shrub'
   | 'sign'
   | 'overpass'
-  | 'suspension-tower';
+  | 'suspension-tower'
+  | 'kiosk'
+  | 'bench'
+  | 'bus-stop'
+  | 'canopy'
+  | 'torii'
+  | 'toro';
 
 export type SegmentEnvironment =
   | 'standard'
   | 'bridge';
+
+/**
+ * Depth bands for roadside props (docs/DESIGN.md §2 Fase 1):
+ * - A: Shoulder (1.15–1.45) — rhythmic functional fixtures (lamps, signs, gantries, chevrons), collidable.
+ * - B: Verge (1.85–3.8) — organic greenery & billboards (shrubs, trees, billboards), collidable within <3.0.
+ * - C: Near field (3.5–8.5) — groves, low buildings & power pylons, organic, non-collidable.
+ * - D: Far field (6.0–14.0) — tall city skyline towers & backdrops, dense organic, non-collidable.
+ */
+export type PropBand = 'A' | 'B' | 'C' | 'D';
+
+export interface PropBandRange {
+  readonly min: number;
+  readonly max: number;
+}
+
+export const PROP_BAND_RANGES: Record<PropBand, PropBandRange> = {
+  A: { min: 1.15, max: 1.45 },
+  B: { min: 1.85, max: 3.8 },
+  C: { min: 3.5, max: 8.5 },
+  D: { min: 6.0, max: 14.0 },
+} as const;
 
 /** A roadside sprite anchored to a segment. `offset` is in road half-widths (±1 = road edge). */
 export interface RoadSprite {
   kind: PropKind;
   offset: number;
   variant: number;
+  scale?: number;
+  /** Optional chain identifier (run id >= 1) grouping consecutive sprites (e.g. power pylons). */
+  chainId?: number;
 }
 
 export interface RoadSegment {

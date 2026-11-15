@@ -170,4 +170,87 @@ describe('RoadRenderer — Rendering Environments', () => {
     expect(fadeAlpha).toBeLessThan(1);
     expect(mock.alphaHistory[mock.alphaHistory.length - 1]).toBe(1);
   });
+
+  it('renders scaled depth-band props and respects horizontal culling', () => {
+    const renderer = new RoadRenderer();
+    const mock = createMockCanvas();
+    const track = createTestTrack('standard');
+
+    // Segment 10 has a Band C building with scale 1.5 within view
+    track.segments[10]!.sprites.push({
+      kind: 'building',
+      offset: 3.5,
+      variant: 0,
+      scale: 1.5,
+    });
+
+    // Segment 10 also has a prop far outside horizontal cull bounds (offset 50)
+    track.segments[10]!.sprites.push({
+      kind: 'lamp',
+      offset: 50.0,
+      variant: 0,
+    });
+
+    renderer.render(mock.ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+
+    // Only the visible building should be drawn, the lamp at offset 50 is culled
+    expect(renderer.stats.drawnProps).toBe(1);
+  });
+
+  it('clips off-screen bottom segments proportionally in X and W so lane lines stay straight', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('standard');
+    for (let i = 0; i < 12; i++) {
+      track.segments[i]!.stripe = 0;
+    }
+
+    const polygons: Array<{ fillStyle: string; pts: Array<[number, number]> }> = [];
+    let currentPts: Array<[number, number]> = [];
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: () => {
+        currentPts = [];
+      },
+      closePath: noop,
+      moveTo: (x: number, y: number) => {
+        currentPts.push([x, y]);
+      },
+      lineTo: (x: number, y: number) => {
+        currentPts.push([x, y]);
+      },
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: () => {
+        if (currentPts.length > 0) {
+          polygons.push({ fillStyle: ctx.fillStyle as string, pts: currentPts });
+        }
+      },
+      stroke: noop,
+      fillRect: noop,
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    // Position = 100 gives basePercent = 0.5, so the bottom-most visible segment straddles y = 360
+    const view: RoadView = {
+      ...defaultView,
+      position: 100,
+    };
+
+    renderer.render(ctx, track, view, PALETTE_NIGHT_FUNK);
+
+    const lanePolys = polygons.filter((p) => p.fillStyle === PALETTE_NIGHT_FUNK.lane);
+    const bottomLanePoly = lanePolys[lanePolys.length - 1]!;
+    const [bl, br] = [bottomLanePoly.pts[0]!, bottomLanePoly.pts[1]!];
+    expect(bl[1]).toBe(360);
+    const leftDividerCenterAtBottom = (bl[0] + br[0]) / 2;
+    // True perspective at y=360: scale = (360 - 180) / (1000 * 180) = 0.001 -> screenW = 640 -> lx = 320 - 640/3
+    expect(leftDividerCenterAtBottom).toBeCloseTo(320 - 640 / 3, 2);
+  });
 });

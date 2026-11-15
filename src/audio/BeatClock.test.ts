@@ -164,4 +164,53 @@ describe('BeatClock & FunkAudioEngine', () => {
 
     engine.dispose();
   });
+
+  it('supports Cassette Deck preview playback while paused and restores gameplay timestamp when staying on same track', async () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+
+    // Advance gameplay position to 42.5s, then pause
+    (engine as unknown as { virtualTrackSec: number }).virtualTrackSec = 42.5;
+    await engine.pause();
+    expect(engine.paused).toBe(true);
+
+    // Start preview at 10s, seek to 25s, toggle beat click
+    await engine.startPreview(10);
+    expect(engine.isPreviewMode).toBe(true);
+    expect(engine.isPreviewPlaying).toBe(true);
+    expect(engine.cutoffHz).toBeGreaterThanOrEqual(15000);
+
+    engine.seekPreview(25);
+    const sample = engine.samplePreview();
+    expect(sample.trackTimeSec).toBeCloseTo(25, 1);
+    expect(sample.isPlaying).toBe(true);
+
+    engine.setPreviewClickEnabled(true);
+    expect(engine.isPreviewClickEnabled).toBe(true);
+
+    // Pause preview retains current scrub time
+    engine.pausePreview();
+    expect(engine.isPreviewPlaying).toBe(false);
+    expect(engine.samplePreview().trackTimeSec).toBeCloseTo(25, 1);
+
+    // Stopping preview with restoreIfSameTrack=true restores original 42.5s gameplay timestamp
+    engine.stopPreview(true);
+    expect(engine.isPreviewMode).toBe(false);
+    expect((engine as unknown as { virtualTrackSec: number }).virtualTrackSec).toBeCloseTo(42.5, 2);
+
+    // Switching to another track during preview resets gameplay timestamp to 0 on exit
+    await engine.startPreview(0);
+    engine.loadTrack(
+      {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:other-preview-track',
+        title: 'Other Track',
+      },
+      null,
+    );
+    engine.seekPreview(18);
+    engine.stopPreview(true);
+    expect((engine as unknown as { virtualTrackSec: number }).virtualTrackSec).toBe(0);
+
+    engine.dispose();
+  });
 });
