@@ -259,6 +259,9 @@ export class AssetPreloader {
         'building',
         'billboard',
         'palm',
+        'tree',
+        'street-tree',
+        'pine',
         'lamp',
         'chevron',
         'jihanki',
@@ -266,6 +269,12 @@ export class AssetPreloader {
         'pylon',
         'shrub',
         'sign',
+        'kiosk',
+        'bench',
+        'bus-stop',
+        'canopy',
+        'torii',
+        'toro',
       ];
       const ppuScales = [0.004, 0.015, 0.035];
       const pulses = [0.1, 0.6];

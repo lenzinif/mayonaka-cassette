@@ -226,6 +226,7 @@ export function App() {
                 akiba_night: 2,
                 weeb_funk: 2,
                 akiba: 2,
+                vaporfunk: 3,
               };
               const idx = norm in namedMap ? namedMap[norm]! : parseInt(norm, 10);
               if (!Number.isNaN(idx)) {

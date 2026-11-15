@@ -419,6 +419,17 @@ export function stitchHorizonToTargetZ(
 
   // Zone 1: Solid visible window (0 .. copyCount - 1), where copyCount = drawDistance - 24
   const copyCount = Math.max(1, drawDistance - 24);
+
+  // Never stitch if the visible source window is already on or showing a suspension bridge,
+  // or if the stitched destination window would split a bridge / mismatch source and destination env.
+  for (let n = 0; n < copyCount; n++) {
+    const srcEnv = track.segments[fromSegIndex + n]?.env ?? 'standard';
+    const destEnv = track.canonical.env[toSegIndex + n] ?? 'standard';
+    if (srcEnv === 'bridge' || destEnv === 'bridge' || srcEnv !== destEnv) {
+      return null;
+    }
+  }
+
   const deltaY =
     track.canonical.p1WorldY[toSegIndex]! - track.segments[fromSegIndex]!.p1.worldY;
 

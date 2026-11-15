@@ -214,6 +214,19 @@ describe('SongRoadGenerator', () => {
       const nearEndZ = road.length - (drawDistance + 5) * road.segmentLength;
       const endRes = stitchHorizonToTargetZ(road, nearEndZ, nearEndZ + 4000, drawDistance);
       expect(endRes).toBeNull();
+
+      // Rejects stitching when either source or destination visible window overlaps a bridge
+      const bridgeSegIdx = road.segments.findIndex((s) => s.env === 'bridge');
+      if (bridgeSegIdx >= 0) {
+        const onBridgeZ = bridgeSegIdx * road.segmentLength;
+        const bridgeRes = stitchHorizonToTargetZ(
+          road,
+          onBridgeZ,
+          onBridgeZ + 2 * road.barLengthWorld,
+          drawDistance,
+        );
+        expect(bridgeRes).toBeNull();
+      }
     });
   });
 
