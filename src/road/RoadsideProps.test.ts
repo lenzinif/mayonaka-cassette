@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { PropKind } from './RoadSegment';
-import { drawProp } from './RoadsideProps';
+import {
+  drawPine,
+  drawProp,
+  drawStreetTree,
+  getPropTheme,
+  setPropTheme,
+} from './RoadsideProps';
 
 function createMockCanvas(): {
   ctx: CanvasRenderingContext2D;
@@ -60,6 +66,9 @@ function createMockCanvas(): {
 describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
   const allProps: readonly PropKind[] = [
     'palm',
+    'tree',
+    'street-tree',
+    'pine',
     'lamp',
     'billboard',
     'building',
@@ -73,6 +82,12 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     'sign',
     'overpass',
     'suspension-tower',
+    'kiosk',
+    'bench',
+    'bus-stop',
+    'canopy',
+    'torii',
+    'toro',
   ];
 
   it('renders all 12 prop kinds cleanly without throwing', () => {
@@ -164,6 +179,23 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
     const mockPulse = createMockCanvas();
     drawProp(mockPulse.ctx, 'chevron', 200, 240, 0.02, -1, 0, 0.85);
     expect(mockPulse.fills).toContain('#ffffff');
+  });
+
+  it('animates chase light across chevrons based on seqIndex and beatIndex', () => {
+    // seqIndex 0: variant = 0 + 2 * 0 = 0
+    // seqIndex 1: variant = 0 + 2 * 1 = 2
+    // On beatIndex = 1 (pulse = 0.85):
+    // Board 1 (seq = 1) matches 1 % 4 === 1, so it turns white (#ffffff)
+    // Board 0 (seq = 0) does not match (0 !== 1), so it stays magenta (#ff007f)
+    const mockBoard0 = createMockCanvas();
+    const mockBoard1 = createMockCanvas();
+
+    drawProp(mockBoard0.ctx, 'chevron', 200, 240, 0.02, -1, 0, 0.85, 1);
+    drawProp(mockBoard1.ctx, 'chevron', 200, 240, 0.02, -1, 2, 0.85, 1);
+
+    expect(mockBoard1.fills).toContain('#ffffff');
+    expect(mockBoard0.fills).not.toContain('#ffffff');
+    expect(mockBoard0.fills).toContain('#ff007f');
   });
 
   it('renders 3 distinct building styles (Akiba Mart, Shinjuku Cyber Glass, Showa Retro Block)', () => {
@@ -289,5 +321,58 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
       }
     }
     expect(mock.rectCalls).toBeGreaterThan(100);
+  });
+
+  describe('Fase 5 — Biome Props (drawStreetTree & drawPine)', () => {
+    it('draws street-tree with sidewalk planter, street glow, trunk and rounded crown', () => {
+      const mock = createMockCanvas();
+      drawStreetTree(mock.ctx, 320, 240, 0.02, 1, 0);
+      expect(mock.rectCalls).toBeGreaterThan(5);
+      // Ginkgo yellow variant 0
+      expect(mock.fills).toContain('#ffd166');
+      // Planter
+      expect(mock.fills).toContain('#231e33');
+    });
+
+    it('draws pine with tiered cloud pads and moonlight rim', () => {
+      const mock = createMockCanvas();
+      drawPine(mock.ctx, 320, 240, 0.02, 1, 0);
+      expect(mock.rectCalls).toBeGreaterThan(5);
+      // Pine body & moonlight rim
+      expect(mock.fills).toContain('#1e4d38');
+      expect(mock.fills).toContain('#80ffdb');
+    });
+
+    it('renders drawStreetTree and drawPine safely across scales 0.2 to 2.0', () => {
+      const mock = createMockCanvas();
+      const scales = [0.2, 0.5, 1.0, 1.5, 2.0];
+      for (const s of scales) {
+        const ppu = 0.015 * s;
+        expect(() => {
+          drawStreetTree(mock.ctx, 320, 240, ppu, -1, 0);
+          drawStreetTree(mock.ctx, 320, 240, ppu, 1, 1);
+          drawPine(mock.ctx, 320, 240, ppu, -1, 0);
+          drawPine(mock.ctx, 320, 240, ppu, 1, 2);
+        }).not.toThrow();
+      }
+      expect(mock.rectCalls).toBeGreaterThan(50);
+    });
+
+    it('tints shrubs based on setPropTheme', () => {
+      const mock = createMockCanvas();
+      setPropTheme({
+        id: 'city',
+        tree: 'street-tree',
+        shrubTint: ['#123456', '#654321', '#abcdef'],
+        buildingDensity: 1.0,
+      });
+
+      drawProp(mock.ctx, 'shrub', 320, 240, 0.02, 1, 0);
+      expect(mock.fills).toContain('#123456');
+      expect(mock.fills).toContain('#654321');
+
+      setPropTheme(null);
+      expect(getPropTheme()).toBeNull();
+    });
   });
 });

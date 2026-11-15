@@ -217,119 +217,237 @@ describe('SongRoadGenerator', () => {
     });
   });
 
-  describe('Curve Warning Chevrons', () => {
-    it('places chevrons ONLY before curves and signals the correct direction (right: >>>, left: <<<)', () => {
-      const testChunk: RoadChunk = defineChunk({
-        id: 'test-chevron-chunk',
-        description: 'Test chunk for chevron direction and placement',
+  describe('Curve Warning Chevrons & Delineators (Phase 2)', () => {
+    it('places chevrons strictly inside real curves on the outside shoulder, and a diamond warning sign ~1 bar before', () => {
+      const testChunkRight: RoadChunk = defineChunk({
+        id: 'test-chevron-right-chunk',
+        description: 'Test chunk for right curve chevrons and warning sign',
         role: 'drop',
-        bars: 8,
+        bars: 4,
+        allowMirror: false,
         maneuvers: [
-          { bars: 2, curve: 0, elevation: 0 },
-          { bars: 2, curve: CURVE.MEDIUM, elevation: 0 },
-          { bars: 2, curve: 0, elevation: 0 },
-          { bars: 2, curve: -CURVE.MEDIUM, elevation: 0 },
+          { bars: 1, curve: 0, elevation: 0 },
+          { bars: 3, curve: CURVE.MEDIUM, elevation: 0 },
         ],
         props: [
-          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, offset: 1.35 },
+          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
+        ],
+      });
+
+      const testChunkLeft: RoadChunk = defineChunk({
+        id: 'test-chevron-left-chunk',
+        description: 'Test chunk for left curve chevrons and warning sign',
+        role: 'drop',
+        bars: 4,
+        allowMirror: false,
+        maneuvers: [
+          { bars: 1, curve: 0, elevation: 0 },
+          { bars: 3, curve: -CURVE.MEDIUM, elevation: 0 },
+        ],
+        props: [
+          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
         ],
       });
 
       const customMap: BeatMap = {
         ...DEFAULT_SYNTH_BEATMAP,
-        contentHash: 'sha256:chevron-test-track',
-        barEnergy: new Array<number>(8).fill(0.8),
-        sections: [{ startBar: 0, bars: 8, role: 'drop' }],
+        contentHash: 'sha256:chevron-phase2-track',
+        barEnergy: new Array<number>(4).fill(0.5), // energy 0.5 => curveScale = 1.0
+        sections: [{ startBar: 0, bars: 4, role: 'drop' }],
       };
 
-      const road = generateSongRoad(customMap, {
-        catalog: [testChunk],
-      });
-
-      interface ChevronInfo {
-        segIndex: number;
-        barIndex: number;
-        offset: number;
-        variant: number;
-        curve: number;
-      }
-      const chevrons: ChevronInfo[] = [];
-
-      for (let i = 0; i < road.segments.length; i++) {
-        const seg = road.segments[i]!;
-        for (const s of seg.sprites) {
-          if (s.kind === 'chevron') {
-            chevrons.push({
-              segIndex: i,
-              barIndex: Math.floor(i / road.segmentsPerBar),
-              offset: s.offset,
-              variant: s.variant,
-              curve: seg.curve,
-            });
-          }
-        }
-      }
-
-      expect(chevrons.length).toBeGreaterThan(0);
-
-      // 1. Right turn chevrons (preceding maneuver 1 which starts at bar 2):
-      // Must be on outside (left shoulder: offset < 0), point right (variant: 0), strictly before bar 2
-      const rightTurnChevrons = chevrons.filter((c) => c.barIndex < 2);
-      expect(rightTurnChevrons.length).toBeGreaterThanOrEqual(2);
-      for (const c of rightTurnChevrons) {
-        expect(c.variant).toBe(0); // Right: >>>
-        expect(c.offset).toBeLessThan(0); // Left shoulder
-        expect(Math.abs(c.curve)).toBeLessThanOrEqual(0.15); // Must be on straight approach
-      }
-
-      // 2. Inside right curve (bars 2 to 4):
-      // Must contain ZERO chevrons! Chevrons must never appear during curves.
-      const insideRightCurveChevrons = chevrons.filter(
-        (c) => c.segIndex >= 2.0 * road.segmentsPerBar && c.segIndex < 4.0 * road.segmentsPerBar,
+      // 1. Test Right Turn:
+      const roadRight = generateSongRoad(customMap, { catalog: [testChunkRight] });
+      const rightChevrons = roadRight.segments.flatMap((s, idx) =>
+        s.sprites.filter((sp) => sp.kind === 'chevron').map((sp) => ({ segIndex: idx, curve: s.curve, ...sp })),
       );
-      expect(insideRightCurveChevrons.length).toBe(0);
-
-      // 3. Middle straight section (bars 4.0 to 4.8):
-      // Must contain ZERO chevrons! Chevrons must never appear when not in the immediate approach to a curve.
-      const middleStraightChevrons = chevrons.filter(
-        (c) => c.segIndex >= 4.0 * road.segmentsPerBar && c.segIndex < 4.8 * road.segmentsPerBar,
+      const rightSigns = roadRight.segments.flatMap((s, idx) =>
+        s.sprites.filter((sp) => sp.kind === 'sign' && sp.variant === 2).map((sp) => ({ segIndex: idx, curve: s.curve, ...sp })),
       );
-      expect(middleStraightChevrons.length).toBe(0);
 
-      // 4. Left turn chevrons (preceding maneuver 3 which starts at bar 6):
-      // Must be on outside (right shoulder: offset > 0), point left (variant: 1), strictly before bar 6
-      const leftTurnChevrons = chevrons.filter((c) => c.barIndex >= 5 && c.barIndex < 6);
-      expect(leftTurnChevrons.length).toBeGreaterThanOrEqual(2);
-      for (const c of leftTurnChevrons) {
-        expect(c.variant).toBe(1); // Left: <<<
-        expect(c.offset).toBeGreaterThan(0); // Right shoulder
-        expect(Math.abs(c.curve)).toBeLessThanOrEqual(0.15); // Must be on straight approach
+      expect(rightChevrons.length).toBeGreaterThanOrEqual(3);
+      expect(rightSigns.length).toBe(1);
+
+      // Warning sign ~1 bar before curve start on outside (left) shoulder
+      expect(rightSigns[0]?.offset).toBeCloseTo(-1.3, 2);
+      expect(Math.abs(rightSigns[0]!.curve)).toBeLessThanOrEqual(0.15);
+
+      // All chevrons must be strictly inside the curve (|curve| >= 0.3 * targetCurve)
+      const minThreshold = 0.3 * CURVE.MEDIUM;
+      let prevSeq = -1;
+      for (const c of rightChevrons) {
+        expect(Math.abs(c.curve)).toBeGreaterThanOrEqual(minThreshold);
+        expect(c.variant % 2).toBe(0); // Right arrow (0)
+        expect(c.offset).toBeCloseTo(-1.3, 2); // Left shoulder (outside)
+        const seq = Math.floor(c.variant / 2);
+        expect(seq).toBeGreaterThan(prevSeq);
+        prevSeq = seq;
       }
 
-      // 5. Inside left curve (bars 6 to 8):
-      // Must contain ZERO chevrons! Chevrons must never appear during curves.
-      const insideLeftCurveChevrons = chevrons.filter(
-        (c) => c.segIndex >= 6.0 * road.segmentsPerBar && c.segIndex < 8.0 * road.segmentsPerBar,
+      // 2. Test Left Turn:
+      const roadLeft = generateSongRoad(customMap, { catalog: [testChunkLeft] });
+      const leftChevrons = roadLeft.segments.flatMap((s, idx) =>
+        s.sprites.filter((sp) => sp.kind === 'chevron').map((sp) => ({ segIndex: idx, curve: s.curve, ...sp })),
       );
-      expect(insideLeftCurveChevrons.length).toBe(0);
+      const leftSigns = roadLeft.segments.flatMap((s, idx) =>
+        s.sprites.filter((sp) => sp.kind === 'sign' && sp.variant === 2).map((sp) => ({ segIndex: idx, curve: s.curve, ...sp })),
+      );
 
-      // 6. Absolute invariant: NO chevron anywhere on the road may exist inside an active curve (|curve| > 0.15)
-      const chevronsInsideCurves = chevrons.filter((c) => Math.abs(c.curve) > 0.15);
-      expect(chevronsInsideCurves.length).toBe(0);
+      expect(leftChevrons.length).toBeGreaterThanOrEqual(3);
+      expect(leftSigns.length).toBe(1);
+
+      // Warning sign on outside (right) shoulder
+      expect(leftSigns[0]?.offset).toBeCloseTo(1.3, 2);
+      expect(Math.abs(leftSigns[0]!.curve)).toBeLessThanOrEqual(0.15);
+
+      prevSeq = -1;
+      for (const c of leftChevrons) {
+        expect(Math.abs(c.curve)).toBeGreaterThanOrEqual(minThreshold);
+        expect(c.variant % 2).toBe(1); // Left arrow (1)
+        expect(c.offset).toBeCloseTo(1.3, 2); // Right shoulder (outside)
+        const seq = Math.floor(c.variant / 2);
+        expect(seq).toBeGreaterThan(prevSeq);
+        prevSeq = seq;
+      }
     });
 
-    it('guarantees that DEFAULT_SYNTH_BEATMAP has ZERO chevrons inside curves', () => {
-      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
-      let chevronCount = 0;
-      for (const seg of road.segments) {
-        for (const sprite of seg.sprites) {
-          if (sprite.kind === 'chevron') {
-            chevronCount++;
-            expect(Math.abs(seg.curve)).toBeLessThanOrEqual(0.15);
-          }
-        }
-      }
-      expect(chevronCount).toBeGreaterThan(0);
+    it('places NO chevrons for EASY-only chunks, but places at most one diamond warning sign', () => {
+      const easyChunk: RoadChunk = defineChunk({
+        id: 'test-easy-chunk',
+        description: 'Test chunk with only EASY curves',
+        role: 'drop',
+        bars: 4,
+        allowMirror: false,
+        maneuvers: [
+          { bars: 1, curve: 0, elevation: 0 },
+          { bars: 3, curve: CURVE.EASY, elevation: 0 }, // 2.0 < 4 * 0.85 = 3.4
+        ],
+        props: [
+          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
+        ],
+      });
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:easy-chunk-track',
+        barEnergy: new Array<number>(4).fill(0.5),
+        sections: [{ startBar: 0, bars: 4, role: 'drop' }],
+      };
+
+      const road = generateSongRoad(customMap, { catalog: [easyChunk] });
+
+      const chevrons = road.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'chevron'));
+      const signs = road.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'sign' && sp.variant === 2));
+
+      // Absolutely zero chevrons for EASY curves
+      expect(chevrons.length).toBe(0);
+      // Exactly 1 diamond warning sign ~1 bar before the curve
+      expect(signs.length).toBe(1);
+      expect(signs[0]?.offset).toBeCloseTo(-1.3, 2); // Outside shoulder for right curve
+    });
+
+    it('places neither signs nor chevrons for very gentle curves (< 1.5)', () => {
+      const gentleChunk: RoadChunk = defineChunk({
+        id: 'test-gentle-chunk',
+        description: 'Test chunk with gentle curve below 1.5',
+        role: 'drop',
+        bars: 4,
+        maneuvers: [
+          { bars: 2, curve: 0, elevation: 0 },
+          { bars: 2, curve: 1.0, elevation: 0 }, // 1.0 < 1.5
+        ],
+        props: [
+          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
+        ],
+      });
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:gentle-chunk-track',
+        barEnergy: new Array<number>(4).fill(0.5),
+        sections: [{ startBar: 0, bars: 4, role: 'drop' }],
+      };
+
+      const road = generateSongRoad(customMap, { catalog: [gentleChunk] });
+
+      const chevrons = road.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'chevron'));
+      const signs = road.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'sign' && sp.variant === 2));
+
+      expect(chevrons.length).toBe(0);
+      expect(signs.length).toBe(0);
+    });
+
+    it('scales chevron density between HARD (half-beat) and MEDIUM (1-beat)', () => {
+      const medChunk: RoadChunk = defineChunk({
+        id: 'test-med-chunk',
+        description: 'MEDIUM curve chunk',
+        role: 'drop',
+        bars: 4,
+        maneuvers: [{ bars: 4, curve: CURVE.MEDIUM, elevation: 0 }],
+        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
+      });
+      const hardChunk: RoadChunk = defineChunk({
+        id: 'test-hard-chunk',
+        description: 'HARD curve chunk',
+        role: 'drop',
+        bars: 4,
+        maneuvers: [{ bars: 4, curve: CURVE.HARD, elevation: 0 }],
+        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
+      });
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:density-scale-track',
+        barEnergy: new Array<number>(4).fill(0.5),
+        sections: [{ startBar: 0, bars: 4, role: 'drop' }],
+      };
+
+      const roadMed = generateSongRoad(customMap, { catalog: [medChunk] });
+      const roadHard = generateSongRoad(customMap, { catalog: [hardChunk] });
+
+      const chevronsMed = roadMed.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'chevron'));
+      const chevronsHard = roadHard.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'chevron'));
+
+      expect(chevronsMed.length).toBeGreaterThan(0);
+      // Hard curve (half-beat spacing) has significantly more chevrons than Medium (1-beat spacing)
+      expect(chevronsHard.length).toBeGreaterThanOrEqual(chevronsMed.length * 1.5);
+    });
+
+    it('scales chevron count with curve duration', () => {
+      const shortChunk: RoadChunk = defineChunk({
+        id: 'test-short-chunk',
+        description: '2-bar curve chunk',
+        role: 'drop',
+        bars: 4,
+        maneuvers: [
+          { bars: 2, curve: 0, elevation: 0 },
+          { bars: 2, curve: CURVE.MEDIUM, elevation: 0 },
+        ],
+        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
+      });
+      const longChunk: RoadChunk = defineChunk({
+        id: 'test-long-chunk',
+        description: '4-bar curve chunk',
+        role: 'drop',
+        bars: 4,
+        maneuvers: [{ bars: 4, curve: CURVE.MEDIUM, elevation: 0 }],
+        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
+      });
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:duration-scale-track',
+        barEnergy: new Array<number>(4).fill(0.5),
+        sections: [{ startBar: 0, bars: 4, role: 'drop' }],
+      };
+
+      const roadShort = generateSongRoad(customMap, { catalog: [shortChunk] });
+      const roadLong = generateSongRoad(customMap, { catalog: [longChunk] });
+
+      const chevronsShort = roadShort.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'chevron'));
+      const chevronsLong = roadLong.segments.flatMap((s) => s.sprites.filter((sp) => sp.kind === 'chevron'));
+
+      expect(chevronsLong.length).toBeGreaterThan(chevronsShort.length);
     });
   });
 

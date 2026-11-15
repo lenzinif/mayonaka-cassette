@@ -217,7 +217,17 @@ export function App() {
             const params = new URLSearchParams(window.location.search);
             const stageParam = params.get('stage') ?? params.get('palette');
             if (stageParam !== null) {
-              const idx = stageParam === 'sunset' || stageParam === 'og_future_funk' ? 1 : parseInt(stageParam, 10);
+              const norm = stageParam.trim().toLowerCase();
+              const namedMap: Record<string, number> = {
+                night: 0,
+                mayonaka: 0,
+                sunset: 1,
+                og_future_funk: 1,
+                akiba_night: 2,
+                weeb_funk: 2,
+                akiba: 2,
+              };
+              const idx = norm in namedMap ? namedMap[norm]! : parseInt(norm, 10);
               if (!Number.isNaN(idx)) {
                 game.setStagePaletteIndex(idx);
               }

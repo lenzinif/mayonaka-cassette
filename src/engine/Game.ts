@@ -973,6 +973,7 @@ export class Game {
     this.view.width = width;
     this.view.height = height;
     this.view.beatPulse = this.beatPulse;
+    this.view.beatIndex = Math.floor(this.audioBeatIndex);
     this.view.alpha = alpha;
 
     const forkZoneStartZ = this.getForkZoneStartZ();

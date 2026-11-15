@@ -19,6 +19,9 @@ export interface ProjectedPoint {
 
 export type PropKind =
   | 'palm'
+  | 'tree'
+  | 'street-tree'
+  | 'pine'
   | 'lamp'
   | 'billboard'
   | 'building'
@@ -31,7 +34,13 @@ export type PropKind =
   | 'shrub'
   | 'sign'
   | 'overpass'
-  | 'suspension-tower';
+  | 'suspension-tower'
+  | 'kiosk'
+  | 'bench'
+  | 'bus-stop'
+  | 'canopy'
+  | 'torii'
+  | 'toro';
 
 export type SegmentEnvironment =
   | 'standard'
@@ -64,6 +73,8 @@ export interface RoadSprite {
   offset: number;
   variant: number;
   scale?: number;
+  /** Optional chain identifier (run id >= 1) grouping consecutive sprites (e.g. power pylons). */
+  chainId?: number;
 }
 
 export interface RoadSegment {

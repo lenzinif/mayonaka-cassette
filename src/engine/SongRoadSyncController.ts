@@ -152,14 +152,11 @@ export class SongRoadSyncController {
       }
     }
 
-    // Do not stitch while the camera is on or approaching a bridge (env === 'bridge'),
-    // so monumental suspension bridge towers, cables, and expansion joints never get split mid-span.
+    // Do not stitch while the camera is currently driving on a bridge (env === 'bridge'),
+    // so monumental suspension bridge spans and expansion joints are never cut mid-crossing.
     const curSegIdx = Math.floor(position / track.segmentLength);
-    const bridgeLookaheadSegs = Math.min(track.segments.length, curSegIdx + drawDistSegs);
-    for (let s = Math.max(0, curSegIdx); s < bridgeLookaheadSegs; s += 8) {
-      if (track.segments[s]!.env === 'bridge') {
-        return 0;
-      }
+    if (track.segments[curSegIdx]?.env === 'bridge') {
+      return 0;
     }
 
     const audioBarFloat = audioBeatIndex / 4;

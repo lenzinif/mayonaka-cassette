@@ -151,6 +151,36 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
     }
   });
 
+  it('collides with Band A chevrons using narrow single-post half-width (0.14)', () => {
+    const track = buildTestTrack();
+    const seg = track.segments[10]!;
+    const z = 10 * track.segmentLength;
+
+    seg.sprites = [{ kind: 'chevron', offset: 1.3, variant: 0 }];
+    const tm = new TrafficManager();
+
+    // Distance 0.16 > 0.14 -> no hit
+    const carMiss = new PlayerCar();
+    carMiss.x = 1.3 - 0.16;
+    carMiss.speed = tuning.maxSpeed * 0.8;
+    const missEvents: CollisionEvent[] = [];
+    tm.update(1 / 120, track, carMiss, z - 100, z + 10, (e) => missEvents.push(e));
+    expect(missEvents).toHaveLength(0);
+
+    // Distance 0.10 < 0.14 -> hit!
+    const carHit = new PlayerCar();
+    carHit.x = 1.3 - 0.10;
+    carHit.speed = tuning.maxSpeed * 0.8;
+    const hitEvents: CollisionEvent[] = [];
+    tm.update(1 / 120, track, carHit, z - 100, z + 10, (e) => hitEvents.push(e));
+    expect(hitEvents).toHaveLength(1);
+    const hitEv = hitEvents[0];
+    expect(hitEv?.obstacle).toBe('prop');
+    if (hitEv?.obstacle === 'prop') {
+      expect(hitEv.propKind).toBe('chevron');
+    }
+  });
+
   it('translates visible trucks by deltaZ without pop-in during an A2 horizon stitch', () => {
     const track = buildTestTrack();
     const tm = new TrafficManager();

@@ -1,4 +1,18 @@
+import type { SceneryTheme } from './palette';
 import type { PropKind } from './RoadSegment';
+
+// ---------------------------------------------------------------------------
+// Biome Scenery Theme State (Fase 5, zero GC)
+// ---------------------------------------------------------------------------
+let activePropTheme: SceneryTheme | null = null;
+
+export function setPropTheme(theme?: SceneryTheme | null): void {
+  activePropTheme = theme ?? null;
+}
+
+export function getPropTheme(): SceneryTheme | null {
+  return activePropTheme;
+}
 
 // ---------------------------------------------------------------------------
 // Static Color Palettes (AGENTS.md §4.3: ZERO GC allocations per frame)
@@ -7,6 +21,30 @@ const PALM_TRUNK = '#3a1d5c';
 const PALM_TRUNK_LIGHT = '#6c34a3';
 const PALM_LEAVES = ['#14f1d9', '#ff3cac', '#7b5cff'] as const;
 const PALM_LEAF_SHADE = ['#08877a', '#a31564', '#43248a'] as const;
+
+// Japanese City Street Tree (Ginkgo / Zelkova)
+const STREET_TREE_PLANTER = '#231e33';
+const STREET_TREE_PLANTER_RIM = '#42395c';
+const STREET_TREE_GROUND_GLOW = 'rgba(255, 235, 150, 0.22)';
+const STREET_TREE_TRUNK = '#2a1e38';
+const STREET_TREE_TRUNK_LIGHT = '#4c3963';
+const STREET_TREE_CROWN_BODY = ['#ffd166', '#06d6a0', '#ff3cac'] as const;
+const STREET_TREE_CROWN_SHADE = ['#9e5f0d', '#085f52', '#6b0f44'] as const;
+const STREET_TREE_CROWN_RIM = ['#fff3b0', '#bbf7d0', '#ffc2e2'] as const;
+
+// Japanese Mountain Pine / Cedar (Kuromatsu / Touge Pine)
+const PINE_TRUNK = '#1b1226';
+const PINE_TRUNK_LIGHT = '#38284d';
+const PINE_CROWN_BODY = ['#1e4d38', '#16384c', '#2d472c'] as const;
+const PINE_CROWN_SHADE = ['#0a1f16', '#091824', '#0f2111'] as const;
+const PINE_CROWN_RIM = ['#80ffdb', '#e0fbfc', '#ffd166'] as const;
+
+const PINE_TIERS = [
+  [0.42, 2300, 420, 0.25],
+  [0.6, 1950, 390, -0.22],
+  [0.76, 1500, 350, 0.15],
+  [0.93, 1000, 320, 0.05],
+] as const;
 
 const LAMP_POLE = '#3d3358';
 const LAMP_POLE_EDGE = '#6e5f94';
@@ -173,6 +211,337 @@ function drawPalm(
       ctx.fillStyle = leafColor;
       ctx.fillRect(bx, py - 1, blockW, Math.max(1, blockH - 1));
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 1b. JAPANESE CITY STREET TREE (Ginkgo / Zelkova with Sidewalk Planter & Street Glow)
+// ---------------------------------------------------------------------------
+export function drawStreetTree(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  side: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const h = 2800 * ppu;
+  const rx = Math.round(x);
+  const ry = Math.round(y);
+  const topY = Math.round(y - h);
+
+  const v = Math.abs(Math.floor(variant)) % STREET_TREE_CROWN_BODY.length;
+  const crownBody = STREET_TREE_CROWN_BODY[v]!;
+  const crownShade = STREET_TREE_CROWN_SHADE[v]!;
+  const crownRim = STREET_TREE_CROWN_RIM[v]!;
+
+  // Distant Low LOD: compact 2-rect silhouette for distant city verge
+  if (h < 12) {
+    const trunkW = 1;
+    const crownW = Math.max(2, Math.round(h * 0.7));
+    const crownH = Math.max(2, Math.round(h * 0.65));
+    ctx.fillStyle = STREET_TREE_TRUNK;
+    ctx.fillRect(rx, Math.round(y - h * 0.45), trunkW, Math.round(h * 0.45));
+    ctx.fillStyle = crownShade;
+    ctx.fillRect(Math.round(x - crownW * 0.5), topY + 1, crownW, crownH);
+    ctx.fillStyle = crownBody;
+    ctx.fillRect(Math.round(x - crownW * 0.5), topY, crownW, Math.max(1, crownH - 1));
+    return;
+  }
+
+  // 1. Sidewalk Planter Curb & Ground Light Ring (cast by street lamps / car lights)
+  const planterW = Math.max(4, Math.round(540 * ppu));
+  const planterH = Math.max(2, Math.round(70 * ppu));
+  const glowW = Math.round(planterW * 1.7);
+
+  // Street ambient glow pool under tree
+  ctx.fillStyle = STREET_TREE_GROUND_GLOW;
+  ctx.fillRect(
+    Math.round(x - glowW * 0.5),
+    ry - 1,
+    glowW,
+    Math.max(2, Math.round(planterH * 0.8)),
+  );
+
+  // Planter concrete box
+  const planterLeft = Math.round(x - planterW * 0.5);
+  const planterTop = ry - planterH;
+  ctx.fillStyle = STREET_TREE_PLANTER;
+  ctx.fillRect(planterLeft, planterTop, planterW, planterH);
+
+  // Concrete curb highlight rim
+  ctx.fillStyle = STREET_TREE_PLANTER_RIM;
+  ctx.fillRect(planterLeft, planterTop, planterW, 1);
+
+  // Soil / tree grate inner inset
+  if (planterW >= 8) {
+    const grateW = Math.round(planterW * 0.75);
+    ctx.fillStyle = '#110b1a';
+    ctx.fillRect(Math.round(x - grateW * 0.5), planterTop + 1, grateW, Math.max(1, planterH - 1));
+  }
+
+  // 2. Trunk & Branch Forks
+  const trunkW = Math.max(2, Math.round(110 * ppu));
+  const trunkH = Math.max(4, Math.round(h * 0.42));
+  const trunkX = Math.round(x - trunkW * 0.5);
+  const trunkY = ry - planterH - trunkH;
+
+  // Trunk body
+  ctx.fillStyle = STREET_TREE_TRUNK;
+  ctx.fillRect(trunkX, trunkY, trunkW, trunkH);
+
+  // Trunk light edge facing the road (using `side`)
+  if (trunkW >= 3) {
+    ctx.fillStyle = STREET_TREE_TRUNK_LIGHT;
+    const hiW = Math.max(1, Math.round(trunkW * 0.35));
+    const hiX = side < 0 ? trunkX + trunkW - hiW : trunkX;
+    ctx.fillRect(hiX, trunkY, hiW, trunkH);
+  }
+
+  // Branch forks into lower canopy
+  if (trunkW >= 4) {
+    ctx.fillStyle = STREET_TREE_TRUNK;
+    const bW = Math.max(2, Math.round(trunkW * 0.6));
+    const bH = Math.max(2, Math.round(trunkW * 0.8));
+    ctx.fillRect(Math.round(x - trunkW * 1.2), trunkY - bH + 1, bW, bH);
+    ctx.fillRect(Math.round(x + trunkW * 0.6), trunkY - bH + 1, bW, bH);
+  }
+
+  // 3. Rounded Crown (Ginkgo / Zelkova multi-dome canopy)
+  const crownW = Math.max(6, Math.round(2200 * ppu));
+  const crownH = Math.max(5, Math.round(1800 * ppu));
+  const crownTop = ry - h;
+  const crownLeft = Math.round(x - crownW * 0.5);
+
+  // Low LOD crown (< 24px wide)
+  if (crownW < 24) {
+    ctx.fillStyle = crownShade;
+    ctx.fillRect(crownLeft, Math.round(crownTop + crownH * 0.35), crownW, Math.round(crownH * 0.65));
+    ctx.fillStyle = crownBody;
+    ctx.fillRect(crownLeft + 1, crownTop, Math.max(1, crownW - 2), Math.round(crownH * 0.65));
+    ctx.fillStyle = crownRim;
+    ctx.fillRect(Math.round(x - crownW * 0.25), crownTop, Math.round(crownW * 0.5), 1);
+    return;
+  }
+
+  // Full detailed multi-dome zelkova crown:
+  // Lower deep shadow underside
+  ctx.fillStyle = crownShade;
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.08),
+    Math.round(crownTop + crownH * 0.45),
+    Math.round(crownW * 0.84),
+    Math.round(crownH * 0.55),
+  );
+  // Left and right lower rounded lobes (shadow)
+  ctx.fillRect(
+    crownLeft,
+    Math.round(crownTop + crownH * 0.35),
+    Math.round(crownW * 0.35),
+    Math.round(crownH * 0.45),
+  );
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.65),
+    Math.round(crownTop + crownH * 0.35),
+    Math.round(crownW * 0.35),
+    Math.round(crownH * 0.45),
+  );
+
+  // Main illuminated foliage body
+  ctx.fillStyle = crownBody;
+  // Central dome
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.15),
+    crownTop,
+    Math.round(crownW * 0.7),
+    Math.round(crownH * 0.7),
+  );
+  // Left illuminated shoulder lobe
+  ctx.fillRect(
+    crownLeft,
+    Math.round(crownTop + crownH * 0.2),
+    Math.round(crownW * 0.4),
+    Math.round(crownH * 0.45),
+  );
+  // Right illuminated shoulder lobe
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.6),
+    Math.round(crownTop + crownH * 0.2),
+    Math.round(crownW * 0.4),
+    Math.round(crownH * 0.45),
+  );
+  // Upper central rounded crest
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.28),
+    crownTop - Math.max(1, Math.round(crownH * 0.08)),
+    Math.round(crownW * 0.44),
+    Math.round(crownH * 0.3),
+  );
+
+  // Top highlight rims catching streetlamp glow
+  ctx.fillStyle = crownRim;
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.32),
+    crownTop - Math.max(1, Math.round(crownH * 0.08)),
+    Math.round(crownW * 0.36),
+    Math.max(1, Math.round(2 * ppu)),
+  );
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.08),
+    Math.round(crownTop + crownH * 0.2),
+    Math.round(crownW * 0.22),
+    1,
+  );
+  ctx.fillRect(
+    Math.round(crownLeft + crownW * 0.7),
+    Math.round(crownTop + crownH * 0.2),
+    Math.round(crownW * 0.22),
+    1,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 1c. JAPANESE MOUNTAIN PINE / CEDAR (Kuromatsu with Tiered Cloud Pads & Moonlight Rim)
+// ---------------------------------------------------------------------------
+export function drawPine(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  side: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const h = 3200 * ppu;
+  const rx = Math.round(x);
+  const ry = Math.round(y);
+  const topY = Math.round(y - h);
+
+  const v = Math.abs(Math.floor(variant)) % PINE_CROWN_BODY.length;
+  const pineBody = PINE_CROWN_BODY[v]!;
+  const pineShade = PINE_CROWN_SHADE[v]!;
+  const pineRim = PINE_CROWN_RIM[v]!;
+
+  // Distant Low LOD: stepped pagoda/triangle silhouette for far touge hillside
+  if (h < 12) {
+    const trunkW = 1;
+    ctx.fillStyle = PINE_TRUNK;
+    ctx.fillRect(rx, topY + Math.round(h * 0.5), trunkW, Math.round(h * 0.5));
+    // Tier 1
+    const w1 = Math.max(2, Math.round(h * 0.7));
+    ctx.fillStyle = pineShade;
+    ctx.fillRect(Math.round(x - w1 * 0.5), topY + Math.round(h * 0.5), w1, Math.round(h * 0.25));
+    // Tier 2
+    const w2 = Math.max(2, Math.round(h * 0.45));
+    ctx.fillStyle = pineBody;
+    ctx.fillRect(Math.round(x - w2 * 0.5), topY + Math.round(h * 0.25), w2, Math.round(h * 0.25));
+    // Apex
+    const w3 = Math.max(1, Math.round(h * 0.2));
+    ctx.fillStyle = pineRim;
+    ctx.fillRect(Math.round(x - w3 * 0.5), topY, w3, Math.round(h * 0.25));
+    return;
+  }
+
+  // 1. Root flare base & rocky ground shadow
+  const rootW = Math.max(3, Math.round(280 * ppu));
+  ctx.fillStyle = 'rgba(8, 3, 18, 0.55)';
+  ctx.fillRect(
+    Math.round(x - rootW * 0.7),
+    ry - 1,
+    Math.round(rootW * 1.4),
+    Math.max(1, Math.round(rootW * 0.22)),
+  );
+
+  // 2. Gnarled / Curving Pine Trunk (windswept towards road or mountain slope)
+  const leanDir = variant % 2 === 0 ? (side < 0 ? 1 : -1) : (side < 0 ? -1 : 1);
+  const lean = 320 * ppu * leanDir;
+  const trunkW = Math.max(2, Math.round(115 * ppu));
+
+  // Trunk sections visible up through the tiered canopy
+  const segs = 3;
+  for (let s = 0; s < segs; s++) {
+    const t0 = s / segs;
+    const t1 = (s + 1) / segs;
+    const x0 = x + lean * t0 * 0.6;
+    const y0 = ry - h * 0.75 * t0;
+    const x1 = x + lean * t1 * 0.6;
+    const y1 = ry - h * 0.75 * t1;
+    const w = Math.max(1, trunkW * (1.1 - t0 * 0.35));
+
+    ctx.fillStyle = PINE_TRUNK;
+    ctx.beginPath();
+    ctx.moveTo(x0 - w * 0.5, y0);
+    ctx.lineTo(x1 - w * 0.5, y1);
+    ctx.lineTo(x1 + w * 0.5, y1);
+    ctx.lineTo(x0 + w * 0.5, y0);
+    ctx.closePath();
+    ctx.fill();
+
+    // Trunk highlight edge
+    if (w >= 3) {
+      ctx.fillStyle = PINE_TRUNK_LIGHT;
+      const hw = Math.max(1, Math.round(w * 0.3));
+      ctx.fillRect(
+        side < 0 ? Math.round(x0 + w * 0.2) : Math.round(x0 - w * 0.5),
+        Math.round(y1),
+        hw,
+        Math.max(1, Math.round(y0 - y1 + 1)),
+      );
+    }
+  }
+
+  // 3. 4 Tiered Horizontal Cloud Pads (Classic Japanese Niwaki Pagoda tiers)
+  for (let i = 0; i < PINE_TIERS.length; i++) {
+    const tier = PINE_TIERS[i]!;
+    const relY = tier[0];
+    const spanW = tier[1];
+    const spanH = tier[2];
+    const xShift = tier[3] * leanDir;
+
+    const padW = Math.max(4, Math.round(spanW * ppu));
+    const padH = Math.max(3, Math.round(spanH * ppu));
+    const padX = Math.round(x + lean * relY * 0.6 + padW * xShift);
+    const padY = Math.round(ry - h * relY);
+    const padLeft = Math.round(padX - padW * 0.5);
+
+    // Deep shadow underside of the cloud tier
+    ctx.fillStyle = pineShade;
+    ctx.fillRect(
+      padLeft,
+      Math.round(padY - padH * 0.35),
+      padW,
+      Math.round(padH * 0.65),
+    );
+
+    // Dense pine needle foliage body with stepped serrated ends
+    ctx.fillStyle = pineBody;
+    const bodyInsetX = Math.max(1, Math.round(padW * 0.06));
+    ctx.fillRect(
+      padLeft + bodyInsetX,
+      Math.round(padY - padH * 0.85),
+      padW - bodyInsetX * 2,
+      Math.round(padH * 0.65),
+    );
+    // Jagged needle tufts on side edges
+    if (padW >= 16) {
+      const tuftW = Math.max(2, Math.round(padW * 0.12));
+      const tuftH = Math.max(1, Math.round(padH * 0.3));
+      ctx.fillRect(padLeft, Math.round(padY - padH * 0.5), tuftW, tuftH);
+      ctx.fillRect(padLeft + padW - tuftW, Math.round(padY - padH * 0.5), tuftW, tuftH);
+    }
+
+    // Glowing synthwave moonlight rim along the top needle tips
+    ctx.fillStyle = pineRim;
+    const rimW = Math.max(2, Math.round(padW * 0.65));
+    ctx.fillRect(
+      Math.round(padX - rimW * 0.5),
+      Math.round(padY - padH * 0.85),
+      rimW,
+      Math.max(1, Math.round(2 * ppu)),
+    );
   }
 }
 
@@ -1287,75 +1656,158 @@ function drawChevron(
   _side: number,
   variant = 0,
   beatPulse = 0,
+  beatIndex = 0,
 ): void {
   const isLeft = variant % 2 === 1;
-  const w = Math.max(5, Math.round(1800 * ppu));
-  const h = Math.max(4, Math.round(1100 * ppu));
-  const postH = Math.max(2, Math.round(700 * ppu));
-  const left = Math.round(x - w * 0.5);
+  const seq = Math.floor(variant / 2);
+  const k = ((beatIndex % 4) + 4) % 4;
+  const isChaseLit = seq % 4 === k && beatPulse > 0.15;
+
+  // Japanese-style delineator board (矢羽根): tall-ish single-arrow board on single post
+  const w = Math.max(5, Math.round(950 * ppu));
+  const h = Math.max(6, Math.round(1350 * ppu));
+  const postH = Math.max(3, Math.round(1200 * ppu));
+  const postW = Math.max(1, Math.round(75 * ppu));
+  const rx = Math.round(x);
+  const left = Math.round(rx - w * 0.5);
   const topY = Math.round(y - postH - h);
 
-  // Twin support posts
+  // Single steel support post
   ctx.fillStyle = '#26203a';
-  ctx.fillRect(Math.round(left + w * 0.2), y - postH, 1, postH);
-  ctx.fillRect(Math.round(left + w * 0.8), y - postH, 1, postH);
+  ctx.fillRect(Math.round(rx - postW * 0.5), y - postH, postW, postH);
+  // Post footing / guardrail clamp
+  ctx.fillStyle = '#140d24';
+  ctx.fillRect(Math.round(rx - postW * 1.2), y - 2, Math.max(3, Math.round(postW * 2.4)), 2);
 
   // Black sign board
   ctx.fillStyle = CHEVRON_BG;
   ctx.fillRect(left, topY, w, h);
 
-  // Neon trim (Cyan for Left turn, Magenta for Right turn)
-  ctx.fillStyle = isLeft ? CHEVRON_CYAN : CHEVRON_MAGENTA;
+  // Neon trim (Cyan for Left turn, Magenta for Right turn, White if chase-lit)
+  const neonColor = isChaseLit ? '#ffffff' : isLeft ? CHEVRON_CYAN : CHEVRON_MAGENTA;
+  ctx.fillStyle = neonColor;
   ctx.fillRect(left, topY, w, 1);
   ctx.fillRect(left, topY + h - 1, w, 1);
+  ctx.fillRect(left, topY, 1, h);
+  ctx.fillRect(left + w - 1, topY, 1, h);
 
-  // 3 Directional Chevron Arrows (<<< left turn, >>> right turn)
-  const isPulse = beatPulse > 0.4;
-  const arrowW = Math.max(1, Math.round(w * 0.18));
-  const arrowH = Math.max(2, Math.round(h * 0.65));
-  const arrowY = topY + Math.round((h - arrowH) * 0.5);
+  // Big Single Japanese-style Chevron Arrow (矢羽根)
+  const arrowPadX = Math.max(1, Math.round(w * 0.16));
+  const arrowPadY = Math.max(1, Math.round(h * 0.18));
+  const thick = Math.max(1, Math.round(w * 0.28));
+  const cy = topY + Math.round(h * 0.5);
 
-  ctx.fillStyle = isPulse ? '#ffffff' : isLeft ? CHEVRON_CYAN : CHEVRON_MAGENTA;
+  ctx.beginPath();
+  if (!isLeft) {
+    // Arrow pointing RIGHT (>)
+    const tipX = left + w - arrowPadX;
+    const baseOuterX = left + arrowPadX;
+    const baseInnerX = baseOuterX + thick;
+    const innerTipX = tipX - thick;
 
-  for (let c = 0; c < 3; c++) {
-    const ax = left + Math.round(w * 0.15) + c * Math.round(w * 0.28);
-    if (!isLeft) {
-      // Right Chevron: >>>
-      ctx.fillRect(ax, arrowY, Math.max(1, Math.round(arrowW * 0.45)), arrowH);
-      ctx.fillRect(ax + Math.round(arrowW * 0.45), arrowY + Math.round(arrowH * 0.25), Math.max(1, Math.round(arrowW * 0.45)), Math.max(1, Math.round(arrowH * 0.5)));
-    } else {
-      // Left Chevron: <<<
-      ctx.fillRect(ax + Math.round(arrowW * 0.45), arrowY, Math.max(1, Math.round(arrowW * 0.45)), arrowH);
-      ctx.fillRect(ax, arrowY + Math.round(arrowH * 0.25), Math.max(1, Math.round(arrowW * 0.45)), Math.max(1, Math.round(arrowH * 0.5)));
-    }
+    ctx.moveTo(baseOuterX, topY + arrowPadY);
+    ctx.lineTo(baseInnerX, topY + arrowPadY);
+    ctx.lineTo(tipX, cy);
+    ctx.lineTo(baseInnerX, topY + h - arrowPadY);
+    ctx.lineTo(baseOuterX, topY + h - arrowPadY);
+    ctx.lineTo(innerTipX, cy);
+  } else {
+    // Arrow pointing LEFT (<)
+    const tipX = left + arrowPadX;
+    const baseOuterX = left + w - arrowPadX;
+    const baseInnerX = baseOuterX - thick;
+    const innerTipX = tipX + thick;
+
+    ctx.moveTo(baseOuterX, topY + arrowPadY);
+    ctx.lineTo(baseInnerX, topY + arrowPadY);
+    ctx.lineTo(tipX, cy);
+    ctx.lineTo(baseInnerX, topY + h - arrowPadY);
+    ctx.lineTo(baseOuterX, topY + h - arrowPadY);
+    ctx.lineTo(innerTipX, cy);
   }
+  ctx.closePath();
+  ctx.fill();
 }
 
 // ---------------------------------------------------------------------------
-// 10. POWER PYLON (Japanese Delta Transmission Tower with Overhead Cables)
+// 10. POWER PYLON (Japanese Delta Transmission Tower with Continuous Lines)
 // ---------------------------------------------------------------------------
+/**
+ * Computes the 5 insulator cable attachment points (x, y) for a power pylon in screen coordinates.
+ * Writes 10 values (x0, y0, ... x4, y4) into the provided Float32Array at `outOffset` (zero GC).
+ */
+export function getPylonAttachmentPoints(
+  x: number,
+  y: number,
+  ppu: number,
+  out: Float32Array,
+  outOffset = 0,
+  variant = 0,
+): void {
+  const isTerminal = variant === 1;
+  const h = Math.max(20, Math.round(10200 * ppu));
+  const baseW = Math.max(6, Math.round((isTerminal ? 3800 : 3400) * ppu));
+  const rx = Math.round(x);
+  const topY = Math.round(y - h);
+
+  const vTopY = Math.round(topY + h * 0.18);
+  const vTopW = Math.max(6, Math.round(baseW * 1.35));
+  const trussH = Math.max(2, Math.round(h * 0.04));
+  const hornSpanW = Math.max(10, Math.round(baseW * 1.95));
+  const hornTipY = Math.round(vTopY - h * 0.04);
+  const leftHornX = Math.round(rx - hornSpanW * 0.5);
+  const rightHornX = Math.round(rx + hornSpanW * 0.5);
+
+  const insH = Math.max(3, Math.round(h * 0.08));
+  const insAttachY = hornTipY + trussH;
+  const insAttachMidY = vTopY + trussH;
+
+  const insX1 = leftHornX + 2;
+  const insX2 = Math.round(rx - vTopW * 0.52);
+  const insX3 = rx;
+  const insX4 = Math.round(rx + vTopW * 0.52);
+  const insX5 = rightHornX - 2;
+
+  // Variant 1 (terminal/strain tower) has tensioned horizontal insulators; variant 0/2 hangs vertically
+  const yOffset = isTerminal ? Math.round(insH * 0.4) : insH;
+
+  out[outOffset] = insX1;
+  out[outOffset + 1] = insAttachY + yOffset;
+  out[outOffset + 2] = insX2;
+  out[outOffset + 3] = insAttachMidY + yOffset;
+  out[outOffset + 4] = insX3;
+  out[outOffset + 5] = insAttachMidY + yOffset;
+  out[outOffset + 6] = insX4;
+  out[outOffset + 7] = insAttachMidY + yOffset;
+  out[outOffset + 8] = insX5;
+  out[outOffset + 9] = insAttachY + yOffset;
+}
+
 function drawPylon(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   ppu: number,
+  variant = 0,
 ): void {
+  const isTerminal = variant === 1;
   const h = Math.max(20, Math.round(10200 * ppu));
-  const baseW = Math.max(6, Math.round(3400 * ppu));
+  const baseW = Math.max(6, Math.round((isTerminal ? 3800 : 3400) * ppu));
   const rx = Math.round(x);
   const topY = Math.round(y - h);
 
-  // Ground concrete footings
+  // Ground concrete footings (heavier for terminal anchor)
   ctx.fillStyle = '#140d24';
-  ctx.fillRect(Math.round(rx - baseW * 0.5), y - 2, baseW, 2);
+  const footH = isTerminal ? 3 : 2;
+  ctx.fillRect(Math.round(rx - baseW * 0.5), y - footH, baseW, footH);
 
   // Waist geometry (narrows at ~42% height from ground)
   const waistY = Math.round(y - h * 0.42);
-  const waistW = Math.max(2, Math.round(baseW * 0.38));
+  const waistW = Math.max(2, Math.round(baseW * (isTerminal ? 0.42 : 0.38)));
 
   ctx.fillStyle = PYLON_STEEL;
-  // Lower tapered legs (from ground to waist)
-  const legThick = Math.max(1, Math.round(baseW * 0.05));
+  // Lower tapered legs (from ground to waist) - slightly heavier for terminal/strain tower
+  const legThick = Math.max(1, Math.round(baseW * (isTerminal ? 0.08 : 0.05)));
   ctx.beginPath();
   // Left leg
   ctx.moveTo(Math.round(rx - baseW * 0.5), y);
@@ -1443,7 +1895,7 @@ function drawPylon(
   ctx.lineTo(Math.round(rx + vTopW * 0.5), vTopY);
   ctx.fill();
 
-  // --- HANGING INSULATOR STRINGS (5 attachment points) ---
+  // --- INSULATOR STRINGS (5 attachment points) ---
   const insH = Math.max(3, Math.round(h * 0.08));
   const insAttachY = hornTipY + trussH;
   const insAttachMidY = vTopY + trussH;
@@ -1454,76 +1906,41 @@ function drawPylon(
   const insX4 = Math.round(rx + vTopW * 0.52);
   const insX5 = rightHornX - 2;
 
-  // Draw insulator strings (porcelain mint/cyan)
-  ctx.fillStyle = '#80f5ec';
-  ctx.fillRect(insX1, insAttachY, 1, insH);
-  ctx.fillRect(insX2, insAttachMidY, 1, insH);
-  ctx.fillRect(insX3, insAttachMidY, 1, insH);
-  ctx.fillRect(insX4, insAttachMidY, 1, insH);
-  ctx.fillRect(insX5, insAttachY, 1, insH);
+  if (isTerminal) {
+    // Terminal variant (1): horizontal strain insulators (porcelain mint/cyan)
+    const strainW = Math.max(3, Math.round(insH * 1.1));
+    const insYOffset = Math.round(insH * 0.4);
+    ctx.fillStyle = '#80f5ec';
+    ctx.fillRect(insX1 - strainW, insAttachY + insYOffset, strainW, 2);
+    ctx.fillRect(insX2 - strainW, insAttachMidY + insYOffset, strainW, 2);
+    ctx.fillRect(insX3 - Math.round(strainW * 0.5), insAttachMidY + insYOffset, strainW, 2);
+    ctx.fillRect(insX4, insAttachMidY + insYOffset, strainW, 2);
+    ctx.fillRect(insX5, insAttachY + insYOffset, strainW, 2);
 
-  // Insulator bottom metal clamps
-  ctx.fillStyle = '#50426b';
-  ctx.fillRect(insX1 - 1, insAttachY + insH, 3, 1);
-  ctx.fillRect(insX2 - 1, insAttachMidY + insH, 3, 1);
-  ctx.fillRect(insX3 - 1, insAttachMidY + insH, 3, 1);
-  ctx.fillRect(insX4 - 1, insAttachMidY + insH, 3, 1);
-  ctx.fillRect(insX5 - 1, insAttachY + insH, 3, 1);
-
-  // --- HIGH VOLTAGE TRANSMISSION LINES (Cables spanning horizontally across the sky) ---
-  ctx.strokeStyle = '#2d1c4a';
-  ctx.lineWidth = 1;
-  const cableSpan = Math.max(40, Math.round(baseW * 2.8));
-
-  // Wire 1: Far left
-  ctx.beginPath();
-  ctx.moveTo(insX1 - cableSpan, insAttachY + insH - Math.round(h * 0.03));
-  if (typeof ctx.quadraticCurveTo === 'function') {
-    ctx.quadraticCurveTo(insX1 - cableSpan * 0.5, insAttachY + insH + 2, insX1, insAttachY + insH);
+    // Insulator metal tension clamps
+    ctx.fillStyle = '#50426b';
+    ctx.fillRect(insX1 - 1, insAttachY + insYOffset, 2, 2);
+    ctx.fillRect(insX2 - 1, insAttachMidY + insYOffset, 2, 2);
+    ctx.fillRect(insX3 - 1, insAttachMidY + insYOffset, 2, 2);
+    ctx.fillRect(insX4 - 1, insAttachMidY + insYOffset, 2, 2);
+    ctx.fillRect(insX5 - 1, insAttachY + insYOffset, 2, 2);
   } else {
-    ctx.lineTo(insX1, insAttachY + insH);
-  }
-  ctx.stroke();
+    // Suspension variants (0 & 2): hanging vertical insulator strings
+    ctx.fillStyle = '#80f5ec';
+    ctx.fillRect(insX1, insAttachY, 1, insH);
+    ctx.fillRect(insX2, insAttachMidY, 1, insH);
+    ctx.fillRect(insX3, insAttachMidY, 1, insH);
+    ctx.fillRect(insX4, insAttachMidY, 1, insH);
+    ctx.fillRect(insX5, insAttachY, 1, insH);
 
-  // Wire 2: Mid left
-  ctx.beginPath();
-  ctx.moveTo(insX2 - cableSpan, insAttachMidY + insH - Math.round(h * 0.03));
-  if (typeof ctx.quadraticCurveTo === 'function') {
-    ctx.quadraticCurveTo(insX2 - cableSpan * 0.5, insAttachMidY + insH + 2, insX2, insAttachMidY + insH);
-  } else {
-    ctx.lineTo(insX2, insAttachMidY + insH);
+    // Insulator bottom metal clamps
+    ctx.fillStyle = '#50426b';
+    ctx.fillRect(insX1 - 1, insAttachY + insH, 3, 1);
+    ctx.fillRect(insX2 - 1, insAttachMidY + insH, 3, 1);
+    ctx.fillRect(insX3 - 1, insAttachMidY + insH, 3, 1);
+    ctx.fillRect(insX4 - 1, insAttachMidY + insH, 3, 1);
+    ctx.fillRect(insX5 - 1, insAttachY + insH, 3, 1);
   }
-  ctx.stroke();
-
-  // Wire 3: Center wire spanning through the V
-  ctx.beginPath();
-  ctx.moveTo(insX3 - cableSpan * 0.8, insAttachMidY + insH - Math.round(h * 0.02));
-  if (typeof ctx.quadraticCurveTo === 'function') {
-    ctx.quadraticCurveTo(insX3, insAttachMidY + insH + 3, insX3 + cableSpan * 0.8, insAttachMidY + insH - Math.round(h * 0.02));
-  } else {
-    ctx.lineTo(insX3 + cableSpan * 0.8, insAttachMidY + insH - Math.round(h * 0.02));
-  }
-  ctx.stroke();
-
-  // Wire 4: Mid right
-  ctx.beginPath();
-  ctx.moveTo(insX4, insAttachMidY + insH);
-  if (typeof ctx.quadraticCurveTo === 'function') {
-    ctx.quadraticCurveTo(insX4 + cableSpan * 0.5, insAttachMidY + insH + 2, insX4 + cableSpan, insAttachMidY + insH - Math.round(h * 0.03));
-  } else {
-    ctx.lineTo(insX4 + cableSpan, insAttachMidY + insH - Math.round(h * 0.03));
-  }
-  ctx.stroke();
-
-  // Wire 5: Far right
-  ctx.beginPath();
-  ctx.moveTo(insX5, insAttachY + insH);
-  if (typeof ctx.quadraticCurveTo === 'function') {
-    ctx.quadraticCurveTo(insX5 + cableSpan * 0.5, insAttachY + insH + 2, insX5 + cableSpan, insAttachY + insH - Math.round(h * 0.03));
-  } else {
-    ctx.lineTo(insX5 + cableSpan, insAttachY + insH - Math.round(h * 0.03));
-  }
-  ctx.stroke();
 
   // Top Pinnacle Aviation Warning Red Beacon
   ctx.fillStyle = PYLON_BEACON;
@@ -1545,6 +1962,16 @@ function drawShrub(
   const isTiered = variant % 2 === 1;
   const v = variant % SHRUB_BODY.length;
 
+  const bodyColor = activePropTheme ? activePropTheme.shrubTint[0] : SHRUB_BODY[v]!;
+  const shadeColor = activePropTheme ? activePropTheme.shrubTint[1] : SHRUB_SHADE[v]!;
+  const accentColor = activePropTheme
+    ? activePropTheme.shrubTint[2]
+    : v === 0
+      ? '#ff007f'
+      : v === 1
+        ? '#00f5d4'
+        : '#ffd166';
+
   if (!isTiered) {
     // --- Silhouette A: Low Broad Roadside Hedge / Dome Bush ---
     const w = Math.max(3, Math.round(1400 * ppu));
@@ -1557,11 +1984,11 @@ function drawShrub(
     ctx.fillRect(left - 1, y - 1, w + 2, Math.max(1, Math.round(h * 0.3)));
 
     // Lower deep shadow cluster
-    ctx.fillStyle = SHRUB_SHADE[v]!;
+    ctx.fillStyle = shadeColor;
     ctx.fillRect(left, topY + Math.round(h * 0.35), w, Math.round(h * 0.65));
 
     // Upper illuminated foliage domes
-    ctx.fillStyle = SHRUB_BODY[v]!;
+    ctx.fillStyle = bodyColor;
     ctx.fillRect(left + Math.round(w * 0.15), topY, Math.round(w * 0.7), Math.round(h * 0.65));
     ctx.fillRect(left, topY + Math.round(h * 0.25), Math.round(w * 0.45), Math.round(h * 0.5));
     ctx.fillRect(left + Math.round(w * 0.55), topY + Math.round(h * 0.25), Math.round(w * 0.45), Math.round(h * 0.5));
@@ -1590,22 +2017,22 @@ function drawShrub(
     const lowerW = Math.max(2, Math.round(w * 0.55));
     const lowerH = Math.max(2, Math.round(h * 0.35));
     const lowerY = Math.round(y - h * 0.55);
-    ctx.fillStyle = SHRUB_SHADE[v]!;
+    ctx.fillStyle = shadeColor;
     ctx.fillRect(left, lowerY + Math.round(lowerH * 0.3), lowerW, Math.round(lowerH * 0.7));
-    ctx.fillStyle = SHRUB_BODY[v]!;
+    ctx.fillStyle = bodyColor;
     ctx.fillRect(left + 1, lowerY, lowerW - 2, Math.round(lowerH * 0.6));
 
     // Upper Tier Foliage Pad (Right/Center side)
     const upperW = Math.max(2, Math.round(w * 0.65));
     const upperH = Math.max(2, Math.round(h * 0.42));
     const upperX = Math.round(x - w * 0.15);
-    ctx.fillStyle = SHRUB_SHADE[v]!;
+    ctx.fillStyle = shadeColor;
     ctx.fillRect(upperX, topY + Math.round(upperH * 0.3), upperW, Math.round(upperH * 0.7));
-    ctx.fillStyle = SHRUB_BODY[v]!;
+    ctx.fillStyle = bodyColor;
     ctx.fillRect(upperX + 1, topY, upperW - 2, Math.round(upperH * 0.6));
 
     // Vibrant flowering blossoms / synthwave highlight tips
-    ctx.fillStyle = v === 0 ? '#ff007f' : v === 1 ? '#00f5d4' : '#ffd166';
+    ctx.fillStyle = accentColor;
     ctx.fillRect(upperX + Math.round(upperW * 0.3), topY, Math.max(1, Math.round(upperW * 0.35)), 1);
     ctx.fillRect(left + Math.round(lowerW * 0.3), lowerY, Math.max(1, Math.round(lowerW * 0.35)), 1);
   }
@@ -1765,6 +2192,380 @@ function drawSign(
 }
 
 // ---------------------------------------------------------------------------
+// 15. ROADSIDE SHOP KIOSK (Baiten / Kiosk)
+// ---------------------------------------------------------------------------
+function drawKiosk(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  _side: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const w = Math.max(6, Math.round(2800 * ppu));
+  const h = Math.max(8, Math.round(2600 * ppu));
+  const left = Math.round(x - w * 0.5);
+  const topY = Math.round(y - h);
+  const v = Math.abs(variant) % 3;
+
+  // Warm ground light pool
+  if (w >= 8) {
+    ctx.fillStyle = 'rgba(255, 200, 100, 0.25)';
+    ctx.fillRect(left - 4, y - 2, w + 8, Math.max(2, Math.round(h * 0.1)));
+  }
+
+  // Building facade body
+  ctx.fillStyle = v === 1 ? '#1c1230' : '#140c22';
+  ctx.fillRect(left, topY, w, h);
+
+  // Awning (slanted/overhanging canopy roof)
+  const awH = Math.max(2, Math.round(h * 0.22));
+  const awY = topY + Math.max(1, Math.round(h * 0.1));
+  const awOverhang = Math.max(1, Math.round(w * 0.06));
+  const awLeft = left - awOverhang;
+  const awW = w + awOverhang * 2;
+
+  // Awning body and vibrant striped accents
+  ctx.fillStyle = v === 0 ? '#ff007f' : v === 1 ? '#00bbf9' : '#ffaa00';
+  ctx.fillRect(awLeft, awY, awW, awH);
+
+  if (w >= 14 && awH >= 4) {
+    // White awning stripes
+    ctx.fillStyle = '#ffffff';
+    const stripeW = Math.max(2, Math.round(awW * 0.12));
+    const stripeCount = Math.floor(awW / (stripeW * 2));
+    for (let i = 0; i < stripeCount; i++) {
+      ctx.fillRect(awLeft + i * (stripeW * 2), awY, stripeW, awH);
+    }
+  }
+
+  // Lit service window & counter
+  const winPadX = Math.max(2, Math.round(w * 0.12));
+  const winW = Math.max(3, w - winPadX * 2);
+  const winH = Math.max(3, Math.round(h * 0.38));
+  const winY = awY + awH + Math.max(1, Math.round(h * 0.04));
+
+  ctx.fillStyle = '#fff4cc';
+  ctx.fillRect(left + winPadX, winY, winW, winH);
+
+  // Counter shelf sill & goods
+  if (winW >= 10 && winH >= 6) {
+    ctx.fillStyle = '#1c0f2e';
+    ctx.fillRect(left + winPadX, winY + winH - Math.max(2, Math.round(winH * 0.3)), winW, Math.max(2, Math.round(winH * 0.3)));
+    // Goods on display
+    ctx.fillStyle = '#ff2a6d';
+    ctx.fillRect(left + winPadX + 2, winY + winH - Math.max(4, Math.round(winH * 0.6)), Math.max(2, Math.round(winW * 0.25)), Math.max(2, Math.round(winH * 0.3)));
+    ctx.fillStyle = '#05d9e8';
+    ctx.fillRect(left + winPadX + Math.round(winW * 0.4), winY + winH - Math.max(4, Math.round(winH * 0.5)), Math.max(2, Math.round(winW * 0.25)), Math.max(2, Math.round(winH * 0.2)));
+  }
+
+  // Top header sign plate
+  const signH = Math.max(2, Math.round(h * 0.1));
+  ctx.fillStyle = '#ff0055';
+  ctx.fillRect(left + 2, topY, w - 4, signH);
+  if (w >= 12 && signH >= 3) {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(left + 4, topY + 1, w - 8, Math.max(1, signH - 2));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 16. ROADSIDE BENCH
+// ---------------------------------------------------------------------------
+function drawBench(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const w = Math.max(4, Math.round(1300 * ppu));
+  const h = Math.max(3, Math.round(750 * ppu));
+  const left = Math.round(x - w * 0.5);
+  const topY = Math.round(y - h);
+  const v = Math.abs(variant) % 3;
+
+  // Ground shadow
+  ctx.fillStyle = 'rgba(8, 2, 20, 0.45)';
+  ctx.fillRect(left - 1, y - 1, w + 2, Math.max(1, Math.round(h * 0.18)));
+
+  // Steel legs and supports
+  ctx.fillStyle = '#100d1c';
+  const legW = Math.max(1, Math.round(w * 0.08));
+  ctx.fillRect(left + Math.round(w * 0.12), topY, legW, h);
+  ctx.fillRect(left + Math.round(w * 0.88) - legW, topY, legW, h);
+
+  // Slats (seat + backrest)
+  const slatColor = v === 1 ? '#0077b6' : v === 2 ? '#2a9d8f' : '#8d5b4c';
+  ctx.fillStyle = slatColor;
+
+  // Backrest horizontal beam
+  const backH = Math.max(1, Math.round(h * 0.32));
+  ctx.fillRect(left, topY, w, backH);
+
+  // Seat horizontal slab
+  const seatH = Math.max(1, Math.round(h * 0.22));
+  const seatY = y - Math.max(2, Math.round(h * 0.48));
+  ctx.fillRect(left, seatY, w, seatH);
+}
+
+// ---------------------------------------------------------------------------
+// 17. SUBURBAN BUS STOP SHELTER
+// ---------------------------------------------------------------------------
+function drawBusStop(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  side: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const w = Math.max(6, Math.round(2400 * ppu));
+  const h = Math.max(8, Math.round(2800 * ppu));
+  const left = Math.round(x - w * 0.5);
+  const topY = Math.round(y - h);
+
+  // Ground shadow & illuminated pool
+  ctx.fillStyle = 'rgba(0, 245, 212, 0.22)';
+  ctx.fillRect(left - 2, y - 2, w + 4, Math.max(2, Math.round(h * 0.08)));
+
+  // Dark steel posts
+  const postW = Math.max(1, Math.round(w * 0.05));
+  ctx.fillStyle = '#151224';
+  ctx.fillRect(left + Math.round(w * 0.08), topY, postW, h);
+  ctx.fillRect(left + Math.round(w * 0.82) - postW, topY, postW, h);
+
+  // Translucent glass back wall
+  ctx.fillStyle = 'rgba(0, 245, 212, 0.28)';
+  const glassY = topY + Math.max(2, Math.round(h * 0.12));
+  const glassH = Math.max(3, Math.round(h * 0.68));
+  ctx.fillRect(left + Math.round(w * 0.08), glassY, Math.round(w * 0.74), glassH);
+
+  // Canopy roof slab
+  const roofH = Math.max(2, Math.round(h * 0.1));
+  ctx.fillStyle = '#221a36';
+  ctx.fillRect(left, topY, Math.round(w * 0.88), roofH);
+
+  // Neon roof trim
+  const neonTrim = Math.abs(variant) % 2 === 0 ? '#ff007f' : '#00f5d4';
+  ctx.fillStyle = neonTrim;
+  ctx.fillRect(left, topY + Math.max(1, Math.round(roofH * 0.7)), Math.round(w * 0.88), 1);
+
+  // Integrated small waiting bench inside
+  ctx.fillStyle = '#0077b6';
+  const benchY = y - Math.max(2, Math.round(h * 0.35));
+  ctx.fillRect(left + Math.round(w * 0.15), benchY, Math.round(w * 0.5), Math.max(1, Math.round(h * 0.08)));
+
+  // Bus stop pole & illuminated timetable sign (facing road edge)
+  const poleX = side < 0 ? left + Math.round(w * 0.08) : left + Math.round(w * 0.92);
+  const poleW = Math.max(1, Math.round(w * 0.04));
+  ctx.fillStyle = '#151224';
+  ctx.fillRect(poleX, topY + Math.round(h * 0.1), poleW, Math.round(h * 0.9));
+
+  // Lit timetable board
+  const boardW = Math.max(3, Math.round(w * 0.18));
+  const boardH = Math.max(4, Math.round(h * 0.3));
+  const boardX = poleX - Math.floor(boardW * 0.5);
+  const boardY = topY + Math.round(h * 0.35);
+
+  ctx.fillStyle = '#fff4cc';
+  ctx.fillRect(boardX, boardY, boardW, boardH);
+
+  // Timetable lines
+  if (boardW >= 6 && boardH >= 6) {
+    ctx.fillStyle = '#100d1c';
+    ctx.fillRect(boardX + 1, boardY + 2, boardW - 2, 1);
+    ctx.fillRect(boardX + 1, boardY + 4, boardW - 2, 1);
+  }
+
+  // Glowing round bus sign on top of the pole
+  const discR = Math.max(2, Math.round(w * 0.08));
+  const discY = topY + Math.round(h * 0.1);
+  ctx.fillStyle = '#00f5d4';
+  ctx.fillRect(poleX - discR + Math.floor(poleW * 0.5), discY - discR, discR * 2, discR * 2);
+}
+
+// ---------------------------------------------------------------------------
+// 18. HIGHWAY PARKING AREA CANOPY (PA Shelter)
+// ---------------------------------------------------------------------------
+function drawCanopy(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const w = Math.max(12, Math.round(4800 * ppu));
+  const h = Math.max(8, Math.round(2600 * ppu));
+  const left = Math.round(x - w * 0.5);
+  const topY = Math.round(y - h);
+  const v = Math.abs(variant) % 3;
+
+  // Illuminated bay under canopy
+  ctx.fillStyle = 'rgba(255, 255, 240, 0.18)';
+  ctx.fillRect(left, y - 2, w, Math.max(2, Math.round(h * 0.14)));
+
+  const roofH = Math.max(3, Math.round(h * 0.18));
+
+  // Steel structural pillars (3 pillars: left, center, right)
+  const postW = Math.max(1, Math.round(w * 0.03));
+  ctx.fillStyle = '#181326';
+  ctx.fillRect(left + Math.round(w * 0.08), topY + roofH, postW, h - roofH);
+  ctx.fillRect(left + Math.round(w * 0.5) - Math.floor(postW * 0.5), topY + roofH, postW, h - roofH);
+  ctx.fillRect(left + Math.round(w * 0.92) - postW, topY + roofH, postW, h - roofH);
+
+  // Roof slab body
+  ctx.fillStyle = '#251c3a';
+  ctx.fillRect(left, topY, w, roofH);
+
+  // Neon edge fascia
+  ctx.fillStyle = v === 0 ? '#00f5d4' : v === 1 ? '#ff007f' : '#ffd166';
+  ctx.fillRect(left, topY, w, Math.max(1, Math.round(roofH * 0.35)));
+
+  // Under-roof downlight strip
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(left + Math.round(w * 0.06), topY + roofH - 1, Math.round(w * 0.88), 1);
+}
+
+// ---------------------------------------------------------------------------
+// 19. SHINTO SHRINE TORII GATE (Torii)
+// ---------------------------------------------------------------------------
+function drawTorii(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const w = Math.max(6, Math.round(3000 * ppu));
+  const h = Math.max(8, Math.round(3400 * ppu));
+  const left = Math.round(x - w * 0.5);
+  const topY = Math.round(y - h);
+
+  // Ground shadow
+  ctx.fillStyle = 'rgba(8, 2, 20, 0.45)';
+  ctx.fillRect(left, y - 1, w, Math.max(2, Math.round(h * 0.08)));
+
+  const pillarW = Math.max(1, Math.round(w * 0.08));
+  const p1X = left + Math.round(w * 0.18);
+  const p2X = left + Math.round(w * 0.82) - pillarW;
+
+  // Black stone bases (Kamebara)
+  const baseH = Math.max(2, Math.round(h * 0.06));
+  ctx.fillStyle = '#0e0a18';
+  ctx.fillRect(p1X - 1, y - baseH, pillarW + 2, baseH);
+  ctx.fillRect(p2X - 1, y - baseH, pillarW + 2, baseH);
+
+  // Vermilion red pillars (Hashira)
+  const vermilion = Math.abs(variant) % 2 === 0 ? '#d90429' : '#e63946';
+  ctx.fillStyle = vermilion;
+  ctx.fillRect(p1X, topY + Math.round(h * 0.1), pillarW, h - baseH - Math.round(h * 0.1));
+  ctx.fillRect(p2X, topY + Math.round(h * 0.1), pillarW, h - baseH - Math.round(h * 0.1));
+
+  // Secondary crossbeam (Nuki)
+  const nukiY = topY + Math.round(h * 0.24);
+  const nukiH = Math.max(1, Math.round(h * 0.06));
+  ctx.fillStyle = '#ba0022';
+  ctx.fillRect(left + Math.round(w * 0.08), nukiY, Math.round(w * 0.84), nukiH);
+
+  // Upper main lintel (Kasagi & Shimaki)
+  const lintelH = Math.max(2, Math.round(h * 0.1));
+  ctx.fillStyle = vermilion;
+  ctx.fillRect(left, topY, w, lintelH);
+
+  // Black curved roof cap
+  ctx.fillStyle = '#100c1c';
+  ctx.fillRect(left - 1, topY - 1, w + 2, Math.max(1, Math.round(lintelH * 0.35)));
+
+  // Center plaque tablet (Gakuzuka)
+  if (w >= 12) {
+    const gakW = Math.max(2, Math.round(w * 0.06));
+    ctx.fillStyle = '#ffd166';
+    ctx.fillRect(Math.round(left + (w - gakW) * 0.5), topY + lintelH, gakW, nukiY - (topY + lintelH));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 20. SHINTO STONE LANTERN (Toro / Ishi-doro)
+// ---------------------------------------------------------------------------
+function drawToro(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  ppu: number,
+  variant: number,
+): void {
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+
+  const w = Math.max(3, Math.round(900 * ppu));
+  const h = Math.max(5, Math.round(1800 * ppu));
+  const left = Math.round(x - w * 0.5);
+
+  const isSlate = Math.abs(variant) % 2 === 1;
+  const stoneDark = isSlate ? '#1e1c28' : '#272233';
+  const stoneMed = isSlate ? '#383247' : '#443c54';
+  const stoneLight = isSlate ? '#564f69' : '#685f7d';
+
+  // Warm candle light pool on ground
+  if (w >= 4) {
+    ctx.fillStyle = 'rgba(255, 190, 11, 0.22)';
+    ctx.fillRect(left - 2, y - 1, w + 4, Math.max(2, Math.round(h * 0.09)));
+  }
+
+  // Stone base (Kiso)
+  const baseH = Math.max(1, Math.round(h * 0.12));
+  ctx.fillStyle = stoneDark;
+  ctx.fillRect(left + 1, y - baseH, w - 2, baseH);
+
+  // Post / column (Sao)
+  const postW = Math.max(1, Math.round(w * 0.35));
+  const postH = Math.max(2, Math.round(h * 0.34));
+  ctx.fillStyle = stoneMed;
+  ctx.fillRect(Math.round(left + (w - postW) * 0.5), y - baseH - postH, postW, postH);
+
+  // Middle platform (Chudai)
+  const midH = Math.max(1, Math.round(h * 0.08));
+  const midY = y - baseH - postH - midH;
+  ctx.fillStyle = stoneLight;
+  ctx.fillRect(left, midY, w, midH);
+
+  // Firebox light chamber (Hibukuro)
+  const fireH = Math.max(2, Math.round(h * 0.2));
+  const fireW = Math.max(2, Math.round(w * 0.65));
+  const fireY = midY - fireH;
+  const fireX = Math.round(left + (w - fireW) * 0.5);
+
+  ctx.fillStyle = stoneDark;
+  ctx.fillRect(fireX, fireY, fireW, fireH);
+
+  // Glowing lantern window
+  ctx.fillStyle = '#ffe066';
+  ctx.fillRect(fireX + 1, fireY + 1, Math.max(1, fireW - 2), Math.max(1, fireH - 2));
+
+  // Umbrella roof (Kasa)
+  const roofH = Math.max(2, Math.round(h * 0.16));
+  const roofY = fireY - roofH;
+  ctx.fillStyle = '#685f7d';
+  ctx.fillRect(left - 1, roofY + Math.round(roofH * 0.5), w + 2, Math.round(roofH * 0.5));
+  ctx.fillRect(left + 1, roofY, w - 2, Math.round(roofH * 0.5));
+
+  // Sacred jewel top (Hoju)
+  const hojuSize = Math.max(1, Math.round(w * 0.25));
+  ctx.fillStyle = '#443c54';
+  ctx.fillRect(Math.round(left + (w - hojuSize) * 0.5), roofY - hojuSize, hojuSize, hojuSize);
+}
+
+// ---------------------------------------------------------------------------
 // Main Router
 // ---------------------------------------------------------------------------
 export function drawProp(
@@ -1776,10 +2577,22 @@ export function drawProp(
   side: number,
   variant: number,
   beatPulse = 0,
+  beatIndex = 0,
 ): void {
+  // Abstract kinds fallback resolution if called directly without upstream resolution
+  if (kind === 'tree') {
+    kind = activePropTheme ? activePropTheme.tree : 'palm';
+  }
+
   switch (kind) {
     case 'palm':
       drawPalm(ctx, x, y, ppu, side, variant);
+      break;
+    case 'street-tree':
+      drawStreetTree(ctx, x, y, ppu, side, variant);
+      break;
+    case 'pine':
+      drawPine(ctx, x, y, ppu, side, variant);
       break;
     case 'lamp':
       drawLamp(ctx, x, y, ppu, side);
@@ -1809,16 +2622,34 @@ export function drawProp(
       drawVMS(ctx, x, y, ppu, variant, beatPulse);
       break;
     case 'chevron':
-      drawChevron(ctx, x, y, ppu, side, variant, beatPulse);
+      drawChevron(ctx, x, y, ppu, side, variant, beatPulse, beatIndex);
       break;
     case 'pylon':
-      drawPylon(ctx, x, y, ppu);
+      drawPylon(ctx, x, y, ppu, variant);
       break;
     case 'shrub':
       drawShrub(ctx, x, y, ppu, variant);
       break;
     case 'sign':
       drawSign(ctx, x, y, ppu, side, variant);
+      break;
+    case 'kiosk':
+      drawKiosk(ctx, x, y, ppu, side, variant);
+      break;
+    case 'bench':
+      drawBench(ctx, x, y, ppu, variant);
+      break;
+    case 'bus-stop':
+      drawBusStop(ctx, x, y, ppu, side, variant);
+      break;
+    case 'canopy':
+      drawCanopy(ctx, x, y, ppu, variant);
+      break;
+    case 'torii':
+      drawTorii(ctx, x, y, ppu, variant);
+      break;
+    case 'toro':
+      drawToro(ctx, x, y, ppu, variant);
       break;
   }
 }

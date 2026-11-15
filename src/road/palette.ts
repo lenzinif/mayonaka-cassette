@@ -1,3 +1,61 @@
+import type { PropKind } from './RoadSegment';
+
+export type SceneryThemeId = 'coastal' | 'city' | 'touge';
+
+/**
+ * Stage scenery theme configuration (biome coherence, docs/DESIGN.md §2 Fase 5).
+ * Resolved at render time so road generation remains a pure deterministic function of (BeatMap, seed).
+ */
+export interface SceneryTheme {
+  readonly id: SceneryThemeId;
+  readonly tree: 'palm' | 'street-tree' | 'pine';
+  readonly shrubTint: readonly [string, string, string];
+  readonly buildingDensity: number;
+  readonly hideKinds?: ReadonlySet<PropKind>;
+}
+
+export const SCENERY_CITY_NIGHT: SceneryTheme = {
+  id: 'city',
+  tree: 'street-tree',
+  shrubTint: ['#00e5be', '#0a3a40', '#e6195e'],
+  buildingDensity: 1.0,
+};
+
+export const SCENERY_COASTAL_SUNSET: SceneryTheme = {
+  id: 'coastal',
+  tree: 'palm',
+  shrubTint: ['#06d6a0', '#0a4235', '#ff2a75'],
+  buildingDensity: 0.35,
+};
+
+export const SCENERY_COASTAL_PASTEL: SceneryTheme = {
+  id: 'coastal',
+  tree: 'palm',
+  shrubTint: ['#70a9a1', '#2f283d', '#ffb5a7'],
+  buildingDensity: 0.25,
+};
+
+export const SCENERY_CITY_NOON: SceneryTheme = {
+  id: 'city',
+  tree: 'street-tree',
+  shrubTint: ['#4d5e2e', '#232c12', '#ffda6b'],
+  buildingDensity: 1.0,
+};
+
+export const SCENERY_CITY_AKIBANIGHT: SceneryTheme = {
+  id: 'city',
+  tree: 'street-tree',
+  shrubTint: ['#00f5d4', '#0d2830', '#ff007f'],
+  buildingDensity: 1.0,
+};
+
+export const SCENERY_TOUGE: SceneryTheme = {
+  id: 'touge',
+  tree: 'pine',
+  shrubTint: ['#2d6a4f', '#143626', '#e76f51'],
+  buildingDensity: 0.05,
+};
+
 /**
  * Stage colour palettes (Future Funk aesthetics: night / og_future_funk / vaporfunk / weeb_funk).
  * Segments only store a stripe index; colours are resolved at render time so a stage
@@ -29,6 +87,7 @@ export interface StagePalette {
   road: readonly [string, string];
   rumble: readonly [string, string];
   lane: string;
+  scenery: SceneryTheme;
 }
 
 /**
@@ -55,6 +114,7 @@ export const PALETTE_NIGHT_FUNK: StagePalette = {
   road: ['#161c2e', '#121724'],
   rumble: ['#00f0b5', '#e6195e'],
   lane: '#80f6ff',
+  scenery: SCENERY_CITY_NIGHT,
 };
 
 /**
@@ -81,6 +141,7 @@ export const PALETTE_OG_FUTURE_FUNK: StagePalette = {
   road: ['#291b38', '#20152d'],
   rumble: ['#ff2a75', '#ffd319'],
   lane: '#fff2c2',
+  scenery: SCENERY_COASTAL_SUNSET,
 };
 
 /**
@@ -107,6 +168,7 @@ export const PALETTE_VAPORFUNK: StagePalette = {
   road: ['#2f283d', '#272133'],
   rumble: ['#48bfe3', '#c77dff'],
   lane: '#f8f9fa',
+  scenery: SCENERY_COASTAL_PASTEL,
 };
 
 /**
@@ -133,6 +195,7 @@ export const PALETTE_AKIBA_NOON: StagePalette = {
   road: ['#32353b', '#1e2025'],
   rumble: ['#b83232', '#eee3cb'],
   lane: '#fffdf5',
+  scenery: SCENERY_CITY_NOON,
 };
 
 /**
@@ -159,6 +222,7 @@ export const PALETTE_AKIBA_NIGHT: StagePalette = {
   road: ['#10121a', '#0a0c12'],
   rumble: ['#ffee32', '#ff007f'],
   lane: '#00f0ff',
+  scenery: SCENERY_CITY_AKIBANIGHT,
 };
 
 export const PALETTE_WEEB_FUNK: StagePalette = PALETTE_AKIBA_NIGHT;
