@@ -1,7 +1,7 @@
 import type { RunGrade, TrackLibrary } from '@src/audio/TrackLibrary';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, RunSummary, TelemetrySnapshot } from '@src/engine/Game';
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 
 export interface RadioSelectorProps {
   bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
@@ -41,7 +41,12 @@ export function RadioSelector({
   onOpenTrackLoader,
   onSelectForkBranch,
 }: RadioSelectorProps) {
-  const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot);
+  const getRadioSnap = useCallback((): TelemetrySnapshot | null => {
+    const s = bridge.getSnapshot();
+    if (!s || (!s.forkActive && !s.isCrossfading)) return null;
+    return s;
+  }, [bridge]);
+  const snap = useSyncExternalStore(bridge.subscribe, getRadioSnap, getRadioSnap);
   const [stageToast, setStageToast] = useState<StageToastInfo | null>(null);
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const dialogRef = useRef<HTMLDialogElement | null>(null);

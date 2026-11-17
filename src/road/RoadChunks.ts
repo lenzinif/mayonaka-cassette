@@ -1,7 +1,7 @@
 import type { SectionRole } from '@src/audio/BeatMap';
 import type { PropBand, PropKind, SegmentEnvironment } from './RoadSegment';
 import { CURVE, HILL } from './TrackBuilder';
-import type { VignetteId } from './Vignettes';
+import type { RoadChunkVignetteSlot } from './Vignettes';
 
 /**
  * Hand-authored bar-length road "chunks" tagged by musical section role (docs/DESIGN.md §3).
@@ -87,11 +87,7 @@ export interface RoadChunk {
   /** Roadside prop rhythm rules for this chunk. */
   props: readonly ChunkPropRule[];
   /** Optional roadside vignette slots that may spawn inside this chunk (docs/DESIGN.md §2 Fase 4). */
-  vignettes?: readonly {
-    prefab: VignetteId;
-    chance: number;
-    side?: 'left' | 'right' | 'outside-curve' | 'inside-curve' | 'any';
-  }[];
+  vignettes?: readonly RoadChunkVignetteSlot[];
 }
 
 /** Validates that a `RoadChunk` definition has consistent bar counts and valid parameters. */
@@ -264,7 +260,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     ],
     props: [
       { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.2, rhythmic: true },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
+      { kind: 'overpass', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
       { kind: 'vms', placement: 'right', everyBeats: 8, band: 'A', offset: 1.38, rhythmic: true },
       { kind: 'billboard', placement: 'left', everyBeats: 8, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
       { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.0, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
@@ -461,6 +457,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     props: [
       { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
       { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.22, rhythmic: true },
+      { kind: 'overpass', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
       { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.1, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
       { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.8, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
       { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.2, jitter: { lateral: 1.4, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },

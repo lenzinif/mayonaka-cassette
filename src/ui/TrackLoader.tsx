@@ -369,6 +369,27 @@ export function TrackLoader({
                     </span>
                   )}
                 </div>
+                {!active.beatMap.confidence.tempoStable && (
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded border border-amber-400/50 bg-amber-950/50 px-2.5 py-1.5 text-[10px] text-amber-200">
+                    <span>
+                      ⚠ Tempo variabile rilevato: il beat può slittare. Attiva il click e calibra con{' '}
+                      <strong>TAP TEMPO</strong> / <strong>BEAT -1/+1</strong>.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClickEnabled(true);
+                        audio?.setPreviewClickEnabled(true);
+                        if (!previewPlaying) {
+                          void startPreviewFromStart();
+                        }
+                      }}
+                      className="cursor-pointer rounded border border-amber-300/70 bg-amber-900/80 px-2 py-0.5 font-bold text-amber-100 hover:bg-amber-800"
+                    >
+                      CALIBRA CON CLICK
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5">

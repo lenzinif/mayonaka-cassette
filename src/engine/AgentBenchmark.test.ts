@@ -111,4 +111,64 @@ describe('AI Agent Automated Playtesting & Simulation Benchmark', () => {
     // Relaxed mode cruises around 75% max speed ceiling
     expect(snapRelaxed.speedRatio).toBeLessThanOrEqual(0.85);
   });
+
+  it('completes a full-song headless benchmark with beat-shifts, drop syncs, Groove sustain, and single-track fork finish (MP-06/MP-10/MP-11)', () => {
+    const library = new TrackLibrary();
+    library.removeTrack(2);
+    library.removeTrack(1);
+    expect(library.hasMultipleTracks).toBe(false);
+
+    const audio = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+    const driver = new AutopilotDriver({
+      mode: 'perfect',
+      avoidTraffic: true,
+      rhythmShifts: true,
+      forkPreference: 'nextTrack',
+    });
+    driver.setEnabled(true);
+
+    const game = new Game({ input: driver, autopilot: driver, audio, library });
+    const events: string[] = [];
+    let completedStageSummary:
+      | {
+          perfectShifts: number;
+          goodShifts: number;
+          dropSyncs: number;
+          maxGroove: number;
+          avgGroove: number;
+        }
+      | undefined;
+
+    game.bridge.onEvent((e) => {
+      events.push(e.type);
+      if (e.type === 'stageCompleted') {
+        completedStageSummary = e.summary;
+      }
+    });
+
+    const dt = 1 / 120;
+    const maxSteps = Math.ceil((DEFAULT_SYNTH_BEATMAP.durationSec + 20) * 120);
+    let stepsRun = 0;
+    let offRoadSteps = 0;
+
+    for (let i = 0; i < maxSteps; i++) {
+      game.update(dt);
+      stepsRun++;
+      if (game.car.isOffRoad) {
+        offRoadSteps++;
+      }
+      if (events.includes('runCompleted')) {
+        break;
+      }
+    }
+
+    expect(events).toContain('stageCompleted');
+    expect(events).toContain('runCompleted');
+    expect(completedStageSummary).toBeDefined();
+    expect(completedStageSummary!.perfectShifts + completedStageSummary!.goodShifts).toBeGreaterThanOrEqual(3);
+    expect(completedStageSummary!.dropSyncs).toBeGreaterThan(0);
+    expect(completedStageSummary!.maxGroove).toBeGreaterThanOrEqual(65);
+    expect(offRoadSteps).toBeLessThan(stepsRun * 0.05);
+    expect(Math.abs(game.track.segments[game.track.segments.length - 1]!.p2.worldY)).toBeLessThan(5);
+  });
 });

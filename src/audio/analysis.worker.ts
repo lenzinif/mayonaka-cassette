@@ -949,22 +949,32 @@ function computeBarEnergyAndSections(
   for (let b = 1; b <= maxSearchBar; b++) {
     const postE = winAvg(unsmoothedEnergy, b, 4);
     const postL = winAvg(normLow, b, 4);
+    const postC = winAvg(normCent, b, 4);
     const preLocalLen = Math.min(4, b);
     const preLocalE = winAvg(unsmoothedEnergy, b - preLocalLen, preLocalLen);
     const preLocalL = winAvg(normLow, b - preLocalLen, preLocalLen);
+    const preLocalC = winAvg(normCent, b - preLocalLen, preLocalLen);
     const preAllE = winAvg(unsmoothedEnergy, 0, b);
     const preAllL = winAvg(normLow, 0, b);
+    const preAllC = winAvg(normCent, 0, b);
 
     // If the 4 bars immediately preceding `b` were ALREADY in a drop, `b` is not the first drop
     if (preLocalE >= highEnergyRef * 0.65 && preLocalL >= highLowRef * 0.55 && b >= 4) {
       continue;
     }
 
-    const stepLocal = 0.55 * (postL - preLocalL) + 0.45 * (postE - preLocalE);
-    const stepIntro = 0.55 * (postL - preAllL) + 0.45 * (postE - preAllE);
+    const stepLocal =
+      0.48 * (postL - preLocalL) +
+      0.38 * (postE - preLocalE) +
+      0.14 * Math.max(0, postC - preLocalC);
+    const stepIntro =
+      0.48 * (postL - preAllL) +
+      0.38 * (postE - preAllE) +
+      0.14 * Math.max(0, postC - preAllC);
     const edge =
-      0.55 * Math.max(0, normLow[b]! - normLow[b - 1]!) +
-      0.45 * Math.max(0, unsmoothedEnergy[b]! - unsmoothedEnergy[b - 1]!);
+      0.48 * Math.max(0, normLow[b]! - normLow[b - 1]!) +
+      0.38 * Math.max(0, unsmoothedEnergy[b]! - unsmoothedEnergy[b - 1]!) +
+      0.14 * Math.max(0, normCent[b]! - normCent[b - 1]!);
 
     const reachesDrop =
       postE >= highEnergyRef * 0.62 && postL >= highLowRef * 0.48 ? 1.0 : 0.35;
@@ -980,10 +990,34 @@ function computeBarEnergyAndSections(
     }
   }
 
+  // Secondary check for 8-bar filtered intros where bar 8 already jumps sharply into a
+  // sustained groove plateau (>= 0.46) after a quiet filtered intro (<= 0.16), before a bar-16 chorus lift.
+  if (bestDropBar >= 12 && totalBars >= 12) {
+    const pre8E = winAvg(unsmoothedEnergy, 0, 8);
+    const mid8E = winAvg(unsmoothedEnergy, 8, 4);
+    if (
+      mid8E >= 0.46 &&
+      mid8E >= highEnergyRef * 0.52 &&
+      pre8E <= 0.16 &&
+      mid8E - pre8E >= 0.3
+    ) {
+      bestDropBar = 8;
+    }
+  }
+
+  const startPostAvg = winAvg(unsmoothedEnergy, 4, 6);
+  const sustainedStartGroove =
+    bestDropBar >= 11 &&
+    ((start3E >= 0.13 && startPostAvg > 0 && start3E >= startPostAvg * 0.72) ||
+      (winAvg(unsmoothedEnergy, 0, 4) >= winAvg(unsmoothedEnergy, 4, 8) * 0.78 &&
+        start3E >= highEnergyRef * 0.5 &&
+        start3L >= highLowRef * 0.4));
+
   const immediateGroove =
-    start3E >= highEnergyRef * 0.58 &&
-    start3L >= highLowRef * 0.48 &&
-    bestNovelty < 0.34;
+    sustainedStartGroove ||
+    (start3E >= highEnergyRef * 0.58 &&
+      start3L >= highLowRef * 0.48 &&
+      bestNovelty < 0.34);
 
   const firstDropBlock = immediateGroove
     ? 0
@@ -1033,11 +1067,63 @@ function computeBarEnergyAndSections(
     }
   }
 
-  if (sections.length === 0) {
-    sections.push({ startBar: 0, bars: totalBars, role: 'drop' });
+  // Post-merge Long-Drop Plateau Articulation Pass (MP-05):
+  // Split monolithic `drop` plateaus (> 28 bars) at their lowest 4-bar energy+centroid valley
+  // while keeping `firstDropBar` anchored at the original section start.
+  const articulated: BeatSection[] = [];
+  for (let i = 0; i < sections.length; i++) {
+    let cur: BeatSection = sections[i]!;
+    while (cur.role === 'drop' && cur.bars > 28) {
+      const sectionEnd = cur.startBar + cur.bars;
+      const searchStart = cur.startBar + 12;
+      const searchEnd = Math.min(cur.startBar + 28, sectionEnd - 8);
+      if (searchStart > searchEnd) break;
+
+      let bestValleyStart = searchStart;
+      let bestValleyScore = Infinity;
+      for (let vStart = searchStart; vStart <= searchEnd; vStart += 4) {
+        let sum = 0;
+        let count = 0;
+        const vEnd = Math.min(totalBars, vStart + 4);
+        for (let b = vStart; b < vEnd; b++) {
+          sum += 0.75 * unsmoothedEnergy[b]! + 0.25 * normCent[b]!;
+          count++;
+        }
+        const mean = count > 0 ? sum / count : 1;
+        if (mean < bestValleyScore) {
+          bestValleyScore = mean;
+          bestValleyStart = vStart;
+        }
+      }
+
+      const valleyEnd = Math.min(sectionEnd - 4, bestValleyStart + 4);
+      const prefixBars = bestValleyStart - cur.startBar;
+      const valleyBars = valleyEnd - bestValleyStart;
+      const suffixBars = sectionEnd - valleyEnd;
+      if (prefixBars < 4 || valleyBars <= 0 || suffixBars < 4) break;
+
+      let nextSum = 0;
+      let nextCount = 0;
+      const nextEnd = Math.min(totalBars, valleyEnd + 4);
+      for (let b = valleyEnd; b < nextEnd; b++) {
+        nextSum += 0.75 * unsmoothedEnergy[b]! + 0.25 * normCent[b]!;
+        nextCount++;
+      }
+      const nextScore = nextCount > 0 ? nextSum / nextCount : bestValleyScore;
+      const valleyRole: SectionRole = nextScore - bestValleyScore > 0.08 ? 'build' : 'breakdown';
+
+      articulated.push({ startBar: cur.startBar, bars: prefixBars, role: 'drop' });
+      articulated.push({ startBar: bestValleyStart, bars: valleyBars, role: valleyRole });
+      cur = { startBar: valleyEnd, bars: suffixBars, role: 'drop' };
+    }
+    articulated.push(cur);
   }
 
-  return { barEnergy, sections };
+  if (articulated.length === 0) {
+    articulated.push({ startBar: 0, bars: totalBars, role: 'drop' });
+  }
+
+  return { barEnergy, sections: articulated };
 }
 
 function downsampleEnvelope(env: Float32Array, targetPoints: number): Float32Array {

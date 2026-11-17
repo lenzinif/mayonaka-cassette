@@ -114,14 +114,6 @@ export interface InputSource {
   poll?(): void;
 }
 
-export interface GamepadSnapshot {
-  connected: boolean;
-  id: string;
-  steerAxis: number;
-  throttleAxis: number;
-  brakeAxis: number;
-}
-
 /**
  * Polling input state + timestamped press edge queue (AGENTS.md §3, §4.8 & §5 M8).
  *
@@ -169,7 +161,6 @@ export class InputManager implements InputSource {
   private readonly connectedScratch: Gamepad[] = [];
   private lastDisconnectedPollMs = -1000;
   private gamepadConnected = false;
-  private gamepadId = '';
   private steerAxis = 0;
   private throttleAxis = 0;
   private brakeAxis = 0;
@@ -208,16 +199,6 @@ export class InputManager implements InputSource {
     return this.gamepadConnected;
   }
 
-  getGamepadSnapshot(): GamepadSnapshot {
-    return {
-      connected: this.gamepadConnected,
-      id: this.gamepadId,
-      steerAxis: this.steerAxis,
-      throttleAxis: this.throttleAxis,
-      brakeAxis: this.brakeAxis,
-    };
-  }
-
   /**
    * Polls the Gamepad API (`navigator.getGamepads()`), updates analog axes,
    * continuous button states, and enqueues high-resolution timestamped rising-edge events.
@@ -237,7 +218,6 @@ export class InputManager implements InputSource {
       this.lastDisconnectedPollMs = now;
       if (this.gamepadConnected) {
         this.gamepadConnected = false;
-        this.gamepadId = '';
         this.resetGamepadState();
       }
       return;
@@ -245,7 +225,6 @@ export class InputManager implements InputSource {
 
     const gp = gamepads[0]!;
     this.gamepadConnected = true;
-    this.gamepadId = gp.id || 'Standard Gamepad';
 
     // 1. Reset continuous gamepad actions
     for (let i = 0; i < ALL_ACTIONS.length; i++) {
@@ -347,16 +326,6 @@ export class InputManager implements InputSource {
     return this.drainedPresses;
   }
 
-  /**
-   * Enqueues a synthetic action press (e.g. from HUD buttons for Tofu Mode, Pause or Auto-Shift).
-   */
-  triggerAction(
-    action: Action,
-    timeStamp = typeof performance !== 'undefined' ? performance.now() : 0,
-  ): void {
-    this.pressQueue.push({ action, timeStamp });
-  }
-
   dispose(): void {
     this.target.removeEventListener('keydown', this.onKeyDown);
     this.target.removeEventListener('keyup', this.onKeyUp);
@@ -433,17 +402,14 @@ export class InputManager implements InputSource {
     this.actionCounts[action] = Math.max(0, this.actionCounts[action] - 1);
   };
 
-  private readonly onGamepadConnected = (e: Event): void => {
-    const gp = (e as unknown as { gamepad?: Gamepad }).gamepad;
+  private readonly onGamepadConnected = (): void => {
     this.gamepadConnected = true;
-    this.gamepadId = gp?.id ?? 'Standard Gamepad';
   };
 
   private readonly onGamepadDisconnected = (): void => {
     const gamepads = this.getConnectedGamepads();
     if (gamepads.length === 0) {
       this.gamepadConnected = false;
-      this.gamepadId = '';
       this.resetGamepadState();
     }
   };

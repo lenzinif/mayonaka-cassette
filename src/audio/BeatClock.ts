@@ -1,5 +1,4 @@
 import {
-  barDurationSec,
   beatDurationSec,
   sectionAtBar,
   type BeatMap,
@@ -184,14 +183,5 @@ export class BeatClock {
       beatIndex: nearestBeat,
       isDownbeat,
     };
-  }
-
-  /** Returns the track timestamp (in seconds) of the next 4-bar phrase boundary after `trackTimeSec`. */
-  nextFourBarBoundarySec(trackTimeSec: number): number {
-    const map = this.beatMap;
-    const barDur = barDurationSec(map);
-    const curBarFloat = (trackTimeSec - map.firstBeatOffsetSec) / barDur;
-    const nextFourBar = Math.max(4, (Math.floor(curBarFloat / 4) + 1) * 4);
-    return map.firstBeatOffsetSec + nextFourBar * barDur;
   }
 }

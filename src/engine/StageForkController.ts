@@ -37,7 +37,6 @@ export class StageForkController {
   forkManualLock: 'left' | 'right' | null = null;
   forkLastSign = 0;
   forkProgress = 0;
-  earlyCrossfadeStarted = false;
 
   readonly forkBoundsScratch: ForkCrossSection = {
     t: 0,
@@ -50,12 +49,10 @@ export class StageForkController {
   };
 
   resetForNewRoad(): void {
-    this.earlyCrossfadeStarted = false;
     this.forkManualLock = null;
   }
 
   resetForStageTransition(): void {
-    this.earlyCrossfadeStarted = false;
     this.forkManualLock = null;
     this.forkActive = false;
     this.forkProgress = 0;
@@ -64,10 +61,10 @@ export class StageForkController {
 
   getForkZoneStartZ(
     track: Track,
-    hasMultipleTracks: boolean,
+    _hasMultipleTracks: boolean,
     hasCustomTrack: boolean,
   ): number | undefined {
-    if (!hasMultipleTracks || hasCustomTrack || !isSongTrack(track)) {
+    if (hasCustomTrack || !isSongTrack(track)) {
       return undefined;
     }
     const forkBars = Math.min(FORK_APPROACH_BARS, Math.floor(track.totalBars * 0.25));
@@ -173,12 +170,7 @@ export class StageForkController {
     trackLength: number,
     carX: number,
     forkStartZ: number | undefined,
-    hasNextTrack: boolean,
-    roadBarIndex: number,
-    totalBars: number,
-    audioBarIndex: number,
     onChoiceChanged: (choice: 'left' | 'right', source: 'lane' | 'input') => void,
-    onStartEarlyCrossfade: () => void,
   ): void {
     if (forkStartZ === undefined) {
       this.forkActive = false;
@@ -222,17 +214,6 @@ export class StageForkController {
         } else {
           this.forkChoice = nextChoice;
         }
-      }
-
-      if (
-        !this.earlyCrossfadeStarted &&
-        this.forkChoice === 'right' &&
-        hasNextTrack &&
-        roadBarIndex >= totalBars - 2 &&
-        audioBarIndex < totalBars - 2
-      ) {
-        this.earlyCrossfadeStarted = true;
-        onStartEarlyCrossfade();
       }
     } else {
       this.forkActive = false;

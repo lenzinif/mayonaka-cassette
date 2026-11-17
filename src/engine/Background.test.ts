@@ -189,6 +189,49 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
     expect(cyanCalls.length).toBe(0);
   });
 
+  it('never injects near-black #030514 into sea or ground horizon gradients across stages', () => {
+    const bg = new Background();
+    const colorStops: string[] = [];
+    const noop = () => {};
+    const makeGrad = () => ({
+      addColorStop: (_offset: number, color: string) => {
+        colorStops.push(color);
+      },
+    });
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      clip: noop,
+      clearRect: noop,
+      drawImage: noop,
+      moveTo: noop,
+      lineTo: noop,
+      arc: noop,
+      rect: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      createLinearGradient: makeGrad,
+      createRadialGradient: makeGrad,
+    } as unknown as CanvasRenderingContext2D;
+
+    bg.render(ctx, 640, 360, PALETTE_OG_FUTURE_FUNK, 0, 0);
+    bg.render(ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+    bg.render(ctx, 640, 360, PALETTE_AKIBA_NIGHT, 0, 0);
+
+    expect(colorStops).not.toContain('#030514');
+    expect(colorStops).toContain(PALETTE_OG_FUTURE_FUNK.fog);
+    expect(colorStops).toContain(PALETTE_NIGHT_FUNK.fog);
+    expect(colorStops).toContain(PALETTE_AKIBA_NIGHT.fog);
+  });
+
   it('renders Sunset Boulevard sea reflections strictly BEHIND the skyline buildings', () => {
     const bg = new Background();
     const calls: Array<{

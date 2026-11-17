@@ -113,10 +113,6 @@ export class AssetPreloader {
     return this.images.get(id) ?? null;
   }
 
-  hasImage(id: string): boolean {
-    return this.images.has(id);
-  }
-
   getJson<T = unknown>(id: string): T | null {
     return (this.jsonCache.get(id) as T) ?? null;
   }

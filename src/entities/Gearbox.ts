@@ -102,19 +102,6 @@ export class Gearbox {
   }
 
   /**
-   * Returns the ideal gear `(1..6)` that places `speed` squarely inside the turbo powerband.
-   */
-  getOptimalGearForSpeed(speed: number, maxSpeed: number): GearNumber {
-    for (let g = 1; g < MAX_GEAR; g++) {
-      const gear = g as GearNumber;
-      if (this.computeRpm(speed, maxSpeed, gear) <= 0.88) {
-        return gear;
-      }
-    }
-    return MAX_GEAR;
-  }
-
-  /**
    * Fake torque curve multiplier `[0, 1.18]` at the current speed & gear:
    * - In 1st gear, strong launch torque from 0 RPM (`>= 0.92`) so standing starts feel snappy.
    * - In gears 2–6, each gear has a real operating band starting at `getBandStartRpm(gear)`.

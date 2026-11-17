@@ -3,13 +3,9 @@ import {
   getStagePalette,
   PALETTE_AKIBA_NIGHT,
   PALETTE_AKIBA_NOON,
-  PALETTE_COASTAL_BREEZE,
-  PALETTE_MIDNIGHT_WANGAN,
   PALETTE_NIGHT_FUNK,
   PALETTE_OG_FUTURE_FUNK,
-  PALETTE_SUNSET_BOULEVARD,
   PALETTE_VAPORFUNK,
-  PALETTE_WEEB_FUNK,
   SCENERY_TOUGE,
   STAGE_PALETTES,
   type StagePalette,
@@ -32,6 +28,12 @@ function validatePalette(palette: StagePalette): void {
   expect(palette.grass).toHaveLength(2);
   expect(palette.grass[0]).toMatch(HEX_COLOR_REGEX);
   expect(palette.grass[1]).toMatch(HEX_COLOR_REGEX);
+
+  if (palette.water !== undefined) {
+    expect(palette.water).toHaveLength(2);
+    expect(palette.water[0]).toMatch(HEX_COLOR_REGEX);
+    expect(palette.water[1]).toMatch(HEX_COLOR_REGEX);
+  }
 
   expect(palette.road).toHaveLength(2);
   expect(palette.road[0]).toMatch(HEX_COLOR_REGEX);
@@ -145,11 +147,7 @@ describe('StagePalettes (Future Funk Presets)', () => {
     validatePalette(PALETTE_AKIBA_NIGHT);
   });
 
-  it('preserves legacy aliases for backward compatibility', () => {
-    expect(PALETTE_SUNSET_BOULEVARD).toBe(PALETTE_OG_FUTURE_FUNK);
-    expect(PALETTE_MIDNIGHT_WANGAN).toBe(PALETTE_NIGHT_FUNK);
-    expect(PALETTE_COASTAL_BREEZE).toBe(PALETTE_VAPORFUNK);
-    expect(PALETTE_WEEB_FUNK).toBe(PALETTE_AKIBA_NIGHT);
+  it('validates PALETTE_VAPORFUNK', () => {
     validatePalette(PALETTE_VAPORFUNK);
   });
 

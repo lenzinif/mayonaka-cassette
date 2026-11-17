@@ -1,5 +1,6 @@
 import type { SectionRole } from '@src/audio/BeatMap';
 import type { GrooveTier } from '@src/entities/PlayerCar';
+import { memo } from 'react';
 
 export interface CassetteTapeWidgetProps {
   trackArtist: string;
@@ -92,7 +93,7 @@ const SECTION_BADGE_STYLES: Readonly<Record<SectionRole, string>> = {
  * Authentic 1980s Japanese Compact Cassette Tape Widget (Groove & Music Telemetry).
  * Togglable via hotkey [C] or button click to ensure an unobstructed view of the road.
  */
-export function CassetteTapeWidget({
+export const CassetteTapeWidget = memo(function CassetteTapeWidget({
   trackArtist,
   trackTitle,
   bpm,
@@ -212,7 +213,7 @@ export function CassetteTapeWidget({
           <div className="relative z-1 flex flex-col items-center">
             {/* Dark magnetic tape pack ring around reel */}
             <div
-              className="flex items-center justify-center rounded-full transition-all duration-100"
+              className="flex items-center justify-center rounded-full"
               style={{
                 width: `${leftPackRadius * 2}px`,
                 height: `${leftPackRadius * 2}px`,
@@ -265,7 +266,7 @@ export function CassetteTapeWidget({
                   />
                   {/* Magnetic Tape Ribbon representing physical Track & Road Progress */}
                   <div
-                    className="absolute inset-y-0.5 left-0 rounded-xs bg-gradient-to-r from-amber-600 via-amber-400 to-amber-200 opacity-90 transition-all duration-100"
+                    className="absolute inset-y-0.5 left-0 rounded-xs bg-gradient-to-r from-amber-600 via-amber-400 to-amber-200 opacity-90"
                     style={{ width: `${Math.round(songProgress * 100)}%` }}
                   />
                 </div>
@@ -287,7 +288,7 @@ export function CassetteTapeWidget({
           <div className="relative z-1 flex flex-col items-center">
             {/* Dark magnetic tape pack ring around reel */}
             <div
-              className="flex items-center justify-center rounded-full transition-all duration-100"
+              className="flex items-center justify-center rounded-full"
               style={{
                 width: `${rightPackRadius * 2}px`,
                 height: `${rightPackRadius * 2}px`,
@@ -366,7 +367,7 @@ export function CassetteTapeWidget({
             return (
               <span
                 key={idx}
-                className={`w-1 rounded-t-xs transition-all duration-75 ${
+                className={`w-1 rounded-t-xs ${
                   isPeak ? 'bg-pink-500 shadow-[0_0_4px_#ff2a6d]' : 'bg-cyan-400'
                 }`}
                 style={{ height: `${heightPct}%` }}
@@ -377,4 +378,4 @@ export function CassetteTapeWidget({
       </div>
     </div>
   );
-}
+});

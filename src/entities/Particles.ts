@@ -271,7 +271,8 @@ export class ParticleSystem {
   }
 
   /**
-   * Emits a subtle puff of tire smoke on a clean drift exit (exhaust flames removed).
+   * Emits a tire traction hookup burst (smoke + directional neon sparks) on clean drift exit (`MP-02`).
+   * Never fires on gear shifts (DESIGN.md §4).
    */
   emitBoostOrShiftBurst(
     car: PlayerCar,
@@ -295,14 +296,36 @@ export class ParticleSystem {
       p.prevY = startY;
       p.x = startX;
       p.y = startY;
-      p.vx = tireSide * this.nextRange(10, 32) + this.nextRange(-12, 12);
-      p.vy = this.nextRange(-22, -6);
+      p.vx = tireSide * this.nextRange(12, 36) + this.nextRange(-12, 12);
+      p.vy = this.nextRange(-26, -8);
       p.size = 3;
       p.life = 0;
-      p.maxLife = this.nextRange(0.18, 0.3);
+      p.maxLife = this.nextRange(0.2, 0.34);
       p.gravity = -16;
       p.color = '#05d9e8';
       p.secondaryColor = '#e0fbfc';
+    }
+
+    for (let i = 0; i < 10; i++) {
+      const p = this.allocate();
+      const tireSide = i % 2 === 0 ? -1 : 1;
+      const tireAnchorX = tireSide < 0 ? rig.leftTireX : rig.rightTireX;
+      const startX = tireAnchorX + this.nextRange(-2, 2);
+      const startY = carBaseY - 1;
+      p.active = true;
+      p.kind = 'spark';
+      p.prevX = startX;
+      p.prevY = startY;
+      p.x = startX;
+      p.y = startY;
+      p.vx = tireSide * this.nextRange(18, 58) - car.steer * 25;
+      p.vy = this.nextRange(-68, -28);
+      p.size = i % 3 === 0 ? 3 : 2;
+      p.life = 0;
+      p.maxLife = this.nextRange(0.22, 0.4);
+      p.gravity = 180;
+      p.color = i % 3 === 0 ? '#ffe600' : i % 2 === 0 ? '#00f0ff' : '#ff2a85';
+      p.secondaryColor = '#ffffff';
     }
   }
 

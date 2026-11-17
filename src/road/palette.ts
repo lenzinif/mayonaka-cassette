@@ -84,6 +84,7 @@ export interface StagePalette {
   mountain: string;
   mountainRim: string;
   grass: readonly [string, string];
+  water?: readonly [string, string];
   road: readonly [string, string];
   rumble: readonly [string, string];
   lane: string;
@@ -111,6 +112,7 @@ export const PALETTE_NIGHT_FUNK: StagePalette = {
   mountain: '#050716',
   mountainRim: '#00f0b5',
   grass: ['#080c1d', '#050713'],
+  water: ['#0d1b3e', '#09132e'],
   road: ['#161c2e', '#121724'],
   rumble: ['#00f0b5', '#e6195e'],
   lane: '#80f6ff',
@@ -138,6 +140,7 @@ export const PALETTE_OG_FUTURE_FUNK: StagePalette = {
   mountain: '#240a38',
   mountainRim: '#fff2c2',
   grass: ['#210933', '#160524'],
+  water: ['#3c1354', '#2c0d42'],
   road: ['#291b38', '#20152d'],
   rumble: ['#ff2a75', '#ffd319'],
   lane: '#fff2c2',
@@ -165,6 +168,7 @@ export const PALETTE_VAPORFUNK: StagePalette = {
   mountain: '#352952',
   mountainRim: '#48bfe3',
   grass: ['#2a203f', '#1e162e'],
+  water: ['#433266', '#332552'],
   road: ['#2f283d', '#272133'],
   rumble: ['#48bfe3', '#c77dff'],
   lane: '#f8f9fa',
@@ -192,6 +196,7 @@ export const PALETTE_AKIBA_NOON: StagePalette = {
   mountain: '#2f3542',
   mountainRim: '#ffffff',
   grass: ['#4d5e2e', '#3a4721'],
+  water: ['#2c6ca3', '#23598a'],
   road: ['#32353b', '#1e2025'],
   rumble: ['#b83232', '#eee3cb'],
   lane: '#fffdf5',
@@ -219,18 +224,12 @@ export const PALETTE_AKIBA_NIGHT: StagePalette = {
   mountain: '#090d29',
   mountainRim: '#00f5d4',
   grass: ['#080a1c', '#04050e'],
+  water: ['#101a4d', '#0b1238'],
   road: ['#10121a', '#0a0c12'],
   rumble: ['#ffee32', '#ff007f'],
   lane: '#00f0ff',
   scenery: SCENERY_CITY_AKIBANIGHT,
 };
-
-export const PALETTE_WEEB_FUNK: StagePalette = PALETTE_AKIBA_NIGHT;
-
-/** Legacy aliases for complete backward compatibility */
-export const PALETTE_SUNSET_BOULEVARD: StagePalette = PALETTE_OG_FUTURE_FUNK;
-export const PALETTE_MIDNIGHT_WANGAN: StagePalette = PALETTE_NIGHT_FUNK;
-export const PALETTE_COASTAL_BREEZE: StagePalette = PALETTE_VAPORFUNK;
 
 export const STAGE_PALETTES: readonly StagePalette[] = [
   PALETTE_NIGHT_FUNK,
@@ -242,4 +241,161 @@ export function getStagePalette(stageIndex: number): StagePalette {
   const len = STAGE_PALETTES.length;
   const idx = ((Math.floor(stageIndex) % len) + len) % len;
   return STAGE_PALETTES[idx] ?? PALETTE_NIGHT_FUNK;
+}
+
+interface MutableStagePalette {
+  id: StagePalette['id'];
+  name: string;
+  skyTop: string;
+  skyMid: string;
+  skyHorizon: string;
+  horizonGlow?: string;
+  fog: string;
+  fogDensity?: number;
+  starColors?: [string, string];
+  sunTop: string;
+  sunBottom: string;
+  mountain: string;
+  mountainRim: string;
+  grass: [string, string];
+  water?: [string, string];
+  road: [string, string];
+  rumble: [string, string];
+  lane: string;
+  scenery: SceneryTheme;
+}
+
+function parseHexChannel(hex: string, offset: number): number {
+  const h = hex.startsWith('#') ? hex.slice(1) : hex;
+  if (h.length === 3) {
+    const ch = h.charAt(offset >> 1);
+    const nib = Number.parseInt(ch, 16);
+    return Number.isNaN(nib) ? 0 : nib * 17;
+  }
+  const v = Number.parseInt(h.slice(offset, offset + 2), 16);
+  return Number.isNaN(v) ? 0 : v;
+}
+
+function toHex2(v: number): string {
+  const clamped = Math.max(0, Math.min(255, Math.round(v)));
+  return clamped < 16 ? `0${clamped.toString(16)}` : clamped.toString(16);
+}
+
+/**
+ * Linearly interpolates between two `#rrggbb` colors, always returning a canonical `#rrggbb` string.
+ */
+export function lerpHexColor(hexA: string, hexB: string, t: number): string {
+  const clampedT = Math.max(0, Math.min(1, t));
+  if (clampedT <= 0.001) return hexA;
+  if (clampedT >= 0.999) return hexB;
+  const rA = parseHexChannel(hexA, 0);
+  const gA = parseHexChannel(hexA, 2);
+  const bA = parseHexChannel(hexA, 4);
+  const rB = parseHexChannel(hexB, 0);
+  const gB = parseHexChannel(hexB, 2);
+  const bB = parseHexChannel(hexB, 4);
+  return `#${toHex2(rA + (rB - rA) * clampedT)}${toHex2(gA + (gB - gA) * clampedT)}${toHex2(bA + (bB - bA) * clampedT)}`;
+}
+
+/**
+ * Allocates a reusable mutable clone of a `StagePalette` for smooth zero-GC crossfades.
+ */
+export function createMutablePaletteClone(base: StagePalette): StagePalette {
+  const clone: MutableStagePalette = {
+    id: base.id,
+    name: base.name,
+    skyTop: base.skyTop,
+    skyMid: base.skyMid,
+    skyHorizon: base.skyHorizon,
+    horizonGlow: base.horizonGlow ?? base.skyHorizon,
+    fog: base.fog,
+    fogDensity: base.fogDensity ?? 1.0,
+    starColors: [
+      base.starColors?.[0] ?? base.mountainRim,
+      base.starColors?.[1] ?? base.sunTop,
+    ],
+    sunTop: base.sunTop,
+    sunBottom: base.sunBottom,
+    mountain: base.mountain,
+    mountainRim: base.mountainRim,
+    grass: [base.grass[0], base.grass[1]],
+    water: [
+      base.water?.[0] ?? base.grass[0],
+      base.water?.[1] ?? base.grass[1],
+    ],
+    road: [base.road[0], base.road[1]],
+    rumble: [base.rumble[0], base.rumble[1]],
+    lane: base.lane,
+    scenery: base.scenery,
+  };
+  return clone;
+}
+
+/**
+ * Smoothly blends `from` into `to` at progress `t in [0, 1]`, mutating pre-allocated `out` in-place
+ * without allocating objects or tuples (safe for fixed-step transitions).
+ */
+export function blendStagePalette(
+  from: StagePalette,
+  to: StagePalette,
+  t: number,
+  out: StagePalette,
+): StagePalette {
+  const clampedT = Math.max(0, Math.min(1, t));
+  const m = out as MutableStagePalette;
+  const active = clampedT >= 0.5 ? to : from;
+
+  m.id = active.id;
+  m.name = to.name;
+  m.scenery = active.scenery;
+
+  m.skyTop = lerpHexColor(from.skyTop, to.skyTop, clampedT);
+  m.skyMid = lerpHexColor(from.skyMid, to.skyMid, clampedT);
+  m.skyHorizon = lerpHexColor(from.skyHorizon, to.skyHorizon, clampedT);
+  m.horizonGlow = lerpHexColor(
+    from.horizonGlow ?? from.skyHorizon,
+    to.horizonGlow ?? to.skyHorizon,
+    clampedT,
+  );
+  m.fog = lerpHexColor(from.fog, to.fog, clampedT);
+
+  const fromDensity = from.fogDensity ?? 1.0;
+  const toDensity = to.fogDensity ?? 1.0;
+  m.fogDensity = fromDensity + (toDensity - fromDensity) * clampedT;
+
+  const fromStar0 = from.starColors?.[0] ?? from.mountainRim;
+  const toStar0 = to.starColors?.[0] ?? to.mountainRim;
+  const fromStar1 = from.starColors?.[1] ?? from.sunTop;
+  const toStar1 = to.starColors?.[1] ?? to.sunTop;
+  if (!m.starColors) {
+    m.starColors = [fromStar0, fromStar1];
+  }
+  m.starColors[0] = lerpHexColor(fromStar0, toStar0, clampedT);
+  m.starColors[1] = lerpHexColor(fromStar1, toStar1, clampedT);
+
+  m.sunTop = lerpHexColor(from.sunTop, to.sunTop, clampedT);
+  m.sunBottom = lerpHexColor(from.sunBottom, to.sunBottom, clampedT);
+  m.mountain = lerpHexColor(from.mountain, to.mountain, clampedT);
+  m.mountainRim = lerpHexColor(from.mountainRim, to.mountainRim, clampedT);
+
+  m.grass[0] = lerpHexColor(from.grass[0], to.grass[0], clampedT);
+  m.grass[1] = lerpHexColor(from.grass[1], to.grass[1], clampedT);
+
+  const fromWater0 = from.water?.[0] ?? from.grass[0];
+  const toWater0 = to.water?.[0] ?? to.grass[0];
+  const fromWater1 = from.water?.[1] ?? from.grass[1];
+  const toWater1 = to.water?.[1] ?? to.grass[1];
+  if (!m.water) {
+    m.water = [fromWater0, fromWater1];
+  }
+  m.water[0] = lerpHexColor(fromWater0, toWater0, clampedT);
+  m.water[1] = lerpHexColor(fromWater1, toWater1, clampedT);
+
+  m.road[0] = lerpHexColor(from.road[0], to.road[0], clampedT);
+  m.road[1] = lerpHexColor(from.road[1], to.road[1], clampedT);
+  m.rumble[0] = lerpHexColor(from.rumble[0], to.rumble[0], clampedT);
+  m.rumble[1] = lerpHexColor(from.rumble[1], to.rumble[1], clampedT);
+  m.lane = lerpHexColor(from.lane, to.lane, clampedT);
+
+  return out;
 }

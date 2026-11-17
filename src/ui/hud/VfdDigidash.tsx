@@ -1,5 +1,6 @@
 import { GEAR_NUMBERS, MAX_GEAR } from '@src/entities/Gearbox';
 import type { GrooveTier } from '@src/entities/PlayerCar';
+import { memo } from 'react';
 
 export interface VfdDigidashProps {
   speedKmh: number;
@@ -29,7 +30,7 @@ const GROOVE_SEGMENTS = Array.from({ length: 24 }, (_, i) => i);
  * Inspired by Toyota Soarer Z10/Z20, Subaru XT Vortex, and Nissan 300ZX Z31 digidash.
  * Integrates Tachometer, Beat-Shift Gearbox, Speedometer, Groove Flux, and Tactical Judgements.
  */
-export function VfdDigidash({
+export const VfdDigidash = memo(function VfdDigidash({
   speedKmh,
   speedRatio,
   gear,
@@ -139,17 +140,17 @@ export function VfdDigidash({
               {GROOVE_SEGMENTS.map((segIdx) => {
                 const segPct = (segIdx / 24) * 100;
                 const isActive = groove >= segPct;
-                let activeColor = 'bg-cyan-400 shadow-[0_0_4px_#05d9e8]';
+                let activeColor = 'bg-cyan-400';
                 if (segIdx >= 21) {
-                  activeColor = 'bg-amber-300 shadow-[0_0_6px_#fbbf24]';
+                  activeColor = 'bg-amber-300';
                 } else if (segIdx >= 16) {
-                  activeColor = 'bg-pink-500 shadow-[0_0_5px_#ff2a6d]';
+                  activeColor = 'bg-pink-500';
                 }
 
                 return (
                   <div
                     key={segIdx}
-                    className={`flex-1 rounded-xs transition-colors duration-75 ${
+                    className={`flex-1 rounded-xs ${
                       isActive ? activeColor : 'bg-[#02050a] border border-cyan-950/40'
                     }`}
                   />
@@ -235,15 +236,15 @@ export function VfdDigidash({
                   return (
                     <div
                       key={idx}
-                      className={`flex-1 rounded-xs transition-colors duration-75 ${
+                      className={`flex-1 rounded-xs ${
                         isLit
                           ? isRedZone
-                            ? 'bg-pink-500 shadow-[0_0_6px_#ff2a6d]'
+                            ? 'bg-pink-500'
                             : isSweetZone
-                              ? 'bg-emerald-400 shadow-[0_0_6px_#10b981]'
+                              ? 'bg-emerald-400'
                               : isLugging
                                 ? 'bg-amber-400'
-                                : 'bg-cyan-400 shadow-[0_0_4px_#05d9e8]'
+                                : 'bg-cyan-400'
                           : isSweetZone
                             ? 'bg-emerald-950/40 border-b border-emerald-500/40'
                             : isRedZone
@@ -326,4 +327,4 @@ export function VfdDigidash({
       </div>
     </div>
   );
-}
+});

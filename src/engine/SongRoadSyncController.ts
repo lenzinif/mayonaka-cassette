@@ -25,13 +25,21 @@ export class SongRoadSyncController {
 
   readonly crossedDropBars = new Set<number>();
   horizonStitchCooldown = 0;
+  private rollingStart = false;
 
-  private readonly anchorScratch = { distRemaining: 0, beatsRemaining: 0 };
+  private readonly anchorScratch = { distRemaining: 0, beatsRemaining: 0, isDropAnchor: false };
 
-  resetForTrack(resetCooldown = false): void {
+  resetForTrack(
+    resetCooldown = false,
+    rollingStart = false,
+    minCooldownSec = 0,
+  ): void {
     this.crossedDropBars.clear();
+    this.rollingStart = rollingStart;
     if (resetCooldown) {
-      this.horizonStitchCooldown = 0;
+      this.horizonStitchCooldown = minCooldownSec;
+    } else if (minCooldownSec > 0) {
+      this.horizonStitchCooldown = Math.max(this.horizonStitchCooldown, minCooldownSec);
     }
   }
 
@@ -59,10 +67,16 @@ export class SongRoadSyncController {
       return carSpeed;
     }
 
-    const paceFactor = getSectionPaceFactor(track, this.roadBarIndex, sectionRole);
+    const paceFactor = getSectionPaceFactor(
+      track,
+      this.roadBarIndex,
+      sectionRole,
+      this.rollingStart,
+    );
 
     // 1. Convergence on visible upcoming anchor (next uncrossed drop marker or stage fork)
     let hasNextAnchor = false;
+    this.anchorScratch.isDropAnchor = false;
 
     for (let i = 0; i < track.dropMarkers.length; i++) {
       const dm = track.dropMarkers[i]!;
@@ -71,9 +85,10 @@ export class SongRoadSyncController {
         const dropBeat = dm.barIndex * 4;
         const beatsRemaining = dropBeat - audioBeatIndex;
         const distRemaining = dm.worldZ - position;
-        if (beatsRemaining > 0.4 && beatsRemaining <= 32 && distRemaining > 0) {
+        if (beatsRemaining > 0.02 && beatsRemaining <= 32 && distRemaining > 0) {
           this.anchorScratch.distRemaining = distRemaining;
           this.anchorScratch.beatsRemaining = beatsRemaining;
+          this.anchorScratch.isDropAnchor = true;
           hasNextAnchor = true;
           break;
         }
@@ -89,13 +104,14 @@ export class SongRoadSyncController {
         if (distRemaining > 0) {
           this.anchorScratch.distRemaining = distRemaining;
           this.anchorScratch.beatsRemaining = beatsRemaining;
+          this.anchorScratch.isDropAnchor = false;
           hasNextAnchor = true;
         }
       }
     }
 
-    const minScale = 1 - tuning.syncMaxSlowdown;
-    const maxScale = 1 + tuning.syncMaxSpeedup;
+    const baseMinScale = 1 - tuning.syncMaxSlowdown;
+    const baseMaxScale = 1 + tuning.syncMaxSpeedup;
 
     if (hasNextAnchor) {
       const safeBpm = bpm > 0 ? bpm : 120;
@@ -103,6 +119,18 @@ export class SongRoadSyncController {
       if (timeRemainingSec > 0.01) {
         const targetSpeed = this.anchorScratch.distRemaining / timeRemainingSec;
         const ratio = targetSpeed / Math.max(1, carSpeed);
+        let minScale = baseMinScale;
+        let maxScale = baseMaxScale;
+        // Expand drop-crest authority inside the final 16-beat approach so even 95%+ Overdrive cars
+        // crest cleanly on the drop downbeat (`MP-06`).
+        if (this.anchorScratch.isDropAnchor && this.anchorScratch.beatsRemaining <= 16) {
+          const lockProximity = Math.max(
+            0,
+            Math.min(1, (16 - this.anchorScratch.beatsRemaining) / 10),
+          );
+          minScale = baseMinScale * (1 - lockProximity) + 0.42 * lockProximity;
+          maxScale = baseMaxScale * (1 - lockProximity) + 1.45 * lockProximity;
+        }
         const scale = Math.max(minScale, Math.min(maxScale, ratio));
         return carSpeed * scale;
       }
@@ -113,7 +141,7 @@ export class SongRoadSyncController {
     const lagBeats = audioBeatIndex - roadBeat;
     const paceInv = paceFactor > 0 ? 1 / paceFactor : 1;
     const rawScale = paceInv + lagBeats * tuning.syncElasticGain;
-    const scale = Math.max(minScale, Math.min(maxScale, rawScale));
+    const scale = Math.max(baseMinScale, Math.min(baseMaxScale, rawScale));
 
     return carSpeed * scale;
   }

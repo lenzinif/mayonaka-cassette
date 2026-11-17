@@ -69,6 +69,8 @@ describe('M6 — TrackLibrary, Grades & Best Scores', () => {
   it('computes stage and overall run grades and persists local per-song best scores by contentHash', () => {
     expect(computeStageGrade(9500, 88, 0, 0)).toBe('SSS');
     expect(computeStageGrade(7500, 68, 1, 2)).toBe('S');
+    expect(computeStageGrade(9500, 88, 6, 4)).not.toBe('S');
+    expect(computeStageGrade(9500, 88, 6, 4)).not.toBe('SSS');
     expect(computeStageGrade(5000, 50, 1, 1)).toBe('A');
     expect(computeStageGrade(2800, 30, 2, 3)).toBe('B');
     expect(computeStageGrade(800, 15, 3, 4)).toBe('C');
@@ -154,21 +156,22 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     expect(snap.forkLeftOption?.mode).toBe('loop');
     expect(snap.forkRightOption?.mode).toBe('nextTrack');
 
-    // Pressing 'forkRight' (key [2]) locks right branch and moves car into right lane
+    // Pressing 'forkRight' (key [2]) locks right branch and moves car into right lane,
+    // while keeping Stage 1's active BeatClock undisturbed until crossing the finish gate.
     input.press('forkRight');
     game.update(1 / 60);
     expect(game.car.x).toBeGreaterThan(0);
-
-    // Since roadBarIndex is in the final 2 bars while audio barIndex is still 0, early 4-bar DJ crossfade starts!
-    expect(audio.isCrossfading).toBe(true);
-    expect(audio.beatMap.contentHash).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
+    expect(audio.beatMap.contentHash).toBe(DEFAULT_SYNTH_BEATMAP.contentHash);
 
     // Cross the finish line on the Right branch -> advances to Stage 2 (Midnight Wangan)
+    // and initiates the 4-bar DJ crossfade cleanly aligned with Bar 0 of Stage 2.
     game.position = game.track.length - 10;
     game.car.speed = 6000;
     game.update(1 / 60);
 
     expect(library.currentIndex).toBe(1);
+    expect(audio.isCrossfading).toBe(true);
+    expect(audio.beatMap.contentHash).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
     expect(events.some((e) => e.type === 'stageCompleted')).toBe(true);
     expect(
       events.some((e) => e.type === 'stageTransition' && e.stageNumber === 2),
@@ -613,5 +616,194 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
       for (let i = 0; i < 60; i++) game.update(dt);
     }
     expect(audio.isOutroLooping).toBe(false);
+  });
+
+  it('transitions continuously across stage forks with zero frame-0 teleport, zero speed snap, and synchronized DJ crossfade', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const audio = new FunkAudioEngine();
+    const library = new TrackLibrary();
+    const game = new Game({ input, bridge, audio, library });
+    const gameAcc = game as unknown as {
+      position: number;
+      renderPalette: { id: string; skyTop: string };
+      activeNextTrackLookahead?: { length: number; segments: unknown[] };
+    };
+
+    const mockCtx = {
+      canvas: { width: 640, height: 360 },
+      save: () => {},
+      restore: () => {},
+      fillRect: () => {},
+      strokeRect: () => {},
+      fillText: () => {},
+      beginPath: () => {},
+      closePath: () => {},
+      moveTo: () => {},
+      lineTo: () => {},
+      quadraticCurveTo: () => {},
+      arc: () => {},
+      ellipse: () => {},
+      rect: () => {},
+      clip: () => {},
+      fill: () => {},
+      stroke: () => {},
+      translate: () => {},
+      rotate: () => {},
+      scale: () => {},
+      setTransform: () => {},
+      setLineDash: () => {},
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      createRadialGradient: () => ({ addColorStop: () => {} }),
+      drawImage: () => {},
+    } as unknown as CanvasRenderingContext2D;
+
+    const transitions: GameEvent[] = [];
+    bridge.onEvent((ev) => {
+      if (ev.type === 'stageTransition') transitions.push(ev);
+    });
+
+    const dt = 1 / 60;
+    const cruiseSpeed = 9500;
+    input.setDown('accelerate', true);
+
+    // Start driving first so audio & traffic clocks initialize before seeking near finish
+    game.update(dt);
+
+    // Seek player & audio clock 4 bars before Stage 1's finish line, then run 1 settle tick so
+    // FunkAudioEngine's sampled beat clock & SongRoadSyncController pick up the new song position.
+    const stage1Length = game.track.length;
+    const barLengthWorld = (game.track as { barLengthWorld?: number }).barLengthWorld ?? 0;
+    expect(barLengthWorld).toBeGreaterThan(0);
+    const startApproachZ = stage1Length - 4 * barLengthWorld;
+    game.position = startApproachZ;
+    game.car.x = 0.95;
+    game.car.speed = cruiseSpeed;
+    game.car.gearbox.gear = 5;
+    const approachRatio = startApproachZ / Math.max(1, game.track.length);
+    (audio as unknown as { virtualTrackSec: number }).virtualTrackSec =
+      audio.beatMap.durationSec * approachRatio;
+    game.update(dt);
+    game.position = startApproachZ;
+    game.car.speed = cruiseSpeed;
+    game.car.gearbox.gear = 5;
+
+    let enteredStage2 = false;
+    let prevPosBeforeFinish = game.position;
+    let prevAudioSecInStage2 = -1;
+
+    // Drive continuously for ~12 seconds across the final 4 bars of Stage 1 and first ~4 bars of Stage 2
+    for (let step = 0; step < 720; step++) {
+      // Hold steady highway cruise speed (5th gear matches 9500 cruise) & Right lane entry
+      game.car.speed = cruiseSpeed;
+      if (game.car.gear < 5) game.car.gearbox.gear = 5;
+      if (library.currentIndex === 0 && game.forkProgress < 0.65) {
+        game.car.x = 0.95;
+      }
+      const beforeStage = library.currentIndex;
+      const beforePos = game.position;
+      game.update(dt);
+      game.render(mockCtx, 1, 60);
+
+      if (beforeStage === 0 && library.currentIndex === 0) {
+        // While still on Stage 1, position must never stall/warp or run off Stage 1's BeatClock
+        const delta = game.position - beforePos;
+        expect(delta).toBeGreaterThan(cruiseSpeed * dt * 0.9);
+        expect(audio.beatMap.contentHash).toBe(DEFAULT_SYNTH_BEATMAP.contentHash);
+        prevPosBeforeFinish = game.position;
+
+        // Approaching the horizon boundary pre-generates Stage 2's lookahead road
+        if (game.position >= game.track.length - 25000) {
+          expect(gameAcc.activeNextTrackLookahead).toBeDefined();
+        }
+      } else if (beforeStage === 0 && library.currentIndex === 1) {
+        enteredStage2 = true;
+        const stage2EntryPos = game.position;
+        // CRITICAL: crossing into Stage 2 enters near bar 0 (<= 1 frame overshoot), NEVER teleported ~2 bars ahead!
+        expect(stage2EntryPos).toBeGreaterThanOrEqual(0);
+        expect(stage2EntryPos).toBeLessThan(260);
+        // Audio starts 4-bar crossfade at Stage 2 Beat 0 in tight phase alignment with Segment 0
+        expect(audio.isCrossfading).toBe(true);
+        expect(audio.beatMap.contentHash).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
+        const audioSec = (audio as unknown as { virtualTrackSec: number }).virtualTrackSec;
+        expect(audioSec).toBeLessThan(0.15);
+        prevAudioSecInStage2 = audioSec;
+        // Frame 0 of Stage 2 starts palette blend continuously from Stage 1's colors (no abrupt cut)
+        expect(gameAcc.renderPalette.skyTop).not.toBe(game.palette.skyTop);
+        expect(prevPosBeforeFinish).toBeLessThan(stage1Length);
+      } else if (enteredStage2) {
+        // Every subsequent frame in Stage 2 advances monotonically without stitch teleports or audio rewind
+        const delta = game.position - beforePos;
+        expect(delta).toBeGreaterThan(0);
+        expect(delta).toBeLessThan(cruiseSpeed * dt * 1.3);
+        const audioSec = (audio as unknown as { virtualTrackSec: number }).virtualTrackSec;
+        expect(audioSec).toBeGreaterThan(prevAudioSecInStage2);
+        prevAudioSecInStage2 = audioSec;
+      }
+    }
+
+    expect(enteredStage2).toBe(true);
+    expect(transitions.length).toBe(1);
+    // After 2.5+ seconds in Stage 2, palette crossfade finishes smoothly on Stage 2's target palette
+    expect(gameAcc.renderPalette.skyTop).toBe(game.palette.skyTop);
+  });
+});
+
+describe('MP-10 — Single-Track End-of-Run Fork', () => {
+  it('opens the stage fork in single-track mode and emits runCompleted on Right branch while looping on Left branch', () => {
+    const library = new TrackLibrary();
+    library.removeTrack(2);
+    library.removeTrack(1);
+    expect(library.hasMultipleTracks).toBe(false);
+
+    const inputRight = new FakeInput();
+    inputRight.setDown('accelerate', true);
+    const gameRight = new Game({
+      input: inputRight,
+      audio: new FunkAudioEngine(library.activeItem.beatMap),
+      library,
+    });
+
+    const forkStartZ = gameRight.getForkZoneStartZ();
+    expect(forkStartZ).toBeDefined();
+
+    const rightEvents: GameEvent['type'][] = [];
+    gameRight.bridge.onEvent((e) => rightEvents.push(e.type));
+
+    gameRight.position = gameRight.track.length - 120;
+    gameRight.car.x = 0.5;
+    gameRight.car.speed = 12000;
+    gameRight.forkChoice = 'right';
+
+    for (let i = 0; i < 60 && !rightEvents.includes('runCompleted'); i++) {
+      gameRight.update(1 / 120);
+    }
+
+    expect(rightEvents).toContain('stageCompleted');
+    expect(rightEvents).toContain('runCompleted');
+
+    // Left branch on single-track playlist still loops to Lap 2
+    const inputLeft = new FakeInput();
+    inputLeft.setDown('accelerate', true);
+    const gameLeft = new Game({
+      input: inputLeft,
+      audio: new FunkAudioEngine(library.activeItem.beatMap),
+      library,
+    });
+    const leftEvents: GameEvent['type'][] = [];
+    gameLeft.bridge.onEvent((e) => leftEvents.push(e.type));
+
+    gameLeft.position = gameLeft.track.length - 120;
+    gameLeft.car.x = -0.5;
+    gameLeft.car.speed = 12000;
+    gameLeft.forkChoice = 'left';
+
+    for (let i = 0; i < 60 && !leftEvents.includes('lapCompleted'); i++) {
+      gameLeft.update(1 / 120);
+    }
+
+    expect(leftEvents).toContain('stageCompleted');
+    expect(leftEvents).toContain('lapCompleted');
+    expect(leftEvents).not.toContain('runCompleted');
   });
 });

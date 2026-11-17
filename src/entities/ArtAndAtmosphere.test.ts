@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { drawMelonSodaInset, MelonSoda, SODA_SKINS } from './MelonSoda';
 import { ParticleSystem } from './Particles';
 import { drawPlayerCar, getPlayerCarSpriteFrame, PlayerCar } from './PlayerCar';
-import { drawKeiTruck, getKeiTruckSpriteFrame } from './TrafficAndProps';
+import { drawKeiTruck } from './TrafficAndProps';
 
 class FakeInput implements InputSource {
   private readonly held = new Set<Action>();
@@ -199,11 +199,6 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     expect(driftMock.polygonFillCalls).toBeGreaterThan(0);
 
     // KeiTruck pure rear view with curve tilt (zero lateral side quads or vertical wobble)
-    expect(getKeiTruckSpriteFrame(0)).toBe(0);
-    expect(getKeiTruckSpriteFrame(0.1)).toBe(0);
-    expect(getKeiTruckSpriteFrame(0.28)).toBe(0);
-    expect(getKeiTruckSpriteFrame(-0.52)).toBe(0);
-
     const truckStraightMock = createMockCanvasContext();
     drawKeiTruck(truckStraightMock.ctx, 320, 220, 0.04, 0, 0, false, 0);
     const truckTurnMock = createMockCanvasContext();

@@ -160,7 +160,7 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
                 <div className="flex gap-3 rounded border border-cyan-400/20 bg-[#13032b] p-2.5">
                   <div className="font-bold text-pink-400 w-24 shrink-0">1. INITIATE:</div>
                   <div className="text-cyan-100/80">
-                    Hold <code className="text-pink-300">[S]</code> / <code className="text-pink-300">[DOWN]</code> while steering into a curve at high speed.
+                    Hold <code className="text-pink-300">[LCTRL]</code> while steering for pure throttle drift, or tap <code className="text-pink-300">[S]</code> / <code className="text-pink-300">[DOWN]</code> + steer for brake-drift entry.
                   </div>
                 </div>
                 <div className="flex gap-3 rounded border border-cyan-400/20 bg-[#13032b] p-2.5">
@@ -226,7 +226,8 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
               <div className="space-y-1.5 rounded border border-cyan-400/30 bg-[#12042b] p-2.5">
                 <div className="font-bold text-cyan-300 border-b border-cyan-400/20 pb-1 uppercase">KEYBOARD</div>
                 <div className="flex justify-between"><span>THROTTLE:</span><span className="text-pink-300 font-bold">[W] / [UP]</span></div>
-                <div className="flex justify-between"><span>BRAKE / DRIFT:</span><span className="text-pink-300 font-bold">[S] / [DOWN]</span></div>
+                <div className="flex justify-between"><span>BRAKE / B-DRIFT:</span><span className="text-pink-300 font-bold">[S] / [DOWN]</span></div>
+                <div className="flex justify-between"><span>PURE DRIFT:</span><span className="text-pink-300 font-bold">[LCTRL]</span></div>
                 <div className="flex justify-between"><span>STEER:</span><span className="text-pink-300 font-bold">[A] / [D]</span></div>
                 <div className="flex justify-between"><span>SHIFT UP:</span><span className="text-pink-300 font-bold">[SPACE]</span></div>
                 <div className="flex justify-between"><span>SHIFT DOWN:</span><span className="text-pink-300 font-bold">[SHIFT]</span></div>

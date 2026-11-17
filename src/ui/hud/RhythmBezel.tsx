@@ -1,4 +1,5 @@
 import type { GrooveTier } from '@src/entities/PlayerCar';
+import { memo } from 'react';
 
 export interface RhythmBezelProps {
   beatPulse: number;
@@ -11,7 +12,11 @@ export interface RhythmBezelProps {
  * Generates an ultra-subtle peripheral light pulse in sync with the downbeat
  * without distracting the driver or adding render loop overhead.
  */
-export function RhythmBezel({ beatPulse, beatInBar, grooveTier }: RhythmBezelProps) {
+export const RhythmBezel = memo(function RhythmBezel({
+  beatPulse,
+  beatInBar,
+  grooveTier,
+}: RhythmBezelProps) {
   const isDownbeat = beatInBar === 0;
   const isOverdrive = grooveTier === 'OVERDRIVE';
 
@@ -27,7 +32,7 @@ export function RhythmBezel({ beatPulse, beatInBar, grooveTier }: RhythmBezelPro
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-0 transition-opacity duration-75 ease-out will-change-opacity"
+      className="pointer-events-none absolute inset-0 z-0 will-change-opacity [contain:strict]"
       style={{
         opacity: effectiveOpacity,
         boxShadow: isOverdrive
@@ -36,4 +41,4 @@ export function RhythmBezel({ beatPulse, beatInBar, grooveTier }: RhythmBezelPro
       }}
     />
   );
-}
+});
