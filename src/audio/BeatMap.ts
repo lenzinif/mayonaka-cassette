@@ -78,13 +78,6 @@ export function isBeatMap(raw: unknown): raw is BeatMap {
   return true;
 }
 
-export function validateBeatMap(raw: unknown): BeatMap {
-  if (!isBeatMap(raw)) {
-    throw new Error('Invalid BeatMap payload');
-  }
-  return raw;
-}
-
 /** Duration of a single beat in seconds (`60 / bpm`). */
 export function beatDurationSec(map: Pick<BeatMap, 'bpm'>): number {
   return 60 / map.bpm;

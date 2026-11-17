@@ -235,7 +235,6 @@ const COLOR_BEACON_RED = '#ff2a75';
 const COLOR_BEACON_CYAN = '#00f5d4';
 const COLOR_RAIN_FAR = '#70b5e8';
 const COLOR_RAIN_NEAR = '#a6e8ff';
-const COLOR_WATER_DEEP = '#030514';
 
 function computeCoastalTowerHeight(t: number): number {
   if (t <= 5 || t >= 26 || (t >= 12 && t <= 19)) {
@@ -374,26 +373,42 @@ export class Background {
   // Cached gradients to guarantee ZERO per-frame garbage collection allocations
   private cachedSkyCtx: CanvasRenderingContext2D | null = null;
   private cachedSkyHorizonY = -1;
-  private cachedSkyPalette: StagePalette | null = null;
+  private cachedSkyTop = '';
+  private cachedSkyMid = '';
+  private cachedSkyHorizon = '';
   private cachedSkyGrad: CanvasGradient | null = null;
 
   private cachedSunCtx: CanvasRenderingContext2D | null = null;
   private cachedSunHorizonY = -1;
-  private cachedSunPalette: StagePalette | null = null;
+  private cachedSunTop = '';
+  private cachedSunBottom = '';
   private cachedSunGrad: CanvasGradient | null = null;
 
   private cachedGlowCtx: CanvasRenderingContext2D | null = null;
   private cachedGlowHorizonY = -1;
-  private cachedGlowPalette: StagePalette | null = null;
+  private cachedGlowColor = '';
   private cachedGlowGrad: CanvasGradient | null = null;
 
   private cachedWaterCtx: CanvasRenderingContext2D | null = null;
   private cachedWaterHorizonY = -1;
-  private cachedWaterPalette: StagePalette | null = null;
+  private cachedWaterStyle = '';
+  private cachedWaterFog = '';
+  private cachedWaterSkyMid = '';
+  private cachedWaterSkyHorizon = '';
+  private cachedWaterDeep = '';
   private cachedWaterGrad: CanvasGradient | null = null;
 
+  private cachedGroundCtx: CanvasRenderingContext2D | null = null;
+  private cachedGroundHorizonY = -1;
+  private cachedGroundHeight = -1;
+  private cachedGroundFog = '';
+  private cachedGroundTop = '';
+  private cachedGroundBase = '';
+  private cachedGroundGrad: CanvasGradient | null = null;
+
   private cachedCoronaCtx: CanvasRenderingContext2D | null = null;
-  private cachedCoronaPalette: StagePalette | null = null;
+  private cachedCoronaSunBottom = '';
+  private cachedCoronaRim = '';
   private cachedCoronaSunX = -1;
   private cachedCoronaSunY = -1;
   private cachedCoronaSunR = -1;
@@ -404,10 +419,11 @@ export class Background {
   private cachedLightningThemeIdx = -1;
   private cachedLightningGrad: CanvasGradient | null = null;
 
-  private readonly cloudCanvases: (HTMLCanvasElement | null)[] = [null, null, null, null, null, null];
+  private cloudCanvases: (HTMLCanvasElement | null)[] = [null, null, null, null, null, null];
+  private readonly cloudCanvasCache = new Map<StagePalette['id'], (HTMLCanvasElement | null)[]>();
   private readonly cloudPadX = new Float32Array(CLOUD_COUNT);
   private readonly cloudPadTop = new Float32Array(CLOUD_COUNT);
-  private cachedCloudPalette: StagePalette | null = null;
+  private cachedCloudPaletteId: StagePalette['id'] | null = null;
 
   constructor() {
     // 1. Layer 1: Mountain ridges & Mayonaka rolling hills
@@ -726,10 +742,12 @@ export class Background {
     beatPulse = 0,
     downbeatPulse = 0,
     alpha = 1,
+    grooveIntensity = 0.5,
   ): void {
     const horizonY = Math.floor(height * 0.5);
-    const pulse = beatPulse * tuning.bpmPulseStrength;
-    const downPulse = downbeatPulse * tuning.bpmPulseStrength;
+    const grooveScale = 0.72 + Math.max(0, Math.min(1.2, grooveIntensity)) * 0.6;
+    const pulse = beatPulse * tuning.bpmPulseStrength * grooveScale;
+    const downPulse = downbeatPulse * tuning.bpmPulseStrength * grooveScale;
 
     const renderScroll1 = alpha >= 0.999 ? this.scroll1 : lerpWrapped(this.prevScroll1, this.scroll1, MOUNTAIN_SPAN, alpha);
     const renderScroll2 = alpha >= 0.999 ? this.scroll2 : lerpWrapped(this.prevScroll2, this.scroll2, CITY_SPAN, alpha);
@@ -745,7 +763,9 @@ export class Background {
     if (
       this.cachedSkyCtx !== ctx ||
       this.cachedSkyHorizonY !== horizonY ||
-      this.cachedSkyPalette !== palette ||
+      this.cachedSkyTop !== palette.skyTop ||
+      this.cachedSkyMid !== palette.skyMid ||
+      this.cachedSkyHorizon !== palette.skyHorizon ||
       !this.cachedSkyGrad
     ) {
       const grad = ctx.createLinearGradient(0, 0, 0, horizonY);
@@ -754,7 +774,9 @@ export class Background {
       grad.addColorStop(1, palette.skyHorizon);
       this.cachedSkyCtx = ctx;
       this.cachedSkyHorizonY = horizonY;
-      this.cachedSkyPalette = palette;
+      this.cachedSkyTop = palette.skyTop;
+      this.cachedSkyMid = palette.skyMid;
+      this.cachedSkyHorizon = palette.skyHorizon;
       this.cachedSkyGrad = grad;
     }
     ctx.fillStyle = this.cachedSkyGrad;
@@ -846,10 +868,11 @@ export class Background {
       const haloR = sunR * 1.85;
       if (
         this.cachedCoronaCtx !== ctx ||
-        this.cachedCoronaPalette !== palette ||
-        Math.abs(this.cachedCoronaSunX - sunX) > 1 ||
-        Math.abs(this.cachedCoronaSunY - sunY) > 1 ||
-        Math.abs(this.cachedCoronaSunR - sunR) > 1 ||
+        this.cachedCoronaSunBottom !== palette.sunBottom ||
+        this.cachedCoronaRim !== palette.mountainRim ||
+        Math.abs(this.cachedCoronaSunX - sunX) > 3.5 ||
+        Math.abs(this.cachedCoronaSunY - sunY) > 3.5 ||
+        Math.abs(this.cachedCoronaSunR - sunR) > 3.5 ||
         !this.cachedCoronaGrad
       ) {
         const glowGrad = ctx.createRadialGradient(sunX, sunY, sunR * 0.5, sunX, sunY, haloR);
@@ -857,7 +880,8 @@ export class Background {
         glowGrad.addColorStop(0.5, hexToRgba(palette.mountainRim, 0.10));
         glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         this.cachedCoronaCtx = ctx;
-        this.cachedCoronaPalette = palette;
+        this.cachedCoronaSunBottom = palette.sunBottom;
+        this.cachedCoronaRim = palette.mountainRim;
         this.cachedCoronaSunX = sunX;
         this.cachedCoronaSunY = sunY;
         this.cachedCoronaSunR = sunR;
@@ -872,7 +896,8 @@ export class Background {
     if (
       this.cachedSunCtx !== ctx ||
       this.cachedSunHorizonY !== horizonY ||
-      this.cachedSunPalette !== palette ||
+      this.cachedSunTop !== palette.sunTop ||
+      this.cachedSunBottom !== palette.sunBottom ||
       !this.cachedSunGrad
     ) {
       const maxR = 64;
@@ -881,7 +906,8 @@ export class Background {
       sunGrad.addColorStop(1, palette.sunBottom);
       this.cachedSunCtx = ctx;
       this.cachedSunHorizonY = horizonY;
-      this.cachedSunPalette = palette;
+      this.cachedSunTop = palette.sunTop;
+      this.cachedSunBottom = palette.sunBottom;
       this.cachedSunGrad = sunGrad;
     }
 
@@ -920,14 +946,43 @@ export class Background {
     }
 
     // -------------------------------------------------------------------------
-    // 5. FALLBACK GROUND FILL (occludes celestial body below road horizon)
+    // 5. FALLBACK GROUND FILL (occludes celestial body below road horizon with smooth fog blend)
     // -------------------------------------------------------------------------
-    ctx.fillStyle = palette.grass[1];
+    const groundBase = palette.grass[1];
+    const groundTop = palette.grass[0];
+    if (typeof ctx.createLinearGradient === 'function') {
+      if (
+        this.cachedGroundCtx !== ctx ||
+        this.cachedGroundHorizonY !== horizonY ||
+        this.cachedGroundHeight !== height ||
+        this.cachedGroundFog !== palette.fog ||
+        this.cachedGroundTop !== groundTop ||
+        this.cachedGroundBase !== groundBase ||
+        !this.cachedGroundGrad
+      ) {
+        const gGrad = ctx.createLinearGradient(0, horizonY, 0, height);
+        gGrad.addColorStop(0, palette.fog);
+        gGrad.addColorStop(0.09, groundTop);
+        gGrad.addColorStop(0.22, groundBase);
+        gGrad.addColorStop(1, groundBase);
+        this.cachedGroundCtx = ctx;
+        this.cachedGroundHorizonY = horizonY;
+        this.cachedGroundHeight = height;
+        this.cachedGroundFog = palette.fog;
+        this.cachedGroundTop = groundTop;
+        this.cachedGroundBase = groundBase;
+        this.cachedGroundGrad = gGrad;
+      }
+      ctx.fillStyle = this.cachedGroundGrad;
+    } else {
+      ctx.fillStyle = groundBase;
+    }
     ctx.fillRect(0, horizonY, width, height - horizonY);
 
     // -------------------------------------------------------------------------
     // 6. LAYER 1: LONTANISSIMO (Scroll ~0.10x)
     // -------------------------------------------------------------------------
+    const seaDeep = palette.water?.[0] ?? palette.grass[0];
     if (isSunsetBoulevard) {
       // Sunset Boulevard: Calm deep sea horizon
       const seaTopY = horizonY - 26;
@@ -936,17 +991,25 @@ export class Background {
       if (
         this.cachedWaterCtx !== ctx ||
         this.cachedWaterHorizonY !== horizonY ||
-        this.cachedWaterPalette !== palette ||
+        this.cachedWaterStyle !== 'sunset' ||
+        this.cachedWaterSkyMid !== palette.skyMid ||
+        this.cachedWaterSkyHorizon !== palette.skyHorizon ||
+        this.cachedWaterFog !== palette.fog ||
+        this.cachedWaterDeep !== seaDeep ||
         !this.cachedWaterGrad
       ) {
         const wGrad = ctx.createLinearGradient(0, seaTopY, 0, horizonY);
-        wGrad.addColorStop(0, hexToRgba(palette.skyHorizon, 0.40));
-        wGrad.addColorStop(0.28, COLOR_WATER_DEEP);
-        wGrad.addColorStop(0.65, hexToRgba(palette.skyHorizon, 0.35));
-        wGrad.addColorStop(1, hexToRgba(palette.grass[0], 0.95));
+        wGrad.addColorStop(0, hexToRgba(palette.skyMid, 0.65));
+        wGrad.addColorStop(0.35, hexToRgba(palette.skyHorizon, 0.45));
+        wGrad.addColorStop(0.75, hexToRgba(palette.fog, 0.78));
+        wGrad.addColorStop(1, seaDeep);
         this.cachedWaterCtx = ctx;
         this.cachedWaterHorizonY = horizonY;
-        this.cachedWaterPalette = palette;
+        this.cachedWaterStyle = 'sunset';
+        this.cachedWaterSkyMid = palette.skyMid;
+        this.cachedWaterSkyHorizon = palette.skyHorizon;
+        this.cachedWaterFog = palette.fog;
+        this.cachedWaterDeep = seaDeep;
         this.cachedWaterGrad = wGrad;
       }
       ctx.fillStyle = this.cachedWaterGrad;
@@ -990,16 +1053,22 @@ export class Background {
       if (
         this.cachedWaterCtx !== ctx ||
         this.cachedWaterHorizonY !== horizonY ||
-        this.cachedWaterPalette !== palette ||
+        this.cachedWaterStyle !== 'bay' ||
+        this.cachedWaterFog !== palette.fog ||
+        this.cachedWaterSkyHorizon !== palette.skyHorizon ||
+        this.cachedWaterDeep !== seaDeep ||
         !this.cachedWaterGrad
       ) {
         const wGrad = ctx.createLinearGradient(0, seaTopY, 0, horizonY);
-        wGrad.addColorStop(0, COLOR_WATER_DEEP);
-        wGrad.addColorStop(0.55, hexToRgba(palette.skyHorizon, 0.40));
-        wGrad.addColorStop(1, hexToRgba(palette.grass[0], 0.95));
+        wGrad.addColorStop(0, hexToRgba(palette.fog, 0.85));
+        wGrad.addColorStop(0.55, hexToRgba(palette.skyHorizon, 0.42));
+        wGrad.addColorStop(1, seaDeep);
         this.cachedWaterCtx = ctx;
         this.cachedWaterHorizonY = horizonY;
-        this.cachedWaterPalette = palette;
+        this.cachedWaterStyle = 'bay';
+        this.cachedWaterFog = palette.fog;
+        this.cachedWaterSkyHorizon = palette.skyHorizon;
+        this.cachedWaterDeep = seaDeep;
         this.cachedWaterGrad = wGrad;
       }
       ctx.fillStyle = this.cachedWaterGrad;
@@ -1117,7 +1186,11 @@ export class Background {
         }
       }
       ctx.strokeStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
-      ctx.lineWidth = 1.0 + pulse * 0.8 + this.lightningAlpha * 1.5;
+      ctx.lineWidth =
+        1.0 +
+        pulse * 0.8 +
+        (grooveIntensity >= 0.85 ? 0.35 : 0) +
+        this.lightningAlpha * 1.5;
       ctx.stroke();
     } else {
       // Akiba Night Rush: Jagged dark mountains
@@ -1149,7 +1222,11 @@ export class Background {
         else ctx.lineTo(x, y);
       }
       ctx.strokeStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
-      ctx.lineWidth = 1.2 + pulse * 1.1 + this.lightningAlpha * 1.6;
+      ctx.lineWidth =
+        1.2 +
+        pulse * 1.1 +
+        (grooveIntensity >= 0.85 ? 0.45 : 0) +
+        this.lightningAlpha * 1.6;
       ctx.stroke();
     }
 
@@ -1167,7 +1244,7 @@ export class Background {
       const waterTopY = skylineBaseY;
       const waterH = horizonY - waterTopY;
 
-      for (let pass = -1; pass <= Math.ceil(width / CITY_SPAN); pass++) {
+      for (let pass = 0; pass <= Math.ceil(width / CITY_SPAN); pass++) {
         const baseOffset = pass * CITY_SPAN - renderScroll3;
         for (let t = 0; t < CITY_TOWERS; t++) {
           const tx = Math.round(baseOffset + t * towerSpacing);
@@ -1194,7 +1271,7 @@ export class Background {
     }
 
     // 7b. Skyline buildings & window matrices (rendered in front of water reflections)
-    for (let pass = -1; pass <= Math.ceil(width / CITY_SPAN); pass++) {
+    for (let pass = 0; pass <= Math.ceil(width / CITY_SPAN); pass++) {
       const baseOffset = pass * CITY_SPAN - renderScroll2;
       for (let t = 0; t < CITY_TOWERS; t++) {
         const tx = Math.round(baseOffset + t * towerSpacing);
@@ -1285,6 +1362,7 @@ export class Background {
           const winRows = Math.min(6, Math.floor(th / 5));
           const wPal = WINDOW_PALETTES[palette.id] ?? WINDOW_PALETTES.night!;
 
+          let lastColIdx = -1;
           for (let r = 0; r < winRows; r++) {
             const wy = ty + 4 + r * 5;
             if (wy >= skylineBaseY - 2) break;
@@ -1292,24 +1370,19 @@ export class Background {
               const wx = tx + 3 + c * 5;
               if (wx + 2 > tx + tw - 2) continue;
 
-              // Unique deterministic seed per window
+              // Unique deterministic seed per window: skip 15% dark windows immediately and run Math.sin only on 20% blinking windows
               const winSeed = (t * 67 + r * 31 + c * 17) % 100;
-              // Occasional independent toggle cycle based on slow time (every 4-12s)
-              const togglePhase = Math.sin(renderSkyTime * 0.35 + winSeed * 0.73);
-
-              // 65% always steady lit; 20% slowly toggle on/off occasionally; 15% dark
-              let isLit = false;
-              if (winSeed < 65) {
-                isLit = true;
-              } else if (winSeed < 85) {
-                isLit = togglePhase > -0.15;
+              if (winSeed >= 85) continue;
+              if (winSeed >= 65 && Math.sin(renderSkyTime * 0.35 + winSeed * 0.73) <= -0.15) {
+                continue;
               }
 
-              if (isLit) {
-                const colIdx = (t + r * 2 + c * 3 + winSeed) % 3;
+              const colIdx = (t + r * 2 + c * 3 + winSeed) % 3;
+              if (colIdx !== lastColIdx) {
                 ctx.fillStyle = colIdx === 0 ? wPal.col1 : colIdx === 1 ? wPal.col2 : wPal.col3;
-                ctx.fillRect(wx, wy, 2, 2);
+                lastColIdx = colIdx;
               }
+              ctx.fillRect(wx, wy, 2, 2);
             }
           }
         }
@@ -1320,30 +1393,38 @@ export class Background {
     // 8. LAYER 3: TRANSIZIONE (Scroll ~0.85x) — Breakwater Horizon Wash
     // -------------------------------------------------------------------------
     const glowH = 24;
+    const glowBelowH = 10;
     const glowColor = palette.horizonGlow ?? palette.skyHorizon;
     if (
       this.cachedGlowCtx !== ctx ||
       this.cachedGlowHorizonY !== horizonY ||
-      this.cachedGlowPalette !== palette ||
+      this.cachedGlowColor !== glowColor ||
       !this.cachedGlowGrad
     ) {
-      const grad = ctx.createLinearGradient(0, horizonY - glowH, 0, horizonY);
+      const totalGlowH = glowH + glowBelowH;
+      const peakStop = glowH / totalGlowH;
+      const grad = ctx.createLinearGradient(0, horizonY - glowH, 0, horizonY + glowBelowH);
       grad.addColorStop(0, hexToRgba(glowColor, 0));
-      grad.addColorStop(0.4, hexToRgba(glowColor, 0.35));
-      grad.addColorStop(1, hexToRgba(glowColor, 0.95));
+      grad.addColorStop(peakStop * 0.45, hexToRgba(glowColor, 0.35));
+      grad.addColorStop(peakStop, hexToRgba(glowColor, 0.85));
+      grad.addColorStop(1, hexToRgba(glowColor, 0));
       this.cachedGlowCtx = ctx;
       this.cachedGlowHorizonY = horizonY;
-      this.cachedGlowPalette = palette;
+      this.cachedGlowColor = glowColor;
       this.cachedGlowGrad = grad;
     }
 
     const washAlpha = Math.min(
-      0.85,
-      0.22 + pulse * 0.36 + downPulse * 0.18 + this.lightningAlpha * 0.28,
+      0.88,
+      0.2 +
+        Math.max(0, Math.min(1.2, grooveIntensity)) * 0.14 +
+        pulse * 0.36 +
+        downPulse * 0.18 +
+        this.lightningAlpha * 0.28,
     );
     ctx.globalAlpha = washAlpha;
     ctx.fillStyle = this.cachedGlowGrad;
-    ctx.fillRect(0, horizonY - glowH, width, glowH);
+    ctx.fillRect(0, horizonY - glowH, width, glowH + glowBelowH);
     ctx.globalAlpha = 1;
 
     // -------------------------------------------------------------------------
@@ -1565,14 +1646,29 @@ export class Background {
   }
 
   /**
+   * Pre-renders cloud sprites for an upcoming stage palette ahead of a stage transition
+   * so switching biomes introduces zero canvas allocation or rasterization hitches.
+   */
+  prewarmPalette(palette: StagePalette): void {
+    this.ensureCloudCanvases(palette);
+  }
+
+  /**
    * Pre-renders pixel-art clouds onto offscreen canvases with generous padding
    * so domes are never clipped at the top, bottom, or sides.
    */
   private ensureCloudCanvases(palette: StagePalette): void {
     if (typeof document === 'undefined' || typeof document.createElement !== 'function') return;
-    if (this.cachedCloudPalette === palette && this.cloudCanvases[0] !== null) return;
-    this.cachedCloudPalette = palette;
+    if (this.cachedCloudPaletteId === palette.id && this.cloudCanvases[0] !== null) return;
 
+    const existing = this.cloudCanvasCache.get(palette.id);
+    if (existing) {
+      this.cloudCanvases = existing;
+      this.cachedCloudPaletteId = palette.id;
+      return;
+    }
+
+    const canvases: (HTMLCanvasElement | null)[] = [null, null, null, null, null, null];
     const cPal = CLOUD_PALETTES[palette.id] ?? CLOUD_PALETTES.night!;
     for (let i = 0; i < CLOUD_COUNT; i++) {
       const cw = Math.round(this.cloudWidth[i]!);
@@ -1583,11 +1679,8 @@ export class Background {
       const padX = this.cloudPadX[i]!;
       const padTop = this.cloudPadTop[i]!;
 
-      let canvas = this.cloudCanvases[i];
-      if (!canvas) {
-        canvas = document.createElement('canvas');
-        this.cloudCanvases[i] = canvas;
-      }
+      const canvas = document.createElement('canvas');
+      canvases[i] = canvas;
       canvas.width = Math.ceil(cw + padX * 2);
       canvas.height = Math.ceil(ch + padTop + 2);
       const ctx = canvas.getContext('2d');
@@ -1610,6 +1703,10 @@ export class Background {
         padTop,
       );
     }
+
+    this.cloudCanvasCache.set(palette.id, canvases);
+    this.cloudCanvases = canvases;
+    this.cachedCloudPaletteId = palette.id;
   }
 
   private renderPixelArtClouds(

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { PALETTE_NIGHT_FUNK } from './palette';
+import { PALETTE_AKIBA_NIGHT, PALETTE_NIGHT_FUNK, PALETTE_OG_FUTURE_FUNK } from './palette';
 import { RoadRenderer, type RoadView } from './RoadRenderer';
 import { createPoint, type RoadSegment, type SegmentEnvironment, type Track } from './RoadSegment';
+import { clearPropSpriteCache } from './RoadsideProps';
 
 function createMockCanvas(): {
   ctx: CanvasRenderingContext2D;
@@ -116,7 +117,7 @@ describe('RoadRenderer — Rendering Environments', () => {
     expect(mock.fills).toContain(PALETTE_NIGHT_FUNK.road[0]);
   });
 
-  it('renders bridge segments with bay water fill, 3D steel parapets, and expansion joints', () => {
+  it('renders bridge segments with palette-harmonized bay water fill, 3D steel parapets, and expansion joints', () => {
     const renderer = new RoadRenderer();
     const mock = createMockCanvas();
     const track = createTestTrack('bridge');
@@ -124,13 +125,28 @@ describe('RoadRenderer — Rendering Environments', () => {
     renderer.render(mock.ctx, track, defaultView, PALETTE_NIGHT_FUNK);
 
     expect(renderer.stats.drawnSegments).toBeGreaterThan(0);
-    // Water ground fill instead of grass
-    expect(mock.fills).toContain('#060b1e');
+    // Palette-harmonized water ground fill instead of grass or hardcoded pitch black
+    expect(mock.fills).toContain(PALETTE_NIGHT_FUNK.water![0]);
+    expect(mock.fills).not.toContain('#040714');
+    expect(mock.fills).not.toContain('#060b1e');
     // Steel parapet & top chrome rail
     expect(mock.fills).toContain('#484160');
     expect(mock.fills).toContain('#9e95be');
     // Expansion joint
     expect(mock.fills).toContain('#5c5478');
+  });
+
+  it('uses distinct palette water colors for Sunset Boulevard and Akiba Night bridges without black bands', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('bridge');
+
+    for (const palette of [PALETTE_OG_FUTURE_FUNK, PALETTE_AKIBA_NIGHT]) {
+      const mock = createMockCanvas();
+      renderer.render(mock.ctx, track, defaultView, palette);
+      expect(mock.fills).toContain(palette.water![0]);
+      expect(mock.fills).not.toContain('#040714');
+      expect(mock.fills).not.toContain('#060b1e');
+    }
   });
 
   it('renders distant roadside props with a smooth alpha fade-in to eliminate horizon pop-in', () => {
@@ -252,5 +268,127 @@ describe('RoadRenderer — Rendering Environments', () => {
     const leftDividerCenterAtBottom = (bl[0] + br[0]) / 2;
     // True perspective at y=360: scale = (360 - 180) / (1000 * 180) = 0.001 -> screenW = 640 -> lx = 320 - 640/3
     expect(leftDividerCenterAtBottom).toBeCloseTo(320 - 640 / 3, 2);
+  });
+
+  it('renders nextTrack past track.length on right-fork lookahead and uses palette road colors for fork branches', () => {
+    const renderer = new RoadRenderer();
+    const mock = createMockCanvas();
+    const trackA = createTestTrack('standard');
+    const trackB = createTestTrack('standard');
+    trackB.segments[0]!.curve = 1.5;
+
+    const viewRight: RoadView = {
+      ...defaultView,
+      position: trackA.length - 400,
+      drawDistance: 20,
+      forkZoneStartZ: trackA.length - 1200,
+      forkChoice: 'right',
+      nextTrack: trackB,
+    };
+
+    renderer.render(mock.ctx, trackA, viewRight, PALETTE_NIGHT_FUNK);
+    // nextTrack.segments[0] was projected ahead of trackA's finish line without negative cameraZ
+    expect(trackB.segments[0]!.p1.cameraZ).toBeCloseTo(400, 3);
+    // Fork branches use palette.road[stripe], never legacy hardcoded '#392858'/'#31214c'
+    expect(mock.fills).not.toContain('#392858');
+    expect(mock.fills).not.toContain('#31214c');
+  });
+
+  it('draws props partially occluded behind a hill crest via drawImage without invoking ctx.clip()', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('standard');
+
+    // Shape a clear hill crest peaking at segments 4..5 and descending steeply at segments 6..15
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      const yOf = (idx: number) => {
+        if (idx <= 5) return Math.sin((idx / 5) * Math.PI * 0.5) * 1400;
+        if (idx <= 16) return 1400 - (idx - 5) * 260;
+        return 1400 - 11 * 260;
+      };
+      seg.p1.worldY = yOf(i);
+      seg.p2.worldY = yOf(i + 1);
+    }
+
+    // Place a palm tree down the far side of the hill crest so it is partially cropped by the crest
+    track.segments[11]!.sprites.push({ kind: 'palm', offset: 1.4, variant: 0 });
+
+    const origDoc = globalThis.document;
+    let clipCalls = 0;
+    let drawImageCalls = 0;
+    const noop = () => {};
+
+    try {
+      clearPropSpriteCache();
+      (globalThis as unknown as { document: unknown }).document = {
+        createElement: (tag: string) => {
+          if (tag !== 'canvas') return {};
+          const offCtx = {
+            canvas: { width: 100, height: 100 },
+            fillStyle: '#000',
+            strokeStyle: '#000',
+            lineWidth: 1,
+            globalAlpha: 1,
+            imageSmoothingEnabled: false,
+            save: noop,
+            restore: noop,
+            beginPath: noop,
+            closePath: noop,
+            moveTo: noop,
+            lineTo: noop,
+            quadraticCurveTo: noop,
+            arc: noop,
+            fill: noop,
+            stroke: noop,
+            fillRect: noop,
+          } as unknown as CanvasRenderingContext2D;
+          return {
+            width: 0,
+            height: 0,
+            getContext: () => offCtx,
+          };
+        },
+      };
+
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        imageSmoothingEnabled: true,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: noop,
+        clip: () => {
+          clipCalls++;
+        },
+        drawImage: () => {
+          drawImageCalls++;
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+
+      expect(renderer.stats.drawnProps).toBe(1);
+      expect(drawImageCalls).toBe(1);
+      expect(clipCalls).toBe(0);
+    } finally {
+      clearPropSpriteCache();
+      if (origDoc !== undefined) {
+        globalThis.document = origDoc;
+      } else {
+        delete (globalThis as unknown as { document?: unknown }).document;
+      }
+    }
   });
 });

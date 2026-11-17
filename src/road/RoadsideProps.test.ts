@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PropKind } from './RoadSegment';
 import {
+  clearPropSpriteCache,
   drawPine,
   drawProp,
   drawStreetTree,
@@ -373,6 +374,78 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
 
       setPropTheme(null);
       expect(getPropTheme()).toBeNull();
+    });
+  });
+
+  describe('Offscreen Sprite Cache & Clip-Free Blit (60 FPS Lock)', () => {
+    it('bakes prop sprites once per LOD tier and blits via drawImage with source-rect crest cropping', () => {
+      const createdCanvases: Array<{ width: number; height: number; rectCalls: number; fillCalls: number }> = [];
+      const drawImageCalls: Array<number[]> = [];
+      const origDoc = globalThis.document;
+
+      try {
+        clearPropSpriteCache();
+        (globalThis as unknown as { document: unknown }).document = {
+          createElement: (tag: string) => {
+            if (tag !== 'canvas') return {};
+            const offMock = createMockCanvas();
+            const record = {
+              width: 0,
+              height: 0,
+              get rectCalls() {
+                return offMock.rectCalls;
+              },
+              get fillCalls() {
+                return offMock.fillCalls;
+              },
+              getContext: () => offMock.ctx,
+            };
+            createdCanvases.push(record);
+            return record;
+          },
+        };
+
+        const mainMock = createMockCanvas();
+        const mainCtx = mainMock.ctx as CanvasRenderingContext2D & {
+          drawImage: (...args: unknown[]) => void;
+        };
+        mainCtx.drawImage = (...args: unknown[]) => {
+          // Record numeric geometry arguments (skip leading CanvasImageSource)
+          drawImageCalls.push(args.slice(1).map(Number));
+        };
+
+        // 1. First draw at mid LOD (ppu = 0.015) bakes one offscreen canvas and blits it (4 numeric args)
+        drawProp(mainCtx, 'palm', 320, 240, 0.015, 1, 0, 0);
+        expect(createdCanvases.length).toBe(1);
+        expect(createdCanvases[0]!.width).toBeGreaterThan(20);
+        expect(createdCanvases[0]!.rectCalls).toBeGreaterThan(0);
+        expect(mainMock.rectCalls).toBe(0);
+        expect(drawImageCalls.length).toBe(1);
+        expect(drawImageCalls[0]!.length).toBe(4);
+
+        // 2. Second draw in same LOD tier reuses cached offscreen canvas without allocating or baking again
+        drawProp(mainCtx, 'palm', 200, 220, 0.018, 1, 0, 0);
+        expect(createdCanvases.length).toBe(1);
+        expect(drawImageCalls.length).toBe(2);
+        expect(drawImageCalls[1]!.length).toBe(4);
+
+        // 3. Draw partially occluded behind a hill crest (y > clipY): uses 8 numeric arg cropped drawImage
+        drawProp(mainCtx, 'palm', 260, 240, 0.02, 1, 0, 0, 0, 210);
+        expect(createdCanvases.length).toBe(1);
+        expect(drawImageCalls.length).toBe(3);
+        const croppedArgs = drawImageCalls[2]!;
+        expect(croppedArgs.length).toBe(8);
+        const [, , , srcH, , destY, , destH] = croppedArgs;
+        expect(srcH!).toBeLessThan(createdCanvases[0]!.height);
+        expect(destY! + destH!).toBeCloseTo(210, 3);
+      } finally {
+        clearPropSpriteCache();
+        if (origDoc !== undefined) {
+          globalThis.document = origDoc;
+        } else {
+          delete (globalThis as unknown as { document?: unknown }).document;
+        }
+      }
     });
   });
 });

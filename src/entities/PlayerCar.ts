@@ -162,12 +162,17 @@ export class PlayerCar {
    * manual downshift, rewarding active downshifting on climbs and corner entries.
    */
   downshiftSpoolTimer = 0;
+  /** Time spent drifting cleanly on an actual curve (`|segmentCurve| >= 0.8`), in seconds. */
+  driftCurveTime = 0;
+  /** Remaining post-drift traction hookup boost duration, in seconds (`MP-02`). */
+  driftBoostTimer = 0;
 
   private prevSlope = 0;
   private prevLateralVel = 0;
   private smoothedLatDelta = 0;
   private prevBrake = false;
   private brakeDriftActive = false;
+  private brakeDriftGraceTimer = 0;
   /** Current outer asphalt edge (1.0 on normal road, up to 1.68 in Y-fork). */
   private roadOuterLimit = 1;
   /** Current inner median island half-width (0 on normal road, up to 0.52 in Y-fork). */
@@ -335,6 +340,10 @@ export class PlayerCar {
       // Heavy shunt breaks an active drift
       this.driftDir = 0;
       this.driftTime = 0;
+      this.driftCurveTime = 0;
+      this.driftBoostTimer = 0;
+      this.brakeDriftActive = false;
+      this.brakeDriftGraceTimer = 0;
     }
   }
 
@@ -418,6 +427,11 @@ export class PlayerCar {
       this.downshiftSpoolTimer = Math.max(0, this.downshiftSpoolTimer - dt);
     }
 
+    const rawSteer =
+      controls.steerAxis !== undefined && Math.abs(controls.steerAxis) > 0.05
+        ? Math.max(-1, Math.min(1, controls.steerAxis))
+        : (controls.right ? 1 : 0) - (controls.left ? 1 : 0);
+
     // 1. Longitudinal speed (accelerate via Gearbox torque curve / brake / coast + off-road & grade drag).
     const gearProgress = (this.gearbox.gear - 1) / (MAX_GEAR - 1);
     // Uphill climbs (`segmentSlope > 0`) load tall gears (5th/6th) moderately so 6th gear sags from top speed,
@@ -456,10 +470,14 @@ export class PlayerCar {
       : 0;
 
     if (controls.brake) {
-      const brakeScale =
+      const rawBrakeScale =
         controls.brakeAxis !== undefined && controls.brakeAxis > 0.15
           ? controls.brakeAxis
           : 1.0;
+      const isBrakeDriftEntry =
+        this.driftDir !== 0 ||
+        (Math.abs(rawSteer) > 0.15 && prevSpeed / maxSpeed >= tuning.driftMinSpeedRatio);
+      const brakeScale = isBrakeDriftEntry ? rawBrakeScale * 0.42 : rawBrakeScale;
       this.speed -=
         maxSpeed *
         (tuning.brakeRate * brakeScale + offRoadDragRate + Math.max(0, slopeDragRate)) *
@@ -506,6 +524,17 @@ export class PlayerCar {
         dt;
     }
 
+    if (this.driftBoostTimer > 0) {
+      this.driftBoostTimer = Math.max(0, this.driftBoostTimer - dt);
+      if (!isOffRoad && !controls.brake) {
+        const boostCeiling = Math.min(maxSpeed * 1.065, Math.max(targetCap, gearTopSpeed) * 1.04);
+        this.speed = Math.min(
+          boostCeiling,
+          this.speed + maxSpeed * tuning.driftBoostAccelBonus * dt,
+        );
+      }
+    }
+
     const hardMaxSpeed = maxSpeed * 1.065;
     this.speed = Math.max(0, Math.min(hardMaxSpeed, this.speed));
     this.gearbox.update(this.speed, maxSpeed);
@@ -513,17 +542,13 @@ export class PlayerCar {
     const speedRatio = this.speedRatio;
 
     // 2. Smooth steering input (supports analog steerAxis from Gamepad or digital left/right keys).
-    const rawSteer =
-      controls.steerAxis !== undefined && Math.abs(controls.steerAxis) > 0.05
-        ? Math.max(-1, Math.min(1, controls.steerAxis))
-        : (controls.right ? 1 : 0) - (controls.left ? 1 : 0);
     const steerBlend = 1 - Math.exp(-tuning.steerResponse * dt);
     this.steer += (rawSteer - this.steer) * steerBlend;
     if (Math.abs(this.steer) < 0.001 && rawSteer === 0) {
       this.steer = 0;
     }
 
-    // 3. Drift state machine (supports dedicated Drift key C/Ctrl OR OutRun-style S+Steer tap).
+    // 3. Drift state machine (supports dedicated Drift key [LCTRL] OR OutRun-style S+Steer tap).
     const brakeJustPressed = controls.brake && !this.prevBrake;
     this.prevBrake = controls.brake;
 
@@ -532,21 +557,54 @@ export class PlayerCar {
       if (aboveMinSpeed && rawSteer !== 0 && (controls.drift || brakeJustPressed)) {
         this.driftDir = rawSteer > 0 ? 1 : -1;
         this.driftTime = 0;
-        this.brakeDriftActive = !controls.drift && brakeJustPressed;
+        this.driftCurveTime = 0;
+        if (!controls.drift && brakeJustPressed) {
+          this.brakeDriftActive = true;
+          this.brakeDriftGraceTimer = 0.08;
+        } else {
+          this.brakeDriftActive = false;
+          this.brakeDriftGraceTimer = 0;
+        }
         onEvent?.({ type: 'driftStart', direction: this.driftDir });
       }
     } else {
-      const canSustain = this.brakeDriftActive
-        ? aboveMinSpeed && (rawSteer !== 0 || Math.abs(segmentCurve) > 1.2)
-        : controls.drift && aboveMinSpeed;
+      if (this.brakeDriftActive) {
+        if (controls.brake || controls.drift) {
+          this.brakeDriftGraceTimer = 0.08;
+        } else {
+          this.brakeDriftGraceTimer = Math.max(0, this.brakeDriftGraceTimer - dt);
+        }
+        if (this.brakeDriftGraceTimer <= 0 || rawSteer === 0 || !aboveMinSpeed) {
+          this.brakeDriftActive = false;
+        }
+      }
+
+      const canSustain =
+        aboveMinSpeed &&
+        ((controls.drift && (rawSteer !== 0 || Math.abs(this.yaw) > 0.08)) ||
+          (this.brakeDriftActive && rawSteer !== 0));
       if (!canSustain) {
         const duration = this.driftTime;
+        const cleanBoostEarned = !isOffRoad && this.driftCurveTime >= tuning.driftBoostMinTime;
         this.driftDir = 0;
         this.driftTime = 0;
+        this.driftCurveTime = 0;
         this.brakeDriftActive = false;
+        this.brakeDriftGraceTimer = 0;
+        if (cleanBoostEarned) {
+          this.driftBoostTimer = tuning.driftBoostDuration;
+          const kickCeiling = Math.min(hardMaxSpeed, Math.max(targetCap, gearTopSpeed) * 1.04);
+          this.speed = Math.min(kickCeiling, this.speed + maxSpeed * 0.018);
+          this.gearbox.update(this.speed, maxSpeed);
+        }
         onEvent?.({ type: 'driftEnd', duration });
       } else {
         this.driftTime += dt;
+        if (!isOffRoad && absCurve >= 0.8) {
+          this.driftCurveTime += dt;
+        } else if (isOffRoad) {
+          this.driftCurveTime = Math.max(0, this.driftCurveTime - dt * 2);
+        }
         // Lateral tire scrub bleeds speed (more pronounced in higher gears / high entry speeds),
         // inviting a downshift to 3rd/4th/5th on exit to launch out of the corner.
         const highGearScrub = 0.78 + 0.72 * gearProgress;
@@ -596,8 +654,12 @@ export class PlayerCar {
     } else {
       let continuousGain = 0;
       if (this.driftDir !== 0) {
+        // Scale drift Groove gain by actual road curvature so straight-road drifting gives zero bonus (`MP-02`)
+        const curveScale = absCurve < 0.35 ? 0 : Math.min(1.0, (absCurve - 0.35) / 1.15);
         continuousGain =
-          tuning.grooveDriftGainRate * (tofuActive ? tuning.tofuGrooveMultiplier : 1);
+          tuning.grooveDriftGainRate *
+          curveScale *
+          (tofuActive ? tuning.tofuGrooveMultiplier : 1);
       } else if (speedRatio >= 0.55) {
         const cruiseFactor = (speedRatio - 0.5) / 0.5;
         const overdriveCruiseScale =
@@ -611,7 +673,12 @@ export class PlayerCar {
 
       let tierDecayRate = 0;
       if (this.grooveTier === 'OVERDRIVE') {
-        tierDecayRate = tuning.grooveOverdriveDrainRate;
+        // Clean high-speed cruising in tall gears sustains OVERDRIVE instead of auto-draining (`MP-01`)
+        const highSpeedSustain =
+          this.driftDir === 0 && !this.isLugging && speedRatio >= 0.85
+            ? Math.min(1, (speedRatio - 0.85) / 0.1)
+            : 0;
+        tierDecayRate = tuning.grooveOverdriveDrainRate * (1 - highSpeedSustain * 0.72);
       } else if (this.grooveTier === 'HIGH') {
         tierDecayRate = tuning.grooveHighDrainRate;
       }

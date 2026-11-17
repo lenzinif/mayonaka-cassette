@@ -255,4 +255,87 @@ describe('PlayerCar', () => {
     expect(car.groove).toBeGreaterThan(88);
     expect(car.groove).toBeCloseTo(88 + (tuning.grooveDriftGainRate - tuning.grooveOverdriveDrainRate), 0);
   });
+
+  it('MP-01: sustains OVERDRIVE during clean 95-100% speed cruising in 6th gear, but drains rapidly below 65%', () => {
+    const fastCar = new PlayerCar();
+    fastCar.gearbox.gear = 6;
+    fastCar.speed = tuning.maxSpeed * 0.96;
+    fastCar.groove = 95;
+    fastCar.grooveTier = 'OVERDRIVE';
+
+    for (let i = 0; i < 20 * 60; i++) {
+      fastCar.update(1 / 60, { ...IDLE, accelerate: true }, 0, 0);
+    }
+    expect(fastCar.grooveTier).toBe('OVERDRIVE');
+    expect(fastCar.groove).toBeGreaterThanOrEqual(85);
+
+    const slowCar = new PlayerCar();
+    slowCar.gearbox.gear = 6;
+    slowCar.speed = tuning.maxSpeed * 0.55;
+    slowCar.groove = 84;
+    slowCar.grooveTier = 'OVERDRIVE';
+
+    for (let i = 0; i < 4 * 60; i++) {
+      slowCar.update(1 / 60, IDLE, 0, 0);
+    }
+    expect(slowCar.grooveTier).toBe('HIGH');
+  });
+
+  it('MP-02: prevents straight-road drift Groove farming and grants a clean exit speed boost after 0.6s+ curve drift', () => {
+    // 1. Straight-road exploit check (curve = 0): drifting must not out-earn clean high-speed cruising
+    const straightCruiser = new PlayerCar();
+    straightCruiser.gearbox.gear = 6;
+    straightCruiser.speed = tuning.maxSpeed * 0.95;
+    straightCruiser.groove = 20;
+
+    const straightDrifter = new PlayerCar();
+    straightDrifter.gearbox.gear = 3;
+    straightDrifter.speed = tuning.maxSpeed * 0.49;
+    straightDrifter.groove = 20;
+
+    for (let i = 0; i < 5 * 60; i++) {
+      straightCruiser.update(1 / 60, { ...IDLE, accelerate: true }, 0, 0);
+      straightDrifter.x = 0;
+      straightDrifter.update(1 / 60, { ...IDLE, accelerate: true, right: true, drift: true }, 0, 0);
+    }
+    expect(straightDrifter.groove).toBeLessThanOrEqual(straightCruiser.groove);
+
+    // 2. Clean drift exit boost after >= 0.6s on a real curve (|curve| = 2.0)
+    const car = new PlayerCar();
+    car.gearbox.gear = 5;
+    car.speed = tuning.maxSpeed * 0.85;
+    for (let i = 0; i < 45; i++) {
+      // 0.75s drift on curve = 2.0
+      car.x = 0;
+      car.update(1 / 60, { ...IDLE, accelerate: true, right: true, drift: true }, 2.0, 0);
+    }
+    expect(car.isDrifting).toBe(true);
+    expect(car.driftCurveTime).toBeGreaterThanOrEqual(0.6);
+
+    const speedBeforeExit = car.speed;
+    // Release drift and straighten on asphalt
+    for (let i = 0; i < 20; i++) {
+      car.update(1 / 60, { ...IDLE, accelerate: true }, 0, 0);
+    }
+    expect(car.isDrifting).toBe(false);
+    expect(car.speed).toBeGreaterThan(speedBeforeExit);
+  });
+
+  it('MP-03: exits brake-drift promptly when releasing all keys even inside a >1.2 curve and softens S+Steer tap decel', () => {
+    const car = new PlayerCar();
+    car.gearbox.gear = 5;
+    car.speed = 9500;
+
+    // 1. S + D tap should not trigger full -100 straight-brake hit in a single 1/120s tick
+    car.update(1 / 120, { ...IDLE, brake: true, right: true }, 1.5, 0);
+    expect(car.isDrifting).toBe(true);
+    expect(car.speed).toBeGreaterThan(9440);
+
+    // 2. Release ALL keys inside a curve = 1.5 -> must exit drift within <= 0.15s
+    for (let i = 0; i < 18; i++) {
+      // 18 / 120 = 0.15s
+      car.update(1 / 120, IDLE, 1.5, 0);
+    }
+    expect(car.isDrifting).toBe(false);
+  });
 });

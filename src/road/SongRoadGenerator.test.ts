@@ -1,5 +1,9 @@
 import type { BeatMap, SectionRole } from '@src/audio/BeatMap';
-import { DEFAULT_SYNTH_BEATMAP } from '@src/audio/FunkAudioEngine';
+import {
+  BUNDLED_COASTAL_BEATMAP,
+  BUNDLED_WANGAN_BEATMAP,
+  DEFAULT_SYNTH_BEATMAP,
+} from '@src/audio/FunkAudioEngine';
 import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { describe, expect, it } from 'vitest';
 import { defineChunk, getChunksForRole, ROAD_CHUNKS, type RoadChunk, validateRoadChunk } from './RoadChunks';
@@ -222,6 +226,88 @@ describe('SongRoadGenerator', () => {
         expect(s.p1.worldY).toBe(road.canonical.p1WorldY[i]);
         expect(s.p2.worldY).toBe(road.canonical.p2WorldY[i]);
         expect(s.env).toBe(road.canonical.env[i]);
+      }
+    });
+
+    it('preserves exact geometry during overlapping 1.75-bar horizon stitches (deltaSegs < copyCount)', () => {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
+      const drawDistance = 200;
+      const copyCount = drawDistance - 24; // 176
+
+      // Find a non-bridge window where a 1.75-bar forward stitch (< 176 segments) overlaps its own source
+      let stitchBar = -1;
+      for (let b = 4; b < road.totalBars - 10; b++) {
+        const startSeg = b * road.segmentsPerBar;
+        let hasBridge = false;
+        for (let s = 0; s < Math.ceil(1.75 * road.segmentsPerBar) + drawDistance + 16; s++) {
+          if (road.segments[startSeg + s]?.env === 'bridge') {
+            hasBridge = true;
+            break;
+          }
+        }
+        if (!hasBridge) {
+          stitchBar = b;
+          break;
+        }
+      }
+
+      expect(stitchBar).toBeGreaterThanOrEqual(0);
+      const currentZ = stitchBar * road.barLengthWorld;
+      const rawTargetZ = currentZ + 1.75 * road.barLengthWorld;
+
+      const preCurve: number[] = [];
+      const preDeltaY: number[] = [];
+      const preEnv: string[] = [];
+      const fromSegIdx = Math.floor(currentZ / road.segmentLength);
+      for (let n = 0; n < copyCount; n++) {
+        const seg = road.segments[fromSegIdx + n]!;
+        preCurve.push(seg.curve);
+        preDeltaY.push(seg.p2.worldY - seg.p1.worldY);
+        preEnv.push(seg.env ?? 'standard');
+      }
+
+      const res = stitchHorizonToTargetZ(road, currentZ, rawTargetZ, drawDistance);
+      expect(res).not.toBeNull();
+      if (!res) return;
+
+      // Ensure test truly exercises overlapping memmove (deltaSegs < copyCount)
+      const deltaSegs = res.toSegIndex - res.fromSegIndex;
+      expect(deltaSegs).toBeLessThan(copyCount);
+      expect(res.copiedWindowSegs).toBe(copyCount);
+
+      for (let n = 0; n < copyCount; n++) {
+        const destSeg = road.segments[res.toSegIndex + n]!;
+        expect(destSeg.curve).toBe(preCurve[n]);
+        expect(destSeg.env).toBe(preEnv[n]);
+        expect(destSeg.p2.worldY - destSeg.p1.worldY).toBeCloseTo(preDeltaY[n]!, 5);
+      }
+
+      for (let i = 1; i < road.segments.length; i++) {
+        expect(road.segments[i]!.p1.worldY).toBeCloseTo(road.segments[i - 1]!.p2.worldY, 5);
+      }
+    });
+
+    it('keeps outro tail elevation gentle and returns cleanly to worldY = 0 across all bundled tracks', () => {
+      for (const map of [
+        DEFAULT_SYNTH_BEATMAP,
+        BUNDLED_WANGAN_BEATMAP,
+        BUNDLED_COASTAL_BEATMAP,
+      ]) {
+        const road = generateSongRoad(map);
+        const segs = road.segments;
+        expect(segs[segs.length - 1]!.p2.worldY).toBeCloseTo(0, 5);
+
+        // Final 2 bars leading into the next stage must have gentle highway grade (no vertical wall climb)
+        const finalTwoBarsStart = Math.max(0, segs.length - road.segmentsPerBar * 2);
+        for (let i = finalTwoBarsStart; i < segs.length; i++) {
+          const slopeUnits = Math.abs(segs[i]!.p2.worldY - segs[i]!.p1.worldY);
+          expect(slopeUnits).toBeLessThanOrEqual(60);
+        }
+        // Very last segments arriving at the portal must level flat into the horizon
+        const lastSlope = Math.abs(
+          segs[segs.length - 1]!.p2.worldY - segs[segs.length - 1]!.p1.worldY,
+        );
+        expect(lastSlope).toBeLessThan(5);
       }
     });
 
@@ -617,5 +703,47 @@ describe('SongRoadGenerator', () => {
         }
       }
     });
+  });
+
+  it('prevents cumulative elevation runaway and clamps build heights across multi-drop tracks (MP-04)', () => {
+    const longMultiDropMap: BeatMap = {
+      version: 1,
+      contentHash: 'sha256:mp04-long-elevation-test',
+      title: 'Long Multi-Drop Endurance',
+      artist: 'Test',
+      bpm: 124,
+      beatsPerBar: 4,
+      firstBeatOffsetSec: 0,
+      durationSec: (128 * 4 * 60) / 124,
+      source: 'bundled',
+      confidence: { tempo: 1, downbeat: 1, tempoStable: true },
+      barEnergy: Array.from({ length: 128 }, () => 0.8),
+      sections: [
+        { startBar: 0, bars: 8, role: 'intro' },
+        { startBar: 8, bars: 16, role: 'build' },
+        { startBar: 24, bars: 20, role: 'drop' },
+        { startBar: 44, bars: 4, role: 'breakdown' },
+        { startBar: 48, bars: 16, role: 'build' },
+        { startBar: 64, bars: 20, role: 'drop' },
+        { startBar: 84, bars: 4, role: 'breakdown' },
+        { startBar: 88, bars: 16, role: 'build' },
+        { startBar: 104, bars: 16, role: 'drop' },
+        { startBar: 120, bars: 8, role: 'outro' },
+      ],
+    };
+
+    const road = generateSongRoad(longMultiDropMap);
+    let maxAbsY = 0;
+    for (const seg of road.segments) {
+      maxAbsY = Math.max(maxAbsY, Math.abs(seg.p2.worldY));
+    }
+    expect(maxAbsY).toBeLessThan(20000);
+    expect(Math.abs(road.segments[road.segments.length - 1]!.p2.worldY)).toBeCloseTo(0, 3);
+
+    for (const map of [DEFAULT_SYNTH_BEATMAP, BUNDLED_WANGAN_BEATMAP, BUNDLED_COASTAL_BEATMAP]) {
+      const r = generateSongRoad(map);
+      const peakY = Math.max(...r.segments.map((s) => Math.abs(s.p2.worldY)));
+      expect(peakY).toBeLessThan(20000);
+    }
   });
 });

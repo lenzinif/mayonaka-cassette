@@ -97,7 +97,8 @@ export interface ImportProgress {
 }
 
 /**
- * Computes a stage/song letter grade from driving performance metrics (M6).
+ * Computes a stage/song letter grade from driving performance metrics (M6, MP-10).
+ * Grade `'S'` requires clean driving (`collisions <= 3 && sodaSpills <= 2`) in addition to strong Groove/score.
  */
 export function computeStageGrade(
   score: number,
@@ -108,13 +109,19 @@ export function computeStageGrade(
   if (avgGroove >= 82 && score >= 9000 && sodaSpills === 0 && collisions <= 1) {
     return 'SSS';
   }
-  if (avgGroove >= 65 || score >= 7000) {
+  const cleanPenalty = collisions * 3.0 + sodaSpills * 3.5;
+  const effectiveGroove = Math.max(0, avgGroove - cleanPenalty);
+  const canEarnS = collisions <= 3 && sodaSpills <= 2 && collisions + sodaSpills <= 4;
+  if (
+    canEarnS &&
+    ((effectiveGroove >= 60 && score >= 6500) || (score >= 7000 && effectiveGroove >= 58))
+  ) {
     return 'S';
   }
-  if (avgGroove >= 45 || score >= 4500) {
+  if (effectiveGroove >= 45 || score >= 4500) {
     return 'A';
   }
-  if (avgGroove >= 28 || score >= 2500) {
+  if (effectiveGroove >= 28 || score >= 2500) {
     return 'B';
   }
   return 'C';
@@ -340,13 +347,6 @@ export class TrackLibrary {
    */
   getBestScore(contentHash: string): SongBestScore | null {
     return this.bestScores.get(contentHash) ?? null;
-  }
-
-  /**
-   * Returns all saved per-song best scores keyed by `contentHash`.
-   */
-  getAllBestScores(): ReadonlyMap<string, SongBestScore> {
-    return this.bestScores;
   }
 
   /**

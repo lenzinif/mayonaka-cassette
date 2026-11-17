@@ -134,13 +134,35 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     });
   };
 
-  let lastChunkId = '';
+  const recentChunkIds: string[] = [];
+  const chunkUsageCounts = new Map<string, number>();
   let lastCurveSign: -1 | 1 = 1;
+
+  // Determine the tail window where elevation smoothly returns to worldY = 0 without cutting
+  // an active build->drop crest (eliminates steep final wall climbs at the stage fork).
+  let lastBuildBeforeDropEndBar = 0;
+  for (let i = 0; i < sections.length - 1; i++) {
+    const s = sections[i]!;
+    const ns = sections[i + 1]!;
+    if (s.role === 'build' && ns.role === 'drop') {
+      lastBuildBeforeDropEndBar = s.startBar + s.bars;
+    }
+  }
+  const lastSection = sections[sections.length - 1];
+  const desiredTailBars =
+    lastSection?.role === 'outro' ? Math.max(8, lastSection.bars) : 6;
+  const rawTailStartBar =
+    totalBars <= 4
+      ? Math.floor(totalBars / 2)
+      : Math.max(lastBuildBeforeDropEndBar, totalBars - desiredTailBars);
+  const tailStartBar =
+    sections.length === 1 && totalBars <= 4 && lastSection?.role !== 'outro'
+      ? Math.max(0, totalBars - 1)
+      : Math.min(totalBars - 1, Math.max(0, rawTailStartBar));
 
   for (let secIdx = 0; secIdx < sections.length; secIdx++) {
     const sec = sections[secIdx]!;
     const nextSec = sections[secIdx + 1];
-    const isLastSection = secIdx === sections.length - 1;
     const isBuildBeforeDrop = sec.role === 'build' && nextSec?.role === 'drop';
 
     if (sec.role === 'drop') {
@@ -160,11 +182,23 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
       const chunkBars: 4 | 8 = remainingBars >= 8 ? (rng.bool(0.55) ? 8 : 4) : 4;
       const actualBars = Math.min(remainingBars, chunkBars);
       const isFinalChunkOfSection = barCursor + actualBars >= secEndBar;
-      const isFinalChunkOfTrack = isLastSection && isFinalChunkOfSection;
 
       const avgEnergy = averageBarEnergy(beatMap.barEnergy, barCursor, actualBars);
-      const chunk = selectChunk(rng, catalog, sec.role, chunkBars, avgEnergy, lastChunkId);
-      lastChunkId = chunk.id;
+      const chunk = selectChunk(
+        rng,
+        catalog,
+        sec.role,
+        chunkBars,
+        avgEnergy,
+        recentChunkIds,
+        chunkUsageCounts,
+        lastY(),
+      );
+      recentChunkIds.push(chunk.id);
+      if (recentChunkIds.length > 3) {
+        recentChunkIds.shift();
+      }
+      chunkUsageCounts.set(chunk.id, (chunkUsageCounts.get(chunk.id) ?? 0) + 1);
 
       const mirrored: boolean =
         chunk.allowMirror === false
@@ -204,18 +238,19 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
         const targetCurve = m.curve * mirrorSign * curveScale;
 
         // Elevation calculation:
-        // 1. If final maneuver of the entire track, bring elevation cleanly back to 0 so loop is seamless.
-        // 2. If inside a build section leading into a drop, enforce positive climb so the crest peaks at the drop.
+        // 1. Inside a build section leading into a drop, enforce positive climb so the crest peaks at the drop.
+        // 2. Otherwise apply gentle homeostatic drift control so altitude stays readable (tail pass levels to 0).
         const startY = lastY();
         let endY: number;
-        if (isFinalChunkOfTrack && isLastManeuverInChunk) {
-          endY = 0;
-        } else if (isBuildBeforeDrop) {
+        if (isBuildBeforeDrop) {
           const minClimbUnits = isFinalChunkOfSection && isLastManeuverInChunk ? HILL.HIGH : HILL.MEDIUM * 0.6;
           const climbUnits = Math.max(minClimbUnits, Math.abs(m.elevation)) * hillScale;
-          endY = startY + climbUnits * segmentLength;
+          endY = Math.min(17500, startY + climbUnits * segmentLength);
         } else {
-          endY = startY + m.elevation * hillScale * segmentLength;
+          const rawDeltaY = m.elevation * hillScale * segmentLength;
+          const restoringPull = -startY * 0.18;
+          const maxDriftY = 16000;
+          endY = Math.max(-maxDriftY, Math.min(maxDriftY, startY + rawDeltaY + restoringPull));
         }
 
         for (let n = 0; n < mSegCount; n++) {
@@ -276,6 +311,23 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
       });
 
       barCursor += actualBars;
+    }
+  }
+
+  // Smoothly return elevation to worldY = 0 over the safe tail window so the stage fork
+  // settles horizontally into the horizon portal instead of forming a steep final climb wall.
+  const tailStartSeg = Math.max(0, Math.min(segments.length - 1, tailStartBar * segmentsPerBar));
+  const tailCount = segments.length - tailStartSeg;
+  if (tailCount > 0) {
+    const tailStartY = segments[tailStartSeg]!.p1.worldY;
+    let prevTailY = tailStartY;
+    for (let k = 0; k < tailCount; k++) {
+      const seg = segments[tailStartSeg + k]!;
+      const progress = (k + 1) / tailCount;
+      const nextTailY = k === tailCount - 1 ? 0 : easeInOut(tailStartY, 0, progress);
+      seg.p1.worldY = prevTailY;
+      seg.p2.worldY = nextTailY;
+      prevTailY = nextTailY;
     }
   }
 
@@ -368,8 +420,12 @@ export function getSectionPaceFactor(
   _track: SongTrack,
   barIndex: number,
   sectionRole: SectionRole,
+  isRollingStart = false,
 ): number {
   if (barIndex < 4) {
+    if (isRollingStart) {
+      return 1.0;
+    }
     const clampedBar = Math.max(0, barIndex);
     return 0.55 + (clampedBar / 4) * (0.85 - 0.55);
   }
@@ -444,7 +500,10 @@ export function stitchHorizonToTargetZ(
   const deltaY =
     track.canonical.p1WorldY[toSegIndex]! - track.segments[fromSegIndex]!.p1.worldY;
 
-  for (let n = 0; n < copyCount; n++) {
+  // Copy backward because toSegIndex > fromSegIndex: when deltaSegs < copyCount
+  // (e.g. 1.75-bar stitches), forward iteration would overwrite overlapping source indices
+  // before later iterations read them, corrupting geometry with double deltaY.
+  for (let n = copyCount - 1; n >= 0; n--) {
     const srcSeg = track.segments[fromSegIndex + n]!;
     const destSeg = track.segments[toSegIndex + n]!;
 
@@ -606,7 +665,9 @@ function selectChunk(
   role: SectionRole,
   preferredBars: 4 | 8,
   avgEnergy: number,
-  lastChunkId: string,
+  recentChunkIds: readonly string[],
+  chunkUsageCounts: ReadonlyMap<string, number>,
+  currentY: number,
 ): RoadChunk {
   const rolePool = getChunksForRole(role, catalog);
   const pool = rolePool.length > 0 ? rolePool : catalog;
@@ -614,14 +675,38 @@ function selectChunk(
   const sizeMatches = pool.filter((c) => c.bars === preferredBars);
   const candidates = sizeMatches.length > 0 ? sizeMatches : pool;
 
-  const nonRepeating =
+  const lastChunkId = recentChunkIds.length > 0 ? recentChunkIds[recentChunkIds.length - 1]! : '';
+  const nonImmediate =
     candidates.length > 1 ? candidates.filter((c) => c.id !== lastChunkId) : candidates;
+  const nonRecent = nonImmediate.filter((c) => !recentChunkIds.includes(c.id));
+  const selectionPool = nonRecent.length > 0 ? nonRecent : nonImmediate;
 
-  return rng.pickWeighted(nonRepeating, (chunk) => {
+  return rng.pickWeighted(selectionPool, (chunk) => {
     const baseWeight = chunk.weight ?? 1.0;
-    if (!chunk.energyRange) return baseWeight;
-    const [minE, maxE] = chunk.energyRange;
-    return avgEnergy >= minE && avgEnergy <= maxE ? baseWeight * 1.5 : baseWeight * 0.35;
+    let energyWeight = baseWeight;
+    if (chunk.energyRange) {
+      const [minE, maxE] = chunk.energyRange;
+      energyWeight =
+        avgEnergy >= minE && avgEnergy <= maxE ? baseWeight * 1.5 : baseWeight * 0.35;
+    }
+
+    // Variety bonus: penalize chunks already used multiple times so songs draw broadly from catalog (`MP-06`)
+    const usedCount = chunkUsageCounts.get(chunk.id) ?? 0;
+    const noveltyWeight = 1 / (1 + usedCount * 0.75);
+
+    // Elevation homeostasis: favor compensating chunks when cumulative worldY drifts far from 0 (`MP-04`)
+    let elevationBias = 1.0;
+    if (Math.abs(currentY) > 6000) {
+      let netElev = 0;
+      for (let i = 0; i < chunk.maneuvers.length; i++) {
+        netElev += chunk.maneuvers[i]!.elevation;
+      }
+      if (netElev !== 0) {
+        elevationBias = netElev * currentY < 0 ? 1.65 : 0.55;
+      }
+    }
+
+    return energyWeight * noveltyWeight * elevationBias;
   });
 }
 

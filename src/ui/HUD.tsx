@@ -86,6 +86,13 @@ export function HUD({
     if (onToggleCleanHud) onToggleCleanHud();
     else setInternalCleanHud((prev) => !prev);
   }, [onToggleCleanHud]);
+  const handleToggleCassetteDeck = useCallback(
+    () => setShowCassetteDeck((prev) => !prev),
+    [],
+  );
+  const handleToggleAutoShift = useCallback(() => {
+    onToggleAutoShift?.();
+  }, [onToggleAutoShift]);
 
   // Keyboard shortcut listeners
   useEffect(() => {
@@ -138,34 +145,10 @@ export function HUD({
         showToast(`DROP // BAR ${event.barIndex + 1}`, 1500, 'pink');
       } else if (event.type === 'songRoadGenerated') {
         showToast(`ROAD BUILT // ${event.totalBars} BARS (${event.chunkCount} CHUNKS)`, 2200, 'cyan');
-      } else if (event.type === 'gearShift') {
-        const { result, grooveGained } = event;
-        const shiftLabel = result.direction === 'down' ? 'DOWNSHIFT' : 'SHIFT';
-        if (result.rewardTier === 'PERFECT') {
-          const db = result.judgement.isDownbeat ? 'DOWNBEAT ' : '';
-          showToast(
-            `${db}PERFECT ${shiftLabel}! ${result.fromGear}→${result.toGear} (+${Math.round(grooveGained)} GROOVE)`,
-            1400,
-            'emerald',
-          );
-        } else if (result.rewardTier === 'GOOD') {
-          showToast(
-            `GOOD ${shiftLabel} ${result.fromGear}→${result.toGear} (+${Math.round(grooveGained)} GROOVE)`,
-            1200,
-            'cyan',
-          );
-        }
       } else if (event.type === 'pauseChanged') {
         if (!event.paused) {
           showToast('GAME RESUMED', 1200, 'pink');
         }
-      } else if (event.type === 'grooveTierChanged') {
-        const tierName = event.tier === 'OVERDRIVE' ? 'FUNKY OVERDRIVE' : event.tier;
-        showToast(
-          `GROOVE TIER // ${tierName}`,
-          1700,
-          event.tier === 'OVERDRIVE' ? 'emerald' : 'pink',
-        );
       } else if (event.type === 'tofuModeToggled') {
         showToast(
           event.active
@@ -307,7 +290,7 @@ export function HUD({
             playlistLength={playlistLength}
             isSlack={isTapeSlack}
             visible={showCassetteDeck && !effectiveCleanHud}
-            onToggleVisible={() => setShowCassetteDeck((prev) => !prev)}
+            onToggleVisible={handleToggleCassetteDeck}
           />
         </div>
 
@@ -446,7 +429,7 @@ export function HUD({
             (Offset upward via `mb-24` so the 120x80 canvas Melon Soda cup inset
              at bottom-left remains 100% unobstructed) */}
         <div
-          className={`flex flex-col gap-1.5 transition-all duration-200 [contain:layout_style_paint] ${
+          className={`flex flex-col gap-1.5 [contain:layout_style_paint] ${
             tofuMode ? 'mb-24 sm:mb-26' : ''
           }`}
         >
@@ -493,7 +476,7 @@ export function HUD({
           isDrifting={isDrifting}
           driftTime={driftTime}
           isOffRoad={isOffRoad}
-          onToggleAutoShift={() => onToggleAutoShift?.()}
+          onToggleAutoShift={handleToggleAutoShift}
         />
       </div>
 

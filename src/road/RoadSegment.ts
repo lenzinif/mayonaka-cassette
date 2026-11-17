@@ -142,8 +142,6 @@ export const FORK_SPLIT_SPAN_T = FORK_SPLIT_END_T - FORK_WIDEN_END_T;
 export const FORK_CONVERGE_SPAN_T = 1 - FORK_SPLIT_END_T;
 /** Peak inner median V-island half-width at `t = FORK_SPLIT_END_T`. */
 export const FORK_PEAK_INNER_GAP = 0.52;
-/** Peak outer asphalt edge in road half-widths at `t = FORK_SPLIT_END_T` (`1.2 + 0.48 = 1.68`). */
-export const FORK_PEAK_OUTER_LIMIT = 1.68;
 /** Peak branch center X offset in road half-widths at `t = FORK_SPLIT_END_T` (`(1.68 + 0.52) / 2 = 1.10`). */
 export const FORK_PEAK_BRANCH_CENTER = 1.1;
 

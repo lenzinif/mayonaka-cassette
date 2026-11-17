@@ -113,10 +113,6 @@ export class AutopilotDriver implements InputSource {
     this.perception = perception;
   }
 
-  setFallbackInput(fallback: InputSource): void {
-    this.fallbackInput = fallback;
-  }
-
   toggle(): boolean {
     this.enabled = !this.enabled;
     if (!this.enabled) {
@@ -267,12 +263,23 @@ export class AutopilotDriver implements InputSource {
     this.isAccelerating = car.speedRatio < targetSpeed;
     this.isBraking = car.speedRatio > targetSpeed + 0.08;
 
-    // 6. Drift Triggering on Tight Corners
+    // 6. Drift Triggering on Tight Corners (release cleanly on exit for MP-02 exit boost)
     if (this.mode !== 'relaxed') {
-      const tightCorner = Math.abs(road.aheadCurve) > 2.2 || Math.abs(road.currentCurve) > 2.4;
-      if (tightCorner && car.speedRatio >= tuning.driftMinSpeedRatio) {
+      const enterThreshold = this.mode === 'perfect' ? 1.7 : 2.2;
+      const tightCorner =
+        Math.abs(road.aheadCurve) > enterThreshold || Math.abs(road.currentCurve) > enterThreshold;
+      const maxDriftSafeX = 0.85;
+      if (
+        tightCorner &&
+        car.speedRatio >= tuning.driftMinSpeedRatio &&
+        Math.abs(car.x) < maxDriftSafeX &&
+        Math.abs(this.steerAxis) > 0.15
+      ) {
         this.isDrifting = true;
-      } else if (Math.abs(road.aheadCurve) < 1.2 && Math.abs(road.currentCurve) < 1.2) {
+      } else if (
+        (Math.abs(road.aheadCurve) < 1.1 && Math.abs(road.currentCurve) < 1.1) ||
+        Math.abs(car.x) >= maxDriftSafeX
+      ) {
         this.isDrifting = false;
       }
     } else {
@@ -286,15 +293,25 @@ export class AutopilotDriver implements InputSource {
         const canShift = Math.abs(audio.deltaMsToNearestBeat) <= 35;
         const isFreshBeat = audio.nearestBeatIndex !== this.lastShiftBeatIndex;
 
-        // Upshift condition: high RPM in gears 1..5
-        if (car.gear < MAX_GEAR && car.rpm >= 0.74 && !car.isOffRoad) {
+        // Upshift condition: in powerband (>= 0.72 valid window) across gears 1..5
+        if (car.gear < MAX_GEAR && car.rpm >= 0.73 && !car.isOffRoad) {
           if (canShift && isFreshBeat) {
             this.pressQueue.push({ action: 'shiftUp', timeStamp: nowMs });
             this.lastShiftBeatIndex = audio.nearestBeatIndex;
           }
         }
-        // Downshift condition: engine bogging/lugging or low speed in tall gear
-        else if (car.gear > 1 && (car.isLugging || (car.speedRatio < 0.22 && car.gear > 2))) {
+        // Downshift condition: engine bogging/lugging, low speed, or tactical climb/curve downshift in perfect mode
+        else if (
+          car.gear > 1 &&
+          (car.isLugging ||
+            (car.speedRatio < 0.22 && car.gear > 2) ||
+            (this.mode === 'perfect' &&
+              car.gear >= 5 &&
+              car.rpm >= 0.56 &&
+              car.rpm <= 0.78 &&
+              (road.slope > 0.02 || Math.abs(road.currentCurve) >= 2.2) &&
+              audio.nearestBeatIndex - this.lastShiftBeatIndex >= 8))
+        ) {
           if (canShift && isFreshBeat) {
             this.pressQueue.push({ action: 'shiftDown', timeStamp: nowMs });
             this.lastShiftBeatIndex = audio.nearestBeatIndex;

@@ -15,6 +15,244 @@ export function getPropTheme(): SceneryTheme | null {
 }
 
 // ---------------------------------------------------------------------------
+// World-Space Bounds & Offscreen Sprite Cache (60 FPS Lock)
+// ---------------------------------------------------------------------------
+const PROP_WORLD_HEIGHTS: Readonly<Record<PropKind, number>> = {
+  bench: 1000,
+  shrub: 1400,
+  toro: 2100,
+  jihanki: 2400,
+  billboard: 2700,
+  phonebooth: 2800,
+  chevron: 2800,
+  canopy: 3000,
+  lamp: 3100,
+  kiosk: 3100,
+  'street-tree': 3200,
+  'bus-stop': 3200,
+  sign: 3600,
+  pine: 3800,
+  torii: 3800,
+  vms: 4200,
+  palm: 4800,
+  tree: 4800,
+  gantry: 5200,
+  overpass: 7600,
+  'suspension-tower': 10200,
+  pylon: 11000,
+  building: 12800,
+};
+
+const PROP_HALF_WIDTHS: Readonly<Record<PropKind, number>> = {
+  toro: 650,
+  phonebooth: 700,
+  chevron: 700,
+  jihanki: 800,
+  bench: 850,
+  shrub: 900,
+  lamp: 1100,
+  sign: 1100,
+  'street-tree': 1400,
+  'bus-stop': 1500,
+  billboard: 1600,
+  kiosk: 1700,
+  pine: 1800,
+  torii: 1800,
+  palm: 2000,
+  tree: 2000,
+  vms: 2100,
+  canopy: 2700,
+  gantry: 3800,
+  overpass: 4200,
+  pylon: 4800,
+  building: 4400,
+  'suspension-tower': 9800,
+};
+
+const PROP_BOTTOM_PADS: Readonly<Record<PropKind, number>> = {
+  bench: 250,
+  shrub: 350,
+  toro: 250,
+  jihanki: 300,
+  billboard: 300,
+  phonebooth: 300,
+  chevron: 200,
+  canopy: 350,
+  lamp: 200,
+  kiosk: 350,
+  'street-tree': 300,
+  'bus-stop': 350,
+  sign: 200,
+  pine: 300,
+  torii: 350,
+  vms: 300,
+  palm: 300,
+  tree: 300,
+  gantry: 300,
+  overpass: 500,
+  'suspension-tower': 500,
+  pylon: 300,
+  building: 600,
+};
+
+const LOD_REF_PPU = [0.006, 0.016, 0.036] as const;
+const SPRITE_PAD_PX = 8;
+
+interface CachedPropSprite {
+  canvas: HTMLCanvasElement;
+  width: number;
+  height: number;
+  anchorX: number;
+  anchorY: number;
+  refPpu: number;
+}
+
+const propSpriteCache = new Map<string, CachedPropSprite>();
+
+/** Returns conservative upper-bound prop height in world units (`pixels / ppu`). */
+export function getPropWorldHeight(kind: PropKind): number {
+  return PROP_WORLD_HEIGHTS[kind] ?? 4800;
+}
+
+/** Returns true when offscreen canvas baking + `drawImage` blitting is available on `ctx`. */
+export function canUsePropSpriteCache(ctx: CanvasRenderingContext2D): boolean {
+  return (
+    typeof ctx.drawImage === 'function' &&
+    typeof document !== 'undefined' &&
+    typeof document.createElement === 'function'
+  );
+}
+
+/** Clears the cached offscreen prop sprite atlas (primarily for tests). */
+export function clearPropSpriteCache(): void {
+  propSpriteCache.clear();
+}
+
+function getLodTier(ppu: number): 0 | 1 | 2 {
+  if (ppu < 0.009) return 0;
+  if (ppu < 0.024) return 1;
+  return 2;
+}
+
+function getOrBakePropSprite(
+  kind: PropKind,
+  side: number,
+  variant: number,
+  beatPulse: number,
+  beatIndex: number,
+  ppu: number,
+): CachedPropSprite | null {
+  const tier = getLodTier(ppu);
+  const refPpu = LOD_REF_PPU[tier];
+  const rawVar = Math.abs(Math.floor(variant));
+
+  const normSide =
+    kind === 'palm' ||
+    kind === 'street-tree' ||
+    kind === 'pine' ||
+    kind === 'lamp' ||
+    kind === 'building' ||
+    kind === 'sign' ||
+    kind === 'bus-stop'
+      ? side < 0
+        ? -1
+        : 1
+      : 0;
+
+  let normVariant: number;
+  let pulseState: number;
+  let bakeVariant: number;
+  let bakeBeatPulse: number;
+
+  if (kind === 'chevron') {
+    const dir = rawVar % 2;
+    const seq = Math.floor(rawVar / 2);
+    const k = ((beatIndex % 4) + 4) % 4;
+    normVariant = dir;
+    pulseState = seq % 4 === k && beatPulse > 0.15 ? 1 : 0;
+    bakeVariant = dir;
+    bakeBeatPulse = pulseState ? 0.85 : 0;
+  } else if (kind === 'vms') {
+    normVariant = rawVar % 4;
+    pulseState = beatPulse > 0.4 ? 1 : 0;
+    bakeVariant = normVariant;
+    bakeBeatPulse = pulseState ? 0.8 : 0;
+  } else if (kind === 'overpass') {
+    normVariant = rawVar % 3;
+    pulseState = beatPulse > 0.4 ? 1 : 0;
+    bakeVariant = normVariant;
+    bakeBeatPulse = pulseState ? 0.8 : 0;
+  } else if (kind === 'suspension-tower') {
+    normVariant = rawVar % 3;
+    pulseState = beatPulse > 0.3 ? 1 : 0;
+    bakeVariant = normVariant;
+    bakeBeatPulse = pulseState ? 0.8 : 0;
+  } else if (kind === 'phonebooth' || kind === 'gantry' || kind === 'lamp') {
+    normVariant = 0;
+    pulseState = 0;
+    bakeVariant = 0;
+    bakeBeatPulse = 0;
+  } else {
+    normVariant = rawVar % 3;
+    pulseState = 0;
+    bakeVariant = normVariant;
+    bakeBeatPulse = 0;
+  }
+
+  const themeKey =
+    kind === 'shrub' && activePropTheme?.shrubTint ? activePropTheme.shrubTint.join(',') : '';
+  const key = `${kind}|${normSide}|${normVariant}|${pulseState}|${themeKey}|${tier}`;
+
+  const existing = propSpriteCache.get(key);
+  if (existing) return existing;
+
+  const leftWorld =
+    kind === 'building' ? (normSide < 0 ? 4400 : 400) : (PROP_HALF_WIDTHS[kind] ?? 2000);
+  const rightWorld =
+    kind === 'building' ? (normSide < 0 ? 400 : 4400) : (PROP_HALF_WIDTHS[kind] ?? 2000);
+  const heightWorld = PROP_WORLD_HEIGHTS[kind] ?? 4800;
+  const bottomPadWorld = PROP_BOTTOM_PADS[kind] ?? 350;
+
+  const anchorX = Math.ceil(leftWorld * refPpu) + SPRITE_PAD_PX;
+  const width = anchorX + Math.ceil(rightWorld * refPpu) + SPRITE_PAD_PX;
+  const anchorY = Math.ceil(heightWorld * refPpu) + SPRITE_PAD_PX;
+  const height = anchorY + Math.ceil(bottomPadWorld * refPpu) + SPRITE_PAD_PX;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const offCtx = canvas.getContext('2d');
+  if (!offCtx) return null;
+
+  if ('imageSmoothingEnabled' in offCtx) {
+    offCtx.imageSmoothingEnabled = false;
+  }
+
+  drawPropDirect(
+    offCtx,
+    kind,
+    anchorX,
+    anchorY,
+    refPpu,
+    normSide === 0 ? 1 : normSide,
+    bakeVariant,
+    bakeBeatPulse,
+    0,
+  );
+
+  const entry: CachedPropSprite = {
+    canvas,
+    width,
+    height,
+    anchorX,
+    anchorY,
+    refPpu,
+  };
+  propSpriteCache.set(key, entry);
+  return entry;
+}
+
+// ---------------------------------------------------------------------------
 // Static Color Palettes (AGENTS.md §4.3: ZERO GC allocations per frame)
 // ---------------------------------------------------------------------------
 const PALM_TRUNK = '#3a1d5c';
@@ -1505,14 +1743,53 @@ function drawSuspensionTower(
     const cableCol = isCyberTitanium
       ? (beatPulse > 0.4 ? '#ffffff' : '#00f5d4')
       : isOrangeWhite ? '#fff2c2' : '#ff9eec';
-    ctx.fillStyle = cableCol;
     const cableThick = Math.max(1, Math.round(120 * ppu));
+    const leftPeakX = leftX + legW * 0.5;
+    const rightPeakX = rightX + legW * 0.5;
+    const outerReach = spanW * 0.72;
+    const leftAnchorX = leftPeakX - outerReach;
+    const rightAnchorX = rightPeakX + outerReach;
+    const leftCpX = leftAnchorX + (leftPeakX - leftAnchorX) * 0.58;
+    const rightCpX = rightAnchorX - (rightAnchorX - rightPeakX) * 0.58;
+    const outerCpY = y - towerH * 0.14;
+    const centerCpY = topY + towerH * 0.26;
 
-    // Main catenary cables
-    ctx.fillRect(leftX, topY, cableThick, Math.round(towerH * 0.3));
-    ctx.fillRect(rightX + legW - cableThick, topY, cableThick, Math.round(towerH * 0.3));
+    if (typeof ctx.quadraticCurveTo === 'function') {
+      ctx.strokeStyle = cableCol;
+      ctx.lineWidth = cableThick;
+      ctx.beginPath();
+      // Left outer parabolic back-stay
+      ctx.moveTo(leftAnchorX, y);
+      ctx.quadraticCurveTo(leftCpX, outerCpY, leftPeakX, topY);
+      // Central span catenary curve between tower peaks
+      ctx.quadraticCurveTo(x, centerCpY, rightPeakX, topY);
+      // Right outer parabolic back-stay
+      ctx.quadraticCurveTo(rightCpX, outerCpY, rightAnchorX, y);
+      ctx.stroke();
+    }
 
+    // Vertical suspender droppers along both outer parabolic catenaries (zero GC)
+    ctx.fillStyle = cableCol;
+    const suspW = Math.max(1, Math.round(cableThick * 0.7));
+    for (let i = 1; i <= 4; i++) {
+      const t = i / 5;
+      const omt = 1 - t;
+      const omt2 = omt * omt;
+      const twoT = 2 * omt * t;
+      const t2 = t * t;
 
+      const lx = Math.round(omt2 * leftAnchorX + twoT * leftCpX + t2 * leftPeakX);
+      const ly = Math.round(omt2 * y + twoT * outerCpY + t2 * topY);
+      if (y > ly) {
+        ctx.fillRect(lx, ly, suspW, y - ly);
+      }
+
+      const rx = Math.round(omt2 * rightPeakX + twoT * rightCpX + t2 * rightAnchorX);
+      const ry = Math.round(omt2 * topY + twoT * outerCpY + t2 * y);
+      if (y > ry) {
+        ctx.fillRect(rx, ry, suspW, y - ry);
+      }
+    }
   }
 
   // 4. Red/White Aviation Warning Beacons at Tower Peaks
@@ -2584,7 +2861,7 @@ function drawToro(
 // ---------------------------------------------------------------------------
 // Main Router
 // ---------------------------------------------------------------------------
-export function drawProp(
+function drawPropDirect(
   ctx: CanvasRenderingContext2D,
   kind: PropKind,
   x: number,
@@ -2668,4 +2945,49 @@ export function drawProp(
       drawToro(ctx, x, y, ppu, variant);
       break;
   }
+}
+
+export function drawProp(
+  ctx: CanvasRenderingContext2D,
+  kind: PropKind,
+  x: number,
+  y: number,
+  ppu: number,
+  side: number,
+  variant: number,
+  beatPulse = 0,
+  beatIndex = 0,
+  clipY = Number.POSITIVE_INFINITY,
+): void {
+  if (kind === 'tree') {
+    kind = activePropTheme ? activePropTheme.tree : 'palm';
+  }
+  if (ppu <= 0 || !Number.isFinite(ppu)) return;
+  if (y - getPropWorldHeight(kind) * ppu >= clipY) return;
+
+  if (canUsePropSpriteCache(ctx)) {
+    const sprite = getOrBakePropSprite(kind, side, variant, beatPulse, beatIndex, ppu);
+    if (sprite) {
+      const scale = ppu / sprite.refPpu;
+      const dw = sprite.width * scale;
+      const dh = sprite.height * scale;
+      const dx = x - sprite.anchorX * scale;
+      const dy = y - sprite.anchorY * scale;
+
+      if (dy >= clipY) return;
+
+      if (dy + dh > clipY) {
+        const visH = clipY - dy;
+        const srcH = sprite.height * (visH / dh);
+        if (visH > 0.5 && srcH > 0.5) {
+          ctx.drawImage(sprite.canvas, 0, 0, sprite.width, srcH, dx, dy, dw, visH);
+        }
+      } else {
+        ctx.drawImage(sprite.canvas, dx, dy, dw, dh);
+      }
+      return;
+    }
+  }
+
+  drawPropDirect(ctx, kind, x, y, ppu, side, variant, beatPulse, beatIndex);
 }

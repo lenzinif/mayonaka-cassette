@@ -36,6 +36,8 @@ import {
 } from '@src/entities/PlayerCar';
 import { TrafficManager, type CollisionEvent } from '@src/entities/TrafficAndProps';
 import {
+  blendStagePalette,
+  createMutablePaletteClone,
   getStagePalette,
   PALETTE_NIGHT_FUNK,
   type StagePalette,
@@ -48,6 +50,7 @@ import {
   isSongTrack,
   restoreCanonicalTrack,
   worldZToBeat,
+  type SongTrack,
 } from '@src/road/SongRoadGenerator';
 import { Background } from './Background';
 import { PlaylistRunManager, type RunSummary } from './PlaylistRunManager';
@@ -202,6 +205,24 @@ export class Game {
   readonly audio: FunkAudioEngine;
   readonly library: TrackLibrary;
   palette: StagePalette;
+  private renderPalette: StagePalette;
+  private readonly blendedPalette: StagePalette;
+  private readonly paletteTransitionSnapshot: StagePalette;
+  private paletteTransitionFrom: StagePalette | null = null;
+  private paletteBlendElapsed = 0;
+  private readonly paletteBlendDurationSec = 2.5;
+  private lastPaletteBlendStep = -1;
+  private nextTrackCache: { contentHash: string; track: SongTrack } | null = null;
+  private activeNextTrackLookahead: SongTrack | undefined = undefined;
+  private cachedForkLeftOption: ForkOptionInfo | null = null;
+  private cachedForkRightOption: ForkOptionInfo | null = null;
+  private cachedForkContentHash = '';
+  private cachedForkRightContentHash = '';
+  private cachedForkLibIndex = -1;
+  private cachedForkLibLength = -1;
+  private cachedForkCompletedStages = -1;
+  private cachedForkBestLeftScore: number | null | undefined = undefined;
+  private cachedForkBestRightScore: number | null | undefined = undefined;
 
   /** Camera Z position along the track, in world units [0, track.length). */
   position = 0;
@@ -349,6 +370,9 @@ export class Game {
     this.audio = options.audio ?? new FunkAudioEngine();
     this.library = options.library ?? new TrackLibrary(options.preloader);
     this.palette = options.palette ?? PALETTE_NIGHT_FUNK;
+    this.renderPalette = this.palette;
+    this.blendedPalette = createMutablePaletteClone(this.palette);
+    this.paletteTransitionSnapshot = createMutablePaletteClone(this.palette);
     this.hasCustomTrack = options.track !== undefined;
     this.activeRoadBeatMap = this.audio.beatMap;
     this.track = options.track ?? generateSongRoad(this.audio.beatMap);
@@ -490,7 +514,12 @@ export class Game {
     const songTrack = generateSongRoad(beatMap);
     this.track = songTrack;
     this.activeRoadBeatMap = beatMap;
-    this.syncController.resetForTrack(!resetPosition && prevLength > 0);
+    this.nextTrackCache = null;
+    this.activeNextTrackLookahead = undefined;
+    this.syncController.resetForTrack(
+      !resetPosition && prevLength > 0,
+      !resetPosition && this.car.speedRatio > 0.25,
+    );
     this.forkController.resetForNewRoad();
     this.lastBridgeJointSegment = -1;
     this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
@@ -529,10 +558,15 @@ export class Game {
   private transitionToNextStage(beatMap: BeatMap, nextPos: number): void {
     const prevLength = this.track.length;
     const overshoot = Math.max(0, nextPos - prevLength);
-    const songTrack = generateSongRoad(beatMap);
+    const songTrack =
+      this.nextTrackCache && this.nextTrackCache.contentHash === beatMap.contentHash
+        ? this.nextTrackCache.track
+        : generateSongRoad(beatMap);
+    this.nextTrackCache = null;
+    this.activeNextTrackLookahead = undefined;
     this.track = songTrack;
     this.activeRoadBeatMap = beatMap;
-    this.syncController.resetForTrack(true);
+    this.syncController.resetForTrack(true, true, 2.0);
     this.forkController.resetForStageTransition();
     this.lastBridgeJointSegment = -1;
     this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
@@ -562,6 +596,10 @@ export class Game {
   restartPlaylistRun(): void {
     this.runManager.restartRun(this.car.groove, this.melonSoda.active);
     this.palette = getStagePalette(0);
+    this.renderPalette = this.palette;
+    this.paletteTransitionFrom = null;
+    this.nextTrackCache = null;
+    this.activeNextTrackLookahead = undefined;
     this.hasStartedDriving = false;
     const first = this.library.selectTrack(0);
     this.audio.loadTrack(first.beatMap, first.audioBuffer);
@@ -585,6 +623,8 @@ export class Game {
    */
   setStagePaletteIndex(index: number): void {
     this.palette = getStagePalette(index);
+    this.renderPalette = this.palette;
+    this.paletteTransitionFrom = null;
     this.renderDirty = true;
     this.bridge.publish(this.buildSnapshot);
   }
@@ -630,7 +670,6 @@ export class Game {
           );
           if (shiftRes) {
             this.melonSoda.applyImpulse(shiftRes.shiftJerk);
-            this.audio.triggerShiftSound(shiftRes.rewardTier, judgement.isDownbeat);
             this.runManager.recordShift(shiftRes.rewardTier, judgement.isDownbeat);
           }
         } else if (p.action === 'tofuMode') {
@@ -658,10 +697,9 @@ export class Game {
       return;
     }
 
-    // Detect BeatMap switch or manual BPM adjustment from TrackLoader (skip if early DJ crossfade is active)
+    // Detect BeatMap switch or manual BPM adjustment from TrackLoader
     if (
       !this.hasCustomTrack &&
-      !this.forkController.earlyCrossfadeStarted &&
       this.audio.beatMap !== this.activeRoadBeatMap
     ) {
       const isNewSong = this.audio.beatMap.contentHash !== this.activeRoadBeatMap.contentHash;
@@ -706,6 +744,10 @@ export class Game {
       forkZoneStartZ,
     );
 
+    const prevAutoShift = this.car.gearbox.autoShift;
+    if (this.isAutopilotActive && this.autopilot?.rhythmShifts) {
+      this.car.gearbox.autoShift = false;
+    }
     this.car.update(
       dt,
       this.controls,
@@ -715,6 +757,7 @@ export class Game {
       this.melonSoda.active,
       forkBounds,
     );
+    this.car.gearbox.autoShift = prevAutoShift;
 
     // Accumulate continuous driving score & groove stats
     this.runManager.accumulateDrivingStep(dt, this.car, this.melonSoda.active);
@@ -907,6 +950,31 @@ export class Game {
       }
     }
 
+    if (this.paletteTransitionFrom !== null) {
+      this.paletteBlendElapsed += dt;
+      const rawT = Math.min(1, this.paletteBlendElapsed / this.paletteBlendDurationSec);
+      if (rawT >= 1) {
+        this.paletteTransitionFrom = null;
+        this.renderPalette = this.palette;
+      } else {
+        const smoothT = rawT * rawT * (3 - 2 * rawT);
+        const step = Math.round(smoothT * 64);
+        if (step !== this.lastPaletteBlendStep) {
+          this.lastPaletteBlendStep = step;
+          blendStagePalette(
+            this.paletteTransitionFrom,
+            this.palette,
+            smoothT,
+            this.blendedPalette,
+          );
+          this.renderPalette = this.blendedPalette;
+        }
+      }
+    }
+
+    this.activeNextTrackLookahead =
+      this.forkChoice === 'right' ? this.getNextLookaheadTrack() : undefined;
+
     this.background.update(dt, playerSeg.curve, this.car.speedRatio, triggerExtremeLightning);
     this.bridge.offer(this.simTime, this.buildSnapshot);
 
@@ -972,16 +1040,41 @@ export class Game {
     this.view.fogDensity = tuning.fogDensity;
     this.view.width = width;
     this.view.height = height;
+    const baseTierIntensity =
+      this.car.grooveTier === 'OVERDRIVE'
+        ? 1.0
+        : this.car.grooveTier === 'HIGH'
+          ? 0.8
+          : this.car.grooveTier === 'MEDIUM'
+            ? 0.52
+            : 0.24;
+    const grooveIntensity = Math.max(
+      0.2,
+      Math.min(1.15, baseTierIntensity * 0.65 + (this.car.groove / 100) * 0.5),
+    );
+
     this.view.beatPulse = this.beatPulse;
     this.view.beatIndex = Math.floor(this.audioBeatIndex);
+    this.view.grooveIntensity = grooveIntensity;
     this.view.alpha = alpha;
 
     const forkZoneStartZ = this.getForkZoneStartZ();
     this.view.forkZoneStartZ = forkZoneStartZ;
     this.view.forkChoice = forkZoneStartZ !== undefined ? this.forkChoice : undefined;
+    this.view.nextTrack =
+      this.forkChoice === 'right' ? this.activeNextTrackLookahead : undefined;
 
-    this.background.render(ctx, width, height, this.palette, this.beatPulse, this.downbeatPulse, alpha);
-    this.roadRenderer.render(ctx, this.track, this.view, this.palette, this.traffic, this.beatPulse);
+    this.background.render(
+      ctx,
+      width,
+      height,
+      this.renderPalette,
+      this.beatPulse,
+      this.downbeatPulse,
+      alpha,
+      grooveIntensity,
+    );
+    this.roadRenderer.render(ctx, this.track, this.view, this.renderPalette, this.traffic, this.beatPulse);
     drawPlayerCar(ctx, this.car, width, height, alpha);
     this.background.renderForegroundWeather(ctx, width, height);
     this.particles.render(ctx, alpha);
@@ -1021,12 +1114,33 @@ export class Game {
     this.bridge.emit({ type: 'forkChoiceChanged', choice, source });
   };
 
-  private readonly handleStartEarlyCrossfade = (): void => {
-    const nextItem = this.library.nextTrackItem;
-    if (nextItem) {
-      this.audio.crossfadeToTrack(nextItem.beatMap, nextItem.audioBuffer, DEFAULT_CROSSFADE_BARS);
+  private getNextLookaheadTrack(): SongTrack | undefined {
+    if (
+      this.hasCustomTrack ||
+      !this.library.hasNextTrack ||
+      !isSongTrack(this.track)
+    ) {
+      return undefined;
     }
-  };
+    const nextItem = this.library.nextTrackItem;
+    if (!nextItem) return undefined;
+
+    const lookaheadThreshold = Math.max(
+      0,
+      this.track.length - (tuning.drawDistance + 64) * this.track.segmentLength,
+    );
+    if (this.position < lookaheadThreshold) {
+      return undefined;
+    }
+
+    if (!this.nextTrackCache || this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash) {
+      const nextTrack = generateSongRoad(nextItem.beatMap);
+      this.nextTrackCache = { contentHash: nextItem.beatMap.contentHash, track: nextTrack };
+      const nextPalette = getStagePalette(this.runManager.stageNumber);
+      this.background.prewarmPalette(nextPalette);
+    }
+    return this.nextTrackCache.track;
+  }
 
   private updateForkState(): void {
     this.forkController.updateState(
@@ -1034,12 +1148,7 @@ export class Game {
       this.track.length,
       this.car.x,
       this.getForkZoneStartZ(),
-      this.library.hasNextTrack,
-      this.roadBarIndex,
-      this.totalBars,
-      this.barIndex,
       this.handleForkChoiceChanged,
-      this.handleStartEarlyCrossfade,
     );
   }
 
@@ -1054,17 +1163,16 @@ export class Game {
 
     this.forkController.recenterCarAfterFork(this.car);
 
-    // Single-track playlist OR player chose Left branch (LOOP CURRENT TRACK):
-    if (!this.library.hasMultipleTracks || this.hasCustomTrack || this.forkChoice === 'left') {
+    // Custom-track loop OR player chose Left branch (LOOP CURRENT TRACK):
+    if (this.hasCustomTrack || this.forkChoice === 'left') {
       const currentItem = this.library.activeItem;
       this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true);
-      this.forkController.earlyCrossfadeStarted = false;
       if (isSongTrack(this.track)) {
         restoreCanonicalTrack(this.track);
       }
       this.position = nextPos % this.track.length;
       this.lastLapTime = this.lapTime;
-      this.syncController.resetForTrack(false);
+      this.syncController.resetForTrack(false, this.car.speedRatio > 0.25);
       this.bridge.emit({ type: 'lapCompleted', lap: this.lap, lapTime: this.lapTime });
       this.lap++;
       this.lapTime = 0;
@@ -1076,9 +1184,23 @@ export class Game {
     this.runManager.completedStages.push(summary);
 
     if (this.library.hasNextTrack) {
+      const prevRenderPalette =
+        this.renderPalette === this.blendedPalette
+          ? blendStagePalette(
+              this.renderPalette,
+              this.renderPalette,
+              0,
+              this.paletteTransitionSnapshot,
+            )
+          : this.renderPalette;
       const nextItem = this.library.advanceToNextTrack()!;
       this.runManager.stageNumber++;
       this.palette = getStagePalette(this.runManager.stageNumber - 1);
+      this.paletteTransitionFrom = prevRenderPalette;
+      this.paletteBlendElapsed = 0;
+      this.lastPaletteBlendStep = -1;
+      blendStagePalette(prevRenderPalette, this.palette, 0, this.blendedPalette);
+      this.renderPalette = this.blendedPalette;
       this.audio.crossfadeToTrack(nextItem.beatMap, nextItem.audioBuffer, DEFAULT_CROSSFADE_BARS);
       this.transitionToNextStage(nextItem.beatMap, nextPos);
 
@@ -1103,7 +1225,7 @@ export class Game {
       }
       this.position = nextPos % this.track.length;
       this.lastLapTime = this.lapTime;
-      this.syncController.resetForTrack(false);
+      this.syncController.resetForTrack(false, this.car.speedRatio > 0.25);
       this.lap++;
       this.lapTime = 0;
       this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
@@ -1179,7 +1301,6 @@ export class Game {
       tuning.tofuSpillGroovePenaltyPct,
       this.handleCarEvent,
     );
-    this.audio.triggerSodaSpillSound();
     this.bridge.emit({
       type: 'sodaSpill',
       spillCount: this.melonSoda.spillCount,
@@ -1188,7 +1309,53 @@ export class Game {
   };
 
   private readonly buildSnapshot = (): TelemetrySnapshot => {
-    const curBest = this.library.getBestScore(this.activeRoadBeatMap.contentHash);
+    const activeHash = this.activeRoadBeatMap.contentHash;
+    const curBest = this.library.getBestScore(activeHash);
+    let forkLeftOption: ForkOptionInfo | null = null;
+    let forkRightOption: ForkOptionInfo | null = null;
+    if (this.forkActive) {
+      const libIndex = this.library.currentIndex;
+      const libLength = this.library.items.length;
+      const completedStages = this.runManager.completedStages.length;
+      const nextItem = this.library.nextTrackItem;
+      const rightHash = nextItem?.contentHash ?? '';
+      const leftBestScore = curBest?.bestScore ?? null;
+      const rightBestScore = nextItem
+        ? (this.library.getBestScore(rightHash)?.bestScore ?? null)
+        : leftBestScore;
+
+      if (
+        !this.cachedForkLeftOption ||
+        !this.cachedForkRightOption ||
+        activeHash !== this.cachedForkContentHash ||
+        rightHash !== this.cachedForkRightContentHash ||
+        libIndex !== this.cachedForkLibIndex ||
+        libLength !== this.cachedForkLibLength ||
+        completedStages !== this.cachedForkCompletedStages ||
+        leftBestScore !== this.cachedForkBestLeftScore ||
+        rightBestScore !== this.cachedForkBestRightScore
+      ) {
+        this.cachedForkLeftOption = this.forkController.buildLeftOption(
+          this.activeRoadBeatMap,
+          this.library,
+        );
+        this.cachedForkRightOption = this.forkController.buildRightOption(
+          this.activeRoadBeatMap,
+          this.library,
+          completedStages,
+        );
+        this.cachedForkContentHash = activeHash;
+        this.cachedForkRightContentHash = rightHash;
+        this.cachedForkLibIndex = libIndex;
+        this.cachedForkLibLength = libLength;
+        this.cachedForkCompletedStages = completedStages;
+        this.cachedForkBestLeftScore = leftBestScore;
+        this.cachedForkBestRightScore = rightBestScore;
+      }
+      forkLeftOption = this.cachedForkLeftOption;
+      forkRightOption = this.cachedForkRightOption;
+    }
+
     return {
       speedKmh: this.car.speedKmh,
       speedRatio: this.car.speedRatio,
@@ -1244,12 +1411,8 @@ export class Game {
       forkActive: this.forkActive,
       forkChoice: this.forkChoice,
       forkProgress: this.forkProgress,
-      forkLeftOption: this.forkController.buildLeftOption(this.activeRoadBeatMap, this.library),
-      forkRightOption: this.forkController.buildRightOption(
-        this.activeRoadBeatMap,
-        this.library,
-        this.runManager.completedStages.length,
-      ),
+      forkLeftOption,
+      forkRightOption,
       isPaused: this.isPaused,
       gamepadConnected: this.input.isGamepadConnected?.() ?? false,
       autopilotActive: this.isAutopilotActive,

@@ -60,6 +60,8 @@ export const FUTURE_FUNK_THEMES = [
 ] as const;
 
 const GROUPS = Array.from(new Set(TUNING_CONTROLS.map((c) => c.group)));
+const NOOP_SUBSCRIBE = () => () => {};
+const NULL_SNAPSHOT = () => null;
 
 type DebugTab = 'tuning' | 'profiler';
 
@@ -82,8 +84,8 @@ export function DebugPanel({
   const [copiedPerf, setCopiedPerf] = useState(false);
 
   const snap = useSyncExternalStore(
-    bridge ? bridge.subscribe : () => () => {},
-    bridge ? bridge.getSnapshot : () => null,
+    open && bridge ? bridge.subscribe : NOOP_SUBSCRIBE,
+    open && bridge ? bridge.getSnapshot : NULL_SNAPSHOT,
   );
 
   useEffect(() => {

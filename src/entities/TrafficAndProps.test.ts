@@ -439,5 +439,40 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
       // Overhead structures must produce zero collisions on the roadway
       expect(events).toHaveLength(0);
     });
+
+    it('steers evasively only when the player approaches from behind within wrap-safe distance (MP-09)', () => {
+      const track = buildTestTrack();
+      const tmBehind = new TrafficManager(track, 'seed-evade-mp09');
+      const truckBehind = tmBehind.trucks[0]!;
+      truckBehind.z = 1000;
+      truckBehind.prevZ = 1000;
+      const initOffsetBehind = truckBehind.laneOffset;
+
+      const fastCar = new PlayerCar();
+      fastCar.x = initOffsetBehind;
+      fastCar.speed = tuning.maxSpeed * 0.95;
+
+      let pz = 600; // aheadDist = +400 < 750
+      for (let i = 0; i < 15; i++) {
+        const prev = pz;
+        pz += fastCar.speed * (1 / 60);
+        tmBehind.update(1 / 60, track, fastCar, prev, pz);
+      }
+      expect(Math.abs(truckBehind.laneOffset - initOffsetBehind)).toBeGreaterThan(0.05);
+
+      const tmAhead = new TrafficManager(track, 'seed-evade-mp09');
+      const truckAhead = tmAhead.trucks[0]!;
+      truckAhead.z = 1000;
+      truckAhead.prevZ = 1000;
+      const initOffsetAhead = truckAhead.laneOffset;
+
+      let az = 1250; // aheadDist = -250 (player is already in front of truck)
+      for (let i = 0; i < 15; i++) {
+        const prev = az;
+        az += fastCar.speed * (1 / 60);
+        tmAhead.update(1 / 60, track, fastCar, prev, az);
+      }
+      expect(Math.abs(truckAhead.laneOffset - initOffsetAhead)).toBeLessThan(0.005);
+    });
   });
 });

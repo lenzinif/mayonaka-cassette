@@ -3,7 +3,6 @@ import {
   BeatClock,
   type BeatClockState,
   type BeatJudgement,
-  type BeatJudgementTier,
 } from './BeatClock';
 import {
   barDurationSec,
@@ -452,13 +451,6 @@ export class FunkAudioEngine {
   /** True when the DJ is looping the last 8 outro bars waiting for the player to reach the fork. */
   get isOutroLooping(): boolean {
     return this.outroLoopHolding;
-  }
-
-  setVolume(volume: number): void {
-    const clamped = Math.max(0, Math.min(1, volume));
-    if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.02);
-    }
   }
 
   get paused(): boolean {
@@ -1080,79 +1072,6 @@ export class FunkAudioEngine {
   }
 
   /**
-   * Plays a synthesized gear-shift cue and opens the filter on beat-matched shifts (M5).
-   */
-  triggerShiftSound(tier: BeatJudgementTier, isDownbeat: boolean): void {
-    if (tier === 'PERFECT') {
-      this.triggerFilterBlip(isDownbeat ? 1.15 : 0.85);
-    } else if (tier === 'GOOD') {
-      this.triggerFilterBlip(0.5);
-    }
-
-    if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
-    const now = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = tier === 'OFF' ? 'triangle' : 'sine';
-
-    const baseFreq = tier === 'PERFECT' ? (isDownbeat ? 880 : 659.25) : tier === 'GOOD' ? 523.25 : 220;
-    osc.frequency.setValueAtTime(baseFreq, now);
-    osc.frequency.exponentialRampToValueAtTime(baseFreq * (tier === 'OFF' ? 0.85 : 1.5), now + 0.09);
-
-    gain.gain.setValueAtTime(tier === 'OFF' ? 0.05 : 0.12, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.11);
-
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    osc.onended = () => {
-      try {
-        osc.disconnect();
-        gain.disconnect();
-      } catch {
-        // Ignore disconnect errors in mock contexts
-      }
-    };
-    osc.start(now);
-    osc.stop(now + 0.12);
-  }
-
-  /**
-   * Plays a synthesized fizzy soda splash + ice-cube glass `clink!` and smooth filter duck
-   * when Melon Soda spills in Tofu Mode (docs/DESIGN.md §5.1).
-   */
-  triggerSodaSpillSound(): void {
-    this.filterMuffleTarget = Math.max(this.filterMuffleTarget, 0.38);
-    if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
-    const now = this.ctx.currentTime;
-
-    // High metallic glass + ice cube "clink!" (dual sine ping)
-    const freqs = [2350, 3120];
-    for (let i = 0; i < freqs.length; i++) {
-      const osc = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      const t0 = now + i * 0.045;
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freqs[i]!, t0);
-      osc.frequency.exponentialRampToValueAtTime(freqs[i]! * 1.12, t0 + 0.08);
-      gain.gain.setValueAtTime(0.14, t0);
-      gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
-      osc.connect(gain);
-      gain.connect(this.masterGain);
-      osc.onended = () => {
-        try {
-          osc.disconnect();
-          gain.disconnect();
-        } catch {
-          // Ignore disconnect errors in mock contexts
-        }
-      };
-      osc.start(t0);
-      osc.stop(t0 + 0.1);
-    }
-  }
-
-  /**
    * Plays a synthesized low-frequency "clack-clack" thud when crossing a metallic bridge expansion joint (Ponte B).
    */
   playBridgeJoint(): void {
@@ -1419,8 +1338,10 @@ export class FunkAudioEngine {
    * to the audible track clock and judges its beat alignment (AGENTS.md §4.8).
    */
   judgeInputTimestamp(eventTimeStampMs: number): BeatJudgement {
+    const useWallClockAge =
+      this.ctx !== null && this.isPlaying && this.ctx.state === 'running';
     const nowPerfMs = typeof performance !== 'undefined' ? performance.now() : eventTimeStampMs;
-    const ageSec = Math.max(0, (nowPerfMs - eventTimeStampMs) / 1000);
+    const ageSec = useWallClockAge ? Math.max(0, (nowPerfMs - eventTimeStampMs) / 1000) : 0;
     const latencySec = this.getOutputLatencySec();
     const eventTrackSec = Math.max(
       0,

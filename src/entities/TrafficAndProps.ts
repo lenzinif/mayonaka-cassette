@@ -43,8 +43,6 @@ export interface KeiTruck {
   forkBranch?: -1 | 1;
 }
 
-export type CollisionOutcome = 'truckKnockedOff' | 'playerShuntedOff' | 'propBounce';
-
 export type CollisionEvent =
   | {
       type: 'collision';
@@ -354,10 +352,10 @@ export class TrafficManager {
         t.knockedTimer = Math.max(0, t.knockedTimer - dt);
         t.tiltAngle *= Math.exp(-3.2 * dt);
       } else {
-        // AI Truck evasive steering: if the player is ahead in the same lane and slower/stopped, steer away smoothly
-        let deltaZToPlayer = wrappedCurrZ - t.z;
-        if (deltaZToPlayer > trackLen * 0.5) deltaZToPlayer -= trackLen;
-        if (deltaZToPlayer < -trackLen * 0.5) deltaZToPlayer += trackLen;
+        // AI Truck evasive steering: react only when the faster player is approaching from behind (`0 < aheadDist < 750`)
+        let aheadDist = t.z - wrappedCurrZ;
+        if (aheadDist > trackLen * 0.5) aheadDist -= trackLen;
+        if (aheadDist < -trackLen * 0.5) aheadDist += trackLen;
 
         const truckEffectiveX = getEffectiveTruckLaneOffset(
           t.laneOffset,
@@ -369,13 +367,18 @@ export class TrafficManager {
           t.forkBranch,
           t.baseLaneOffset,
         );
-        const playerAheadClose = deltaZToPlayer > 0 && deltaZToPlayer < 750;
+        const truckSpeed = t.speedRatio * speedPenalty * maxSpeed;
+        const playerApproachingFromBehind =
+          aheadDist > 0 && aheadDist < 750 && car.speed > truckSpeed;
+        const catchingSlowPlayerAhead =
+          aheadDist < 0 && aheadDist > -750 && truckSpeed > car.speed;
+        const shouldEvade = playerApproachingFromBehind || catchingSlowPlayerAhead;
         const inSameLane = Math.abs(truckEffectiveX - car.x) < 0.42;
 
         const isInFork =
           forkZoneStartZ !== undefined && t.z >= forkZoneStartZ && trackLen > forkZoneStartZ;
 
-        if (playerAheadClose && inSameLane) {
+        if (shouldEvade && inSameLane) {
           if (isInFork) {
             // In a fork, stay on the chosen carriageway but nudge laterally away from player
             const evadeDir: -1 | 1 = car.x >= truckEffectiveX ? -1 : 1;
@@ -386,7 +389,7 @@ export class TrafficManager {
             );
             t.tiltAngle = -evadeStep * 3;
           } else {
-            // Player is ahead in this truck's lane: steer to an open lane
+            // Player is closing from behind in this truck's lane: steer smoothly to the opposite lane
             const evadeDir: -1 | 1 = car.x >= 0 ? -1 : 1;
             t.baseLaneOffset = evadeDir * 0.58;
             const evadeStep = evadeDir * Math.min(1.0, dt * 2.5);
@@ -403,7 +406,7 @@ export class TrafficManager {
         }
       }
 
-      const segIdx = Math.floor(t.z / segLen) % segCount;
+      const segIdx = ((Math.floor(t.z / segLen) % segCount) + segCount) % segCount;
       t.segmentIndex = segIdx;
       t.nextInSegment = this.segmentHeads[segIdx]!;
       this.segmentHeads[segIdx] = i;
@@ -622,20 +625,6 @@ export class TrafficManager {
 const TRUCK_CAB_COLORS = ['#e8f7ff', '#ff4f9a', '#d8b4fe'] as const;
 const TRUCK_BED_COLORS = ['#b8d8eb', '#c81d66', '#9d65c9'] as const;
 const TRUCK_CARGO_COLORS = ['#05d9e8', '#ffd319', '#00f59b'] as const;
-
-/**
- * Discrete OutRun-style sprite frame index for AI Kei Trucks:
- * Pure rear view (0).
- */
-export type TruckSpriteFrame = 0;
-
-/**
- * Kei truck sprite frame (reverted to pure rear view 0).
- */
-export function getKeiTruckSpriteFrame(turnAngle?: number): TruckSpriteFrame {
-  void turnAngle;
-  return 0;
-}
 
 /**
  * 16-bit pixel-art 80s Japanese Kei Truck renderer (AGENTS.md §4.1, §4.3, §4.4 & §5 M7).
