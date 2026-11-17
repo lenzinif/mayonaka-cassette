@@ -34,7 +34,14 @@ export function App() {
   const wasPausedBeforeModalRef = useRef(false);
 
   // Quick settings state
-  const [crtEnabled, setCrtEnabled] = useState(true);
+  const [crtEnabled, setCrtEnabled] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return !params.has('nocrt') && !params.has('nohud');
+  });
+  const [noHud] = useState(() => new URLSearchParams(window.location.search).has('nohud'));
+  const [noBezel] = useState(() => new URLSearchParams(window.location.search).has('nobezel'));
+  const [noCassette] = useState(() => new URLSearchParams(window.location.search).has('nocassette'));
+  const [noVfd] = useState(() => new URLSearchParams(window.location.search).has('novfd'));
   const [autoShift, setAutoShift] = useState(false);
   const [tofuMode, setTofuMode] = useState(false);
   const [sodaSkin, setSodaSkin] = useState<SodaSkin>('melon-soda');
@@ -233,6 +240,9 @@ export function App() {
                 game.setStagePaletteIndex(idx);
               }
             }
+            if (params.has('nobg')) game.renderBg = false;
+            if (params.has('noroad')) game.renderRoad = false;
+            if (params.has('noprops')) game.renderProps = false;
             if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {
               game.setPaused(true);
             }
@@ -246,6 +256,10 @@ export function App() {
           inspectorOpen={inspectorOpen}
           cleanHud={cleanHud}
           crtEnabled={crtEnabled}
+          hideBezel={noBezel}
+          minimalPerfOnly={noHud}
+          hideCassette={noCassette}
+          hideVfd={noVfd}
           onToggleCrt={() => setCrtEnabled((prev) => !prev)}
           onToggleCleanHud={() => setCleanHud((prev) => !prev)}
           onTogglePause={() => gameRef.current?.togglePause()}

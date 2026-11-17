@@ -131,7 +131,30 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 
 ---
 
-## 5. Phased Development Milestones
+## 5. Debugging & Performance Investigation Protocol (Mandatory Agent Workflow)
+
+Every performance optimization or runtime bug investigation **must** follow an empirical measure-first loop. Speculative rewrites based solely on reading code are forbidden.
+
+1. **Reproduce & Record a Live Baseline Before Editing:**
+   - Always run the game in a real browser (`npm run dev`, using `?autostart&debug` + Autopilot `F4`, `F3` `PERF MON`, `DebugPanel` → `PERF PROFILER` / `DUMP BENCHMARK`, or browser DevTools Performance traces) before modifying code.
+   - Capture baseline stability metrics across active gameplay (not just `frameTimeMs` averages): `fps`, `minFps`, `p95FrameMs`, `maxFrameMs`, `droppedFrames` (`>18.5 ms`), `simTimeMs`, and `renderTimeMs`.
+2. **Isolate JS CPU vs. Browser Raster / GPU Compositor (`compositorGapMs`):**
+   - Inspect the engine telemetry breakdown (`bgRenderMs`, `roadRenderMs` [`roadSlicesMs`, `roadPropsMs`, `roadTrafficMs`], `carOverlayMs`) alongside `compositorGapMs = frameTimeMs - simTimeMs - renderTimeMs`.
+   - If `frameTimeMs` spikes while `simTimeMs + renderTimeMs` stays low, the bottleneck is outside JS — in browser GPU fill-rate, Canvas pixel upscaling, or DOM/CSS compositor repaints (`CRTOverlay`, `RhythmBezel`, `box-shadow`, `backdrop-blur`). Optimizing JS draw loops will not fix a compositor-bound frame drop.
+3. **Never Use Node/Mock Tests as Proof of FPS:**
+   - Vitest runs in `node` (`AgentBenchmark.test.ts`, `RoadRenderer.test.ts`, `RoadsideProps.test.ts` with `noop` mock contexts). Passing Node tests validates determinism and zero-GC logic only — never real Canvas 2D rasterization, texture upload cost, or CSS compositing performance.
+4. **One Hypothesis at a Time (Falsifiable A/B Verification):**
+   - Apply one targeted change (or isolation toggle) per experiment and compare live browser telemetry before and after.
+   - Treat caching and offscreen canvases as **unproven until benchmarked**: allocating large transparent offscreen `<canvas>` surfaces and blitting scaled `drawImage` calls can increase GPU texture uploads and alpha-blending overdraw on Direct2D/Skia, making FPS *worse* than direct `fillRect` calls. Revert immediately if `p95FrameMs` / `minFps` do not measurably improve.
+5. **Zero-GC Instrumentation:**
+   - All frame-timing buffers and rolling windows in the engine must use pre-allocated scalars or `TypedArray` ring buffers (`§4.3`). Inner loops (e.g., per-segment pass in `RoadRenderer`) must be sub-sampled (such as 1 in every 8 frames) instead of invoking `performance.now()` hundreds of times per frame.
+6. **Mandatory Verification Gate & Honest Block Reporting:**
+   - Before declaring any fix complete, run `npm run check` (`eslint .`, `vitest run`, `tsc --noEmit && vite build`) **and** re-verify live 60 FPS telemetry (`p95FrameMs <= 16.7 ms`, `droppedFrames` flat) in the browser after the final edit.
+   - If the agent environment blocks running Node, builds, or the browser, stop immediately rather than shipping unverified optimizations, and report the exact commands the user needs to run locally.
+
+---
+
+## 6. Phased Development Milestones
 
 - **M0 (Foundations):** Vite + React + TS strict + Tailwind v4, ESLint layer boundaries, `FixedStepper`, `GameLoop`, `TelemetryBridge`, `CanvasStage`.
 - **M1 (Pseudo-3D Road):** `RoadSegment`, `RoadProjection`, `TrackBuilder`, `RoadRenderer`, `RoadsideProps`, `Background`, looping test track.

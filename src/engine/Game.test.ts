@@ -513,6 +513,17 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     expect(snap.frameTimeMs).toBeGreaterThan(0);
     expect(snap.simTimeMs).toBeGreaterThanOrEqual(0);
     expect(snap.renderTimeMs).toBeGreaterThanOrEqual(0);
+    expect(snap.bgRenderMs).toBeGreaterThanOrEqual(0);
+    expect(snap.roadRenderMs).toBeGreaterThanOrEqual(0);
+    expect(snap.roadSlicesMs).toBeGreaterThanOrEqual(0);
+    expect(snap.roadPropsMs).toBeGreaterThanOrEqual(0);
+    expect(snap.roadTrafficMs).toBeGreaterThanOrEqual(0);
+    expect(snap.carOverlayMs).toBeGreaterThanOrEqual(0);
+    expect(snap.compositorGapMs).toBeGreaterThanOrEqual(0);
+    expect(snap.p95FrameMs).toBeGreaterThan(0);
+    expect(snap.maxFrameMs).toBeGreaterThan(0);
+    expect(snap.minFps).toBeGreaterThan(0);
+    expect(snap.droppedFrames).toBeGreaterThanOrEqual(0);
     expect(snap.drawnSegments).toBeGreaterThan(0);
     expect(snap.fixedStepsLastFrame).toBeGreaterThanOrEqual(1);
     expect(snap.drawnProps).toBeGreaterThanOrEqual(0);

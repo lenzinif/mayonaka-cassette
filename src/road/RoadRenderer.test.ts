@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { PALETTE_AKIBA_NIGHT, PALETTE_NIGHT_FUNK, PALETTE_OG_FUTURE_FUNK } from './palette';
 import { RoadRenderer, type RoadView } from './RoadRenderer';
 import { createPoint, type RoadSegment, type SegmentEnvironment, type Track } from './RoadSegment';
-import { clearPropSpriteCache } from './RoadsideProps';
 
 function createMockCanvas(): {
   ctx: CanvasRenderingContext2D;
@@ -294,101 +293,56 @@ describe('RoadRenderer — Rendering Environments', () => {
     expect(mock.fills).not.toContain('#31214c');
   });
 
-  it('draws props partially occluded behind a hill crest via drawImage without invoking ctx.clip()', () => {
+  it('culls props fully hidden below hill crest without calling ctx.clip() and records subsystem timings', () => {
     const renderer = new RoadRenderer();
     const track = createTestTrack('standard');
 
-    // Shape a clear hill crest peaking at segments 4..5 and descending steeply at segments 6..15
+    // Tall hill crest peaking at segments 4..5 (worldY=2200) and dropping steeply into a valley by segment 12
     for (let i = 0; i < track.segments.length; i++) {
       const seg = track.segments[i]!;
       const yOf = (idx: number) => {
-        if (idx <= 5) return Math.sin((idx / 5) * Math.PI * 0.5) * 1400;
-        if (idx <= 16) return 1400 - (idx - 5) * 260;
-        return 1400 - 11 * 260;
+        if (idx <= 5) return Math.sin((idx / 5) * Math.PI * 0.5) * 2200;
+        if (idx <= 16) return 2200 - (idx - 5) * 700;
+        return 2200 - 11 * 700;
       };
       seg.p1.worldY = yOf(i);
       seg.p2.worldY = yOf(i + 1);
     }
 
-    // Place a palm tree down the far side of the hill crest so it is partially cropped by the crest
-    track.segments[11]!.sprites.push({ kind: 'palm', offset: 1.4, variant: 0 });
+    // Place a short shrub deep inside the valley behind the crest so it stays strictly below segClipY
+    track.segments[12]!.sprites.push({ kind: 'shrub', offset: 1.4, variant: 0 });
 
-    const origDoc = globalThis.document;
     let clipCalls = 0;
-    let drawImageCalls = 0;
     const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      clip: () => {
+        clipCalls++;
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
 
-    try {
-      clearPropSpriteCache();
-      (globalThis as unknown as { document: unknown }).document = {
-        createElement: (tag: string) => {
-          if (tag !== 'canvas') return {};
-          const offCtx = {
-            canvas: { width: 100, height: 100 },
-            fillStyle: '#000',
-            strokeStyle: '#000',
-            lineWidth: 1,
-            globalAlpha: 1,
-            imageSmoothingEnabled: false,
-            save: noop,
-            restore: noop,
-            beginPath: noop,
-            closePath: noop,
-            moveTo: noop,
-            lineTo: noop,
-            quadraticCurveTo: noop,
-            arc: noop,
-            fill: noop,
-            stroke: noop,
-            fillRect: noop,
-          } as unknown as CanvasRenderingContext2D;
-          return {
-            width: 0,
-            height: 0,
-            getContext: () => offCtx,
-          };
-        },
-      };
+    renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
 
-      const ctx = {
-        canvas: { width: 640, height: 360 },
-        fillStyle: '#000',
-        strokeStyle: '#000',
-        lineWidth: 1,
-        globalAlpha: 1,
-        imageSmoothingEnabled: true,
-        save: noop,
-        restore: noop,
-        beginPath: noop,
-        closePath: noop,
-        moveTo: noop,
-        lineTo: noop,
-        quadraticCurveTo: noop,
-        arc: noop,
-        fill: noop,
-        stroke: noop,
-        fillRect: noop,
-        clip: () => {
-          clipCalls++;
-        },
-        drawImage: () => {
-          drawImageCalls++;
-        },
-        createLinearGradient: () => ({ addColorStop: noop }),
-      } as unknown as CanvasRenderingContext2D;
-
-      renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
-
-      expect(renderer.stats.drawnProps).toBe(1);
-      expect(drawImageCalls).toBe(1);
-      expect(clipCalls).toBe(0);
-    } finally {
-      clearPropSpriteCache();
-      if (origDoc !== undefined) {
-        globalThis.document = origDoc;
-      } else {
-        delete (globalThis as unknown as { document?: unknown }).document;
-      }
-    }
+    expect(renderer.stats.drawnProps).toBe(0);
+    expect(clipCalls).toBe(0);
+    expect(renderer.stats.slicesMs).toBeGreaterThanOrEqual(0);
+    expect(renderer.stats.propsMs).toBeGreaterThanOrEqual(0);
+    expect(renderer.stats.trafficMs).toBeGreaterThanOrEqual(0);
   });
 });

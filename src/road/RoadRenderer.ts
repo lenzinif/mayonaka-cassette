@@ -1,5 +1,7 @@
 import { LANES, MAX_DRAW_DISTANCE } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
+
+const EMPTY_SPRITES: readonly RoadSprite[] = [];
 import { drawKeiTruck, type TrafficManager } from '@src/entities/TrafficAndProps';
 import type { StagePalette } from './palette';
 import { clamp01, interpolate, percentRemaining, project, smoothstep } from './RoadProjection';
@@ -21,7 +23,6 @@ import {
   type Track,
 } from './RoadSegment';
 import {
-  canUsePropSpriteCache,
   drawProp,
   getPropWorldHeight,
   getPylonAttachmentPoints,
@@ -51,6 +52,8 @@ export interface RoadView {
   nextTrack?: Track;
   /** Sub-frame interpolation factor in `[0, 1]` from `FixedStepper` (defaults to `1`). */
   alpha?: number;
+  /** Diagnostic toggle to isolate road slices vs roadside props rasterization cost. */
+  skipProps?: boolean;
 }
 
 /**
@@ -60,6 +63,9 @@ export interface RoadRenderStats {
   drawnSegments: number;
   drawnProps: number;
   drawnTrucks: number;
+  slicesMs: number;
+  propsMs: number;
+  trafficMs: number;
 }
 
 /**
@@ -95,11 +101,16 @@ export class RoadRenderer {
   private cachedBridgeWater1 = '';
   private cachedBridgeWaterGrad: CanvasGradient | null = null;
 
+  private profileTick = 0;
+
   /** Pre-allocated rendering statistics updated every frame without GC allocations (AGENTS.md §4.3). */
   readonly stats: RoadRenderStats = {
     drawnSegments: 0,
     drawnProps: 0,
     drawnTrucks: 0,
+    slicesMs: 0,
+    propsMs: 0,
+    trafficMs: 0,
   };
 
   render(
@@ -113,6 +124,10 @@ export class RoadRenderer {
     this.stats.drawnSegments = 0;
     this.stats.drawnProps = 0;
     this.stats.drawnTrucks = 0;
+    const sampleSubsystems = (this.profileTick++ & 7) === 0;
+    let sampleSlicesMs = 0;
+    let samplePropsMs = 0;
+    let sampleTrafficMs = 0;
     this.chainSlotMeta.fill(0);
     setPropTheme(palette.scenery);
 
@@ -213,10 +228,6 @@ export class RoadRenderer {
       }
       ctx.fillRect(0, horizonY, width, height - horizonY);
     }
-    const useSpriteCache = canUsePropSpriteCache(ctx);
-    if ('imageSmoothingEnabled' in ctx) {
-      ctx.imageSmoothingEnabled = false;
-    }
     for (let n = drawDistance - 1; n >= 0; n--) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
       const seg = this.visible[n]!;
@@ -236,6 +247,7 @@ export class RoadRenderer {
           firstTruckIdx !== -1
         ) {
           this.stats.drawnSegments++;
+          const tSeg0 = sampleSubsystems ? performance.now() : 0;
           this.renderSegment(
             ctx,
             width,
@@ -250,6 +262,9 @@ export class RoadRenderer {
             horizonY,
             view.grooveIntensity ?? 0.5,
           );
+          if (sampleSubsystems) {
+            sampleSlicesMs += performance.now() - tSeg0;
+          }
         }
       }
 
@@ -257,7 +272,7 @@ export class RoadRenderer {
       const scaledPpu = (ppu * roadWidth) / 2000;
       if (scaledPpu < 0.001) continue;
 
-      const sprites = seg.sprites;
+      const sprites = view.skipProps ? EMPTY_SPRITES : seg.sprites;
       if (sprites.length === 0 && firstTruckIdx === -1) continue;
 
       // Skip segment sprites/traffic if occluded behind a hill crest
@@ -273,6 +288,7 @@ export class RoadRenderer {
       }
 
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
+      const tProps0 = sampleSubsystems && sprites.length > 0 ? performance.now() : 0;
       const segForkZoneStartZ = isNextSeg ? undefined : view.forkZoneStartZ;
       for (let i = 0; i < sprites.length; i++) {
         const s = sprites[i]!;
@@ -345,7 +361,6 @@ export class RoadRenderer {
         if (p1.screenY - getPropWorldHeight(resolvedKind) * propPpu >= segClipY) continue;
 
         if (
-          !useSpriteCache &&
           !crestClipActive &&
           segClipY < height &&
           p1.screenY > segClipY &&
@@ -383,9 +398,13 @@ export class RoadRenderer {
       if (needsPropAlpha && sprites.length > 0) {
         ctx.globalAlpha = 1;
       }
+      if (sampleSubsystems && sprites.length > 0) {
+        samplePropsMs += performance.now() - tProps0;
+      }
 
       // AI Kei Trucks on this segment (diverging onto the left/right Y-fork branch)
       if (traffic && firstTruckIdx !== -1) {
+        const tTraffic0 = sampleSubsystems ? performance.now() : 0;
         let tIdx = firstTruckIdx;
         while (tIdx !== -1) {
           const truck = traffic.trucks[tIdx]!;
@@ -475,11 +494,21 @@ export class RoadRenderer {
           }
           tIdx = truck.nextInSegment;
         }
+        if (sampleSubsystems) {
+          sampleTrafficMs += performance.now() - tTraffic0;
+        }
       }
     }
 
     // Phase 3 Edge case (b): extrapolate wires for nearest visible tower behind camera
+    const tWires0 = sampleSubsystems ? performance.now() : 0;
     this.extrapolateNearestPylonWires(ctx, width, height);
+    if (sampleSubsystems) {
+      samplePropsMs += performance.now() - tWires0;
+      this.stats.slicesMs = this.stats.slicesMs * 0.75 + sampleSlicesMs * 0.25;
+      this.stats.propsMs = this.stats.propsMs * 0.75 + samplePropsMs * 0.25;
+      this.stats.trafficMs = this.stats.trafficMs * 0.75 + sampleTrafficMs * 0.25;
+    }
   }
 
   private handlePylonChainWires(
@@ -730,31 +759,19 @@ export class RoadRenderer {
 
     const isBridge = seg.env === 'bridge';
 
-    // Bridge water surface or regular grass ground fill (feathered near horizonY to prevent hard seams)
+    // Bridge water surface or regular grass ground fill (clamped at horizonY to avoid state-churn alpha flips)
     if (isBridge && isCameraOnBridge) {
-      // Oceanic bay water surface harmonized with stage palette (clamped below horizonY;
-      // base water gradient is pre-filled once before Pass 2)
       if (stripe === 0 && y1 > horizonY) {
         const waterColors = palette.water ?? palette.grass;
         const waterY2 = Math.max(horizonY, y2);
-        const horizonFade = (waterY2 - horizonY) / 18;
         ctx.fillStyle = waterColors[0];
-        if (horizonFade < 1) {
-          ctx.globalAlpha = Math.max(0.15, horizonFade);
-          ctx.fillRect(0, waterY2, width, y1 - waterY2);
-          ctx.globalAlpha = 1;
-        } else {
-          ctx.fillRect(0, waterY2, width, y1 - waterY2);
-        }
+        ctx.fillRect(0, waterY2, width, y1 - waterY2);
       }
     } else {
-      ctx.fillStyle = palette.grass[stripe];
-      if (y2 >= horizonY && y2 < horizonY + 16) {
-        ctx.globalAlpha = Math.max(0.25, (y2 - horizonY) / 16);
-        ctx.fillRect(0, y2, width, y1 - y2);
-        ctx.globalAlpha = 1;
-      } else {
-        ctx.fillRect(0, y2, width, y1 - y2);
+      const grassY2 = Math.max(horizonY, y2);
+      if (y1 > grassY2) {
+        ctx.fillStyle = palette.grass[stripe];
+        ctx.fillRect(0, grassY2, width, y1 - grassY2);
       }
     }
 
@@ -779,30 +796,47 @@ export class RoadRenderer {
       return;
     }
 
-    ctx.fillStyle = palette.rumble[stripe];
-    drawRumblePair(ctx, x1, y1, x2, y2, w1, w2, r1, r2);
+    const sliceH = y1 - y2;
+    if (!isBridge && w1 < 20 && p1.screenY - p2.screenY < 2.2) {
+      // Distant thin-slice fast path: axis-aligned fillRect avoids path tessellation
+      const mx = (x1 + x2) * 0.5;
+      const mw = (w1 + w2) * 0.5;
+      const mr = (r1 + r2) * 0.5;
+      ctx.fillStyle = palette.rumble[stripe];
+      ctx.fillRect(mx - mw - mr, y2, (mw + mr) * 2, sliceH);
+      ctx.fillStyle = palette.road[stripe];
+      ctx.fillRect(mx - mw, y2, mw * 2, sliceH);
+      if (stripe === 0 && w1 >= 6) {
+        ctx.fillStyle = palette.lane;
+        const lw = mw / Math.max(32, 8 * LANES);
+        const laneStep = (mw * 2) / LANES;
+        let lx = mx - mw + laneStep;
+        for (let lane = 1; lane < LANES; lane++) {
+          ctx.fillRect(lx - lw * 0.5, y2, lw, sliceH);
+          lx += laneStep;
+        }
+      }
+    } else {
+      ctx.fillStyle = palette.rumble[stripe];
+      drawRumblePair(ctx, x1, y1, x2, y2, w1, w2, r1, r2);
 
-    ctx.fillStyle = palette.road[stripe];
-    polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      ctx.fillStyle = palette.road[stripe];
+      polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
 
-    if (stripe === 0 && w1 >= 6) {
-      ctx.fillStyle = palette.lane;
-      drawLanes(ctx, x1, y1, x2, y2, w1, w2);
-    }
+      if (stripe === 0 && w1 >= 6) {
+        ctx.fillStyle = palette.lane;
+        drawLanes(ctx, x1, y1, x2, y2, w1, w2);
+      }
 
-    // Zero-GC high-Groove / OVERDRIVE outer curb neon edge glow
-    if (clampedGroove >= 0.85 && !isBridge && w1 >= 24) {
-      const glowAlpha = Math.min(0.85, 0.28 + (clampedGroove - 0.85) * 1.8);
-      ctx.globalAlpha = glowAlpha;
-      ctx.strokeStyle = palette.mountainRim;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(x1 - w1 - r1, y1);
-      ctx.lineTo(x2 - w2 - r2, y2);
-      ctx.moveTo(x1 + w1 + r1, y1);
-      ctx.lineTo(x2 + w2 + r2, y2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
+      // Zero-GC high-Groove / OVERDRIVE outer curb neon edge rails (dash fillRects without stroke/globalAlpha churn)
+      if (clampedGroove >= 0.85 && stripe === 0 && !isBridge && w1 >= 24) {
+        const mx = (x1 + x2) * 0.5;
+        const mw = (w1 + w2) * 0.5;
+        const mr = (r1 + r2) * 0.5;
+        ctx.fillStyle = palette.mountainRim;
+        ctx.fillRect(mx - mw - mr, y2, 1.5, sliceH);
+        ctx.fillRect(mx + mw + mr - 1.5, y2, 1.5, sliceH);
+      }
     }
 
     if (isBridge && w1 >= 18) {

@@ -29,6 +29,10 @@ export interface HUDProps {
   onToggleAutopilot?: () => void;
   crtEnabled?: boolean;
   onToggleCrt?: () => void;
+  hideBezel?: boolean;
+  minimalPerfOnly?: boolean;
+  hideCassette?: boolean;
+  hideVfd?: boolean;
 }
 
 interface ToastState {
@@ -73,6 +77,10 @@ export function HUD({
   onToggleAutopilot,
   crtEnabled = true,
   onToggleCrt,
+  hideBezel = false,
+  minimalPerfOnly = false,
+  hideCassette = false,
+  hideVfd = false,
 }: HUDProps) {
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot, bridge.getSnapshot);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -256,49 +264,65 @@ export function HUD({
 
   if (!gameStarted) return null;
 
+  if (minimalPerfOnly) {
+    return (
+      <div className="pointer-events-none absolute top-2 left-2 z-2 bg-black/80 px-2 py-1 font-mono text-[10px] text-white">
+        PERF {fps} FPS | MIN {snap?.minFps ?? fps} | FR {snap?.frameTimeMs ?? 16.7}ms | P95{' '}
+        {snap?.p95FrameMs ?? 16.7}ms | JS {snap?.renderTimeMs ?? 0}ms | GAP{' '}
+        {snap?.compositorGapMs ?? 0}ms | DRP {snap?.droppedFrames ?? 0} | SEG{' '}
+        {snap?.drawnSegments ?? 0} | PRP {snap?.drawnProps ?? 0}
+      </div>
+    );
+  }
+
   return (
     <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between p-3 font-mono text-white select-none sm:p-5">
       {/* Downbeat Rhythm Bezel light pulse */}
-      <RhythmBezel
-        beatPulse={beatPulse}
-        beatInBar={beatInBar}
-        grooveTier={grooveTier}
-      />
+      {!hideBezel && (
+        <RhythmBezel
+          beatPulse={beatPulse}
+          beatInBar={beatInBar}
+          grooveTier={grooveTier}
+          alwaysMount
+        />
+      )}
 
       {/* =====================================================================
           TOP BAR: Left Cassette Tape Deck + Right Minimalist Pause & Status Pill
          ===================================================================== */}
       <div className="relative z-1 flex items-start justify-between gap-2.5 sm:gap-3">
-        {/* Left: Cassette Tape Groove Deck (Togglable via [C] or button) */}
-        <div className="flex min-w-0 items-start">
-          <CassetteTapeWidget
-            trackArtist={trackArtist}
-            trackTitle={trackTitle}
-            bpm={bpm}
-            barIndex={barIndex}
-            beatInBar={beatInBar}
-            sectionRole={sectionRole}
-            barEnergy={barEnergy}
-            filterCutoffHz={filterCutoffHz}
-            groove={groove}
-            grooveTier={grooveTier}
-            tofuMode={tofuMode}
-            roadBarIndex={roadBarIndex}
-            totalBars={totalBars}
-            speedRatio={speedRatio}
-            playlistIndex={playlistIndex}
-            playlistLength={playlistLength}
-            isSlack={isTapeSlack}
-            visible={showCassetteDeck && !effectiveCleanHud}
-            onToggleVisible={handleToggleCassetteDeck}
-          />
+        {/* Left: Cassette Tape Groove Deck (Togglable via [C] or button) — promoted GPU layer avoids union dirty rects */}
+        <div className="flex min-w-0 items-start [contain:layout_style_paint] [transform:translateZ(0)]">
+          {!hideCassette && (
+            <CassetteTapeWidget
+              trackArtist={trackArtist}
+              trackTitle={trackTitle}
+              bpm={bpm}
+              barIndex={barIndex}
+              beatInBar={beatInBar}
+              sectionRole={sectionRole}
+              barEnergy={barEnergy}
+              filterCutoffHz={filterCutoffHz}
+              groove={groove}
+              grooveTier={grooveTier}
+              tofuMode={tofuMode}
+              roadBarIndex={roadBarIndex}
+              totalBars={totalBars}
+              speedRatio={speedRatio}
+              playlistIndex={playlistIndex}
+              playlistLength={playlistLength}
+              isSlack={isTapeSlack}
+              visible={showCassetteDeck && !effectiveCleanHud}
+              onToggleVisible={handleToggleCassetteDeck}
+            />
+          )}
         </div>
 
         {/* Right: Minimalist Status Pill (Replaces old 5x2 grid, freeing up the view) */}
-        <div className="pointer-events-auto flex items-center gap-1.5 [contain:layout_style_paint]">
+        <div className="pointer-events-auto flex items-center gap-1.5 [contain:layout_style_paint] [transform:translateZ(0)]">
           {/* Autopilot Active Indicator */}
           {snap?.autopilotActive && (
-            <span className="animate-pulse rounded border border-cyan-300/80 bg-cyan-950/90 px-2 py-1 text-[10px] font-bold text-cyan-300 shadow-[0_0_10px_rgba(5,217,232,0.5)]">
+            <span className="rounded border border-cyan-300/80 bg-cyan-950/90 px-2 py-1 text-[10px] font-bold text-cyan-300">
               🤖 AUTO [{snap.autopilotMode?.toUpperCase() ?? 'ON'}]
             </span>
           )}
@@ -343,10 +367,10 @@ export function HUD({
               onTogglePause?.();
               e.currentTarget.blur();
             }}
-            className={`flex h-7 cursor-pointer items-center justify-center rounded border px-3 text-xs font-bold tracking-wider transition ${
+            className={`flex h-7 cursor-pointer items-center justify-center rounded border px-3 text-xs font-bold tracking-wider ${
               isPaused
-                ? 'animate-pulse border-pink-500 bg-pink-950/90 text-pink-200 shadow-[0_0_12px_rgba(255,42,109,0.6)]'
-                : 'border-fuchsia-400/55 bg-[#16042d]/90 text-fuchsia-200 hover:border-pink-400 hover:text-pink-200 shadow-[0_0_10px_rgba(255,42,109,0.25)]'
+                ? 'border-pink-500 bg-pink-950/90 text-pink-200'
+                : 'border-fuchsia-400/55 bg-[#16042d]/90 text-fuchsia-200 hover:border-pink-400 hover:text-pink-200'
             }`}
             title="Pausa di gioco [ESC] o [P]"
           >
@@ -357,14 +381,23 @@ export function HUD({
 
       {/* M8 Mini Performance Profiler Ribbon (Activated on demand via F3 or Pause Menu) */}
       {showPerfHud && (
-        <div className="pointer-events-auto relative z-1 mx-auto mt-1.5 flex flex-wrap items-center justify-center gap-3 rounded border border-cyan-400/50 bg-[#090117]/95 px-3 py-1 font-mono text-[10px] text-cyan-200 shadow-[0_0_15px_rgba(5,217,232,0.3)]">
+        <div className="pointer-events-auto relative z-1 mx-auto mt-1.5 flex flex-wrap items-center justify-center gap-2.5 rounded border border-cyan-400/50 bg-[#090117]/95 px-3 py-1 font-mono text-[10px] text-cyan-200 [contain:layout_style_paint] [transform:translateZ(0)]">
           <span className="font-bold tracking-widest text-pink-400 uppercase">PERF MON</span>
-          <span className="font-bold text-emerald-300">{fps} FPS</span>
+          <span className="font-bold text-emerald-300">
+            {fps} FPS (MIN {snap?.minFps ?? fps})
+          </span>
           <span className="text-fuchsia-200">
-            FRAME: <strong className="text-white">{snap?.frameTimeMs ?? 16.7}ms</strong>
+            FRAME: <strong className="text-white">{snap?.frameTimeMs ?? 16.7}ms</strong> (P95 {snap?.p95FrameMs ?? 16.7})
           </span>
           <span className="text-pink-300">
-            RENDER: <strong className="text-pink-200">{snap?.renderTimeMs ?? 1.2}ms</strong>
+            JS: <strong className="text-pink-200">{snap?.renderTimeMs ?? 1.2}ms</strong>{' '}
+            [BG {snap?.bgRenderMs ?? 0} / SL {snap?.roadSlicesMs ?? 0} / PR {snap?.roadPropsMs ?? 0} / CAR {snap?.carOverlayMs ?? 0}]
+          </span>
+          <span className="text-amber-300">
+            GAP: <strong className="text-amber-200">{snap?.compositorGapMs ?? 0}ms</strong>
+          </span>
+          <span className="text-pink-300">
+            DROPS: <strong className="text-white">{snap?.droppedFrames ?? 0}</strong>
           </span>
           <span className="text-emerald-300">
             PHYS:{' '}
@@ -396,8 +429,8 @@ export function HUD({
          ===================================================================== */}
       <div className="relative z-1 flex flex-col items-center justify-center gap-2">
         {!audioUnlocked && (
-          <div className="flex items-center gap-2 rounded border border-cyan-400/60 bg-[#0b011d]/90 px-4 py-1.5 text-[11px] font-bold tracking-[0.22em] text-cyan-200 uppercase shadow-[0_0_20px_rgba(5,217,232,0.28)]">
-            <span className="inline-block h-2 w-2 animate-ping rounded-full bg-pink-400" />
+          <div className="flex items-center gap-2 rounded border border-cyan-400/60 bg-[#0b011d]/90 px-4 py-1.5 text-[11px] font-bold tracking-[0.22em] text-cyan-200 uppercase">
+            <span className="inline-block h-2 w-2 rounded-full bg-pink-400" />
             <span>PRESS ANY KEY OR DRIVE TO START SYNTH AUDIO</span>
           </div>
         )}
@@ -429,19 +462,19 @@ export function HUD({
             (Offset upward via `mb-24` so the 120x80 canvas Melon Soda cup inset
              at bottom-left remains 100% unobstructed) */}
         <div
-          className={`flex flex-col gap-1.5 [contain:layout_style_paint] ${
+          className={`flex flex-col gap-1.5 [contain:layout_style_paint] [transform:translateZ(0)] ${
             tofuMode ? 'mb-24 sm:mb-26' : ''
           }`}
         >
           {tofuMode && (
-            <div className="flex items-center gap-2.5 rounded border border-emerald-400/60 bg-[#0b011d]/92 px-3 py-1.5 text-[10px] tracking-wider uppercase shadow-[0_0_16px_rgba(16,185,129,0.25)]">
+            <div className="flex items-center gap-2.5 rounded border border-emerald-400/60 bg-[#0b011d]/92 px-3 py-1.5 text-[10px] tracking-wider uppercase">
               <span className="font-black text-emerald-300">TOFU CUP // ×2 GROOVE</span>
               <span className="text-cyan-200">{SODA_SKIN_LABELS[sodaSkin]}</span>
               <div className="flex items-center gap-1">
                 <span className="text-fuchsia-300">SLOSH</span>
                 <div className="h-1.5 w-12 overflow-hidden rounded-xs bg-fuchsia-950">
                   <div
-                    className={`h-full w-full origin-left transition-transform duration-75 will-change-transform ${
+                    className={`h-full w-full origin-left ${
                       sodaDanger >= 0.9
                         ? 'bg-pink-500'
                         : sodaDanger >= 0.65
@@ -459,25 +492,29 @@ export function HUD({
           )}
         </div>
 
-        {/* Bottom-Right: 1980s JDM VFD Digital Cockpit Binnacle (Tachometer, Gearbox, Speedometer, Groove Flux) */}
-        <VfdDigidash
-          speedKmh={speedKmh}
-          speedRatio={speedRatio}
-          gear={gear}
-          rpm={rpm}
-          groove={groove}
-          grooveTier={grooveTier}
-          isLugging={isLugging}
-          isRedlining={isRedlining}
-          isOverdrive={isOverdrive}
-          autoShift={autoShift}
-          lastShiftTier={lastShiftTier}
-          lastShiftDeltaMs={lastShiftDeltaMs}
-          isDrifting={isDrifting}
-          driftTime={driftTime}
-          isOffRoad={isOffRoad}
-          onToggleAutoShift={handleToggleAutoShift}
-        />
+        {/* Bottom-Right: 1980s JDM VFD Digital Cockpit Binnacle (promoted GPU layer isolates dirty rects) */}
+        {!hideVfd && (
+          <div className="[contain:layout_style_paint] [transform:translateZ(0)]">
+            <VfdDigidash
+              speedKmh={speedKmh}
+              speedRatio={speedRatio}
+              gear={gear}
+              rpm={rpm}
+              groove={groove}
+              grooveTier={grooveTier}
+              isLugging={isLugging}
+              isRedlining={isRedlining}
+              isOverdrive={isOverdrive}
+              autoShift={autoShift}
+              lastShiftTier={lastShiftTier}
+              lastShiftDeltaMs={lastShiftDeltaMs}
+              isDrifting={isDrifting}
+              driftTime={driftTime}
+              isOffRoad={isOffRoad}
+              onToggleAutoShift={handleToggleAutoShift}
+            />
+          </div>
+        )}
       </div>
 
       {/* M8 Centralized Future Funk Pause Menu (Hub for all in-game options & tuning) */}

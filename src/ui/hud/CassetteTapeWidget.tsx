@@ -42,7 +42,7 @@ const TIER_CASSETTE_CONFIG: Readonly<
   LOW: {
     shellBorder: 'border-zinc-700/80',
     shellBg: 'bg-[#0c0914]/95',
-    shellGlow: 'shadow-[0_0_15px_rgba(100,100,120,0.15)]',
+    shellGlow: '',
     typeLabel: 'TYPE I // NORMAL WARMUP',
     typeBadge: 'border-zinc-600 bg-zinc-900/90 text-zinc-300',
     tapeColor: '#3a2e26',
@@ -52,7 +52,7 @@ const TIER_CASSETTE_CONFIG: Readonly<
   MEDIUM: {
     shellBorder: 'border-cyan-500/60',
     shellBg: 'bg-[#080d1a]/95',
-    shellGlow: 'shadow-[0_0_20px_rgba(5,217,232,0.22)]',
+    shellGlow: '',
     typeLabel: 'TYPE II // IN THE POCKET (CrO₂)',
     typeBadge: 'border-cyan-400/80 bg-cyan-950/90 text-cyan-200',
     tapeColor: '#1a3038',
@@ -62,7 +62,7 @@ const TIER_CASSETTE_CONFIG: Readonly<
   HIGH: {
     shellBorder: 'border-fuchsia-500/70',
     shellBg: 'bg-[#150422]/95',
-    shellGlow: 'shadow-[0_0_25px_rgba(255,42,109,0.28)]',
+    shellGlow: '',
     typeLabel: 'TYPE IV // FUTURE FUNK FLOW',
     typeBadge: 'border-fuchsia-400/80 bg-fuchsia-950/90 text-fuchsia-200',
     tapeColor: '#42122c',
@@ -72,9 +72,9 @@ const TIER_CASSETTE_CONFIG: Readonly<
   OVERDRIVE: {
     shellBorder: 'border-amber-400/90',
     shellBg: 'bg-[#1c1204]/96',
-    shellGlow: 'shadow-[0_0_30px_rgba(251,191,36,0.38)]',
+    shellGlow: '',
     typeLabel: 'SPECIAL // FUNKY OVERDRIVE',
-    typeBadge: 'border-amber-300 bg-amber-950/90 text-amber-200 animate-pulse',
+    typeBadge: 'border-amber-300 bg-amber-950/90 text-amber-200',
     tapeColor: '#523805',
     accentColor: 'text-amber-300',
     labelColor: 'bg-amber-100 text-amber-950',
@@ -84,7 +84,7 @@ const TIER_CASSETTE_CONFIG: Readonly<
 const SECTION_BADGE_STYLES: Readonly<Record<SectionRole, string>> = {
   intro: 'border-cyan-400/60 bg-cyan-950/85 text-cyan-200',
   build: 'border-amber-400/75 bg-amber-950/85 text-amber-200',
-  drop: 'border-pink-400 bg-pink-600/90 text-white shadow-[0_0_10px_rgba(255,42,109,0.55)]',
+  drop: 'border-pink-400 bg-pink-600/90 text-white',
   breakdown: 'border-fuchsia-400/60 bg-fuchsia-950/85 text-fuchsia-200',
   outro: 'border-emerald-400/60 bg-emerald-950/85 text-emerald-200',
 };
@@ -145,7 +145,7 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
 
   return (
     <div
-      className={`pointer-events-auto relative flex w-[310px] sm:w-[340px] flex-col justify-between rounded-md border-2 ${config.shellBorder} ${config.shellBg} p-2 text-white shadow-xl transition-colors duration-150 select-none [contain:layout_style_paint] ${config.shellGlow}`}
+      className={`pointer-events-auto relative flex w-[310px] sm:w-[340px] flex-col justify-between rounded-md border-2 ${config.shellBorder} ${config.shellBg} p-2 text-white select-none [contain:layout_style_paint] ${config.shellGlow}`}
     >
       {/* Top Screws & Header Ribbon */}
       <div className="flex items-center justify-between border-b border-white/10 pb-1 text-[9px] tracking-wider uppercase">
@@ -210,24 +210,21 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
           </div>
 
           {/* Left Spool: Supply Reel */}
-          <div className="relative z-1 flex flex-col items-center">
+          <div className="relative z-1 flex h-12 w-12 items-center justify-center">
             {/* Dark magnetic tape pack ring around reel */}
             <div
-              className="flex items-center justify-center rounded-full"
+              className="absolute inset-0 rounded-full will-change-transform"
               style={{
-                width: `${leftPackRadius * 2}px`,
-                height: `${leftPackRadius * 2}px`,
                 backgroundColor: config.tapeColor,
-                boxShadow: 'inset 0 0 6px rgba(0,0,0,0.8)',
+                transform: `scale(${(leftPackRadius * 2) / 48})`,
               }}
+            />
+            {/* White plastic 6-tooth reel hub */}
+            <div
+              className="relative z-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-zinc-200 bg-zinc-100 text-zinc-800 will-change-transform"
+              style={{ transform: `rotate(${baseRotation}deg)` }}
             >
-              {/* White plastic 6-tooth reel hub */}
-              <div
-                className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-zinc-200 bg-zinc-100 text-zinc-800 transition-transform duration-100"
-                style={{ transform: `rotate(${baseRotation}deg)` }}
-              >
-                <div className="h-2 w-2 rounded-full border border-zinc-600 bg-zinc-300" />
-              </div>
+              <div className="h-2 w-2 rounded-full border border-zinc-600 bg-zinc-300" />
             </div>
           </div>
 
@@ -245,7 +242,7 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
               {isSlack ? (
                 /* Animated Slack / Crinkled Tape when damaged or spilling */
                 <svg
-                  className="h-full w-full animate-bounce text-pink-500 drop-shadow-[0_0_6px_#ff2a6d]"
+                  className="h-full w-full text-pink-500"
                   viewBox="0 0 100 12"
                   fill="none"
                   preserveAspectRatio="none"
@@ -259,15 +256,15 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
                 </svg>
               ) : (
                 /* Taut magnetic tape ribbon */
-                <div className="relative h-full w-full flex items-center">
+                <div className="relative flex h-full w-full items-center overflow-hidden">
                   <div
-                    className="h-1.5 w-full rounded-xs shadow-inner"
+                    className="h-1.5 w-full rounded-xs"
                     style={{ backgroundColor: config.tapeColor }}
                   />
                   {/* Magnetic Tape Ribbon representing physical Track & Road Progress */}
                   <div
-                    className="absolute inset-y-0.5 left-0 rounded-xs bg-gradient-to-r from-amber-600 via-amber-400 to-amber-200 opacity-90"
-                    style={{ width: `${Math.round(songProgress * 100)}%` }}
+                    className="absolute inset-y-0.5 left-0 w-full origin-left rounded-xs bg-gradient-to-r from-amber-600 via-amber-400 to-amber-200 opacity-90 will-change-transform"
+                    style={{ transform: `scaleX(${songProgress})` }}
                   />
                 </div>
               )}
@@ -285,24 +282,21 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
           </div>
 
           {/* Right Spool: Take-up Reel */}
-          <div className="relative z-1 flex flex-col items-center">
+          <div className="relative z-1 flex h-12 w-12 items-center justify-center">
             {/* Dark magnetic tape pack ring around reel */}
             <div
-              className="flex items-center justify-center rounded-full"
+              className="absolute inset-0 rounded-full will-change-transform"
               style={{
-                width: `${rightPackRadius * 2}px`,
-                height: `${rightPackRadius * 2}px`,
                 backgroundColor: config.tapeColor,
-                boxShadow: 'inset 0 0 6px rgba(0,0,0,0.8)',
+                transform: `scale(${(rightPackRadius * 2) / 48})`,
               }}
+            />
+            {/* White plastic 6-tooth reel hub */}
+            <div
+              className="relative z-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-zinc-200 bg-zinc-100 text-zinc-800 will-change-transform"
+              style={{ transform: `rotate(${baseRotation}deg)` }}
             >
-              {/* White plastic 6-tooth reel hub */}
-              <div
-                className="flex h-5 w-5 items-center justify-center rounded-full border-2 border-zinc-200 bg-zinc-100 text-zinc-800 transition-transform duration-100"
-                style={{ transform: `rotate(${baseRotation}deg)` }}
-              >
-                <div className="h-2 w-2 rounded-full border border-zinc-600 bg-zinc-300" />
-              </div>
+              <div className="h-2 w-2 rounded-full border border-zinc-600 bg-zinc-300" />
             </div>
           </div>
         </div>
@@ -320,7 +314,7 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
 
           {/* Audio Playback State */}
           <div className="flex items-center gap-1.5">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_4px_#10b981]" />
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
             <span className="font-bold text-emerald-300">
               {speedRatio > 0.05 ? '▶ PLAY' : '⏸ IDLE'}
             </span>
@@ -343,8 +337,8 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
               className={`inline-block h-2 w-2 rounded-xs border text-[6px] font-bold text-center leading-[8px] ${
                 beatInBar === b
                   ? b === 0
-                    ? 'border-pink-300 bg-pink-500 text-white shadow-[0_0_6px_#ff2a6d]'
-                    : 'border-cyan-200 bg-cyan-400 text-slate-950 shadow-[0_0_4px_#05d9e8]'
+                    ? 'border-pink-300 bg-pink-500 text-white'
+                    : 'border-cyan-200 bg-cyan-400 text-slate-950'
                   : 'border-zinc-700 bg-zinc-900 text-zinc-500'
               }`}
             >
@@ -359,18 +353,15 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
         {/* Mini 4-Bar VU Meter */}
         <div className="flex items-end gap-0.5 h-2.5" title="Tape Level VU Meter">
           {[0.3, 0.55, 0.8, 1.0].map((factor, idx) => {
-            const heightPct = Math.max(
-              20,
-              Math.min(100, Math.round(barEnergy * factor * 100)),
-            );
-            const isPeak = idx === 3 && heightPct > 75;
+            const ratio = Math.max(0.2, Math.min(1, barEnergy * factor));
+            const isPeak = idx === 3 && ratio > 0.75;
             return (
               <span
                 key={idx}
-                className={`w-1 rounded-t-xs ${
-                  isPeak ? 'bg-pink-500 shadow-[0_0_4px_#ff2a6d]' : 'bg-cyan-400'
+                className={`h-full w-1 origin-bottom rounded-t-xs will-change-transform ${
+                  isPeak ? 'bg-pink-500' : 'bg-cyan-400'
                 }`}
-                style={{ height: `${heightPct}%` }}
+                style={{ transform: `scaleY(${ratio})` }}
               />
             );
           })}
