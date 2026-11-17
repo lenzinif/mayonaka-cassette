@@ -129,7 +129,18 @@ export interface TelemetrySnapshot {
   // M8 Performance Profiler telemetry
   simTimeMs: number;
   renderTimeMs: number;
+  bgRenderMs: number;
+  roadRenderMs: number;
+  roadSlicesMs: number;
+  roadPropsMs: number;
+  roadTrafficMs: number;
+  carOverlayMs: number;
+  compositorGapMs: number;
   frameTimeMs: number;
+  p95FrameMs: number;
+  maxFrameMs: number;
+  minFps: number;
+  droppedFrames: number;
   fixedStepsLastFrame: number;
   drawnSegments: number;
   drawnProps: number;
@@ -285,19 +296,30 @@ export class Game {
   private isPaused = false;
   private renderDirty = true;
   private lastRenderCtx: CanvasRenderingContext2D | null = null;
+  renderBg = true;
+  renderRoad = true;
+  renderProps = true;
   onTimingReset?: () => void;
   private readonly input: InputSource;
   private readonly roadRenderer = new RoadRenderer();
   private readonly background = new Background();
 
-  // M8 Performance Profiler metrics
+  // M8 Performance Profiler metrics (zero GC ring buffer)
   private simTimeMs = 0;
   private simTimeAccumMs = 0;
   private simStepsSinceLastFrame = 0;
   private fixedStepsLastFrame = 0;
   private renderTimeMs = 0;
+  private bgRenderMs = 0;
+  private roadRenderMs = 0;
+  private carOverlayMs = 0;
   private frameTimeMs = 16.67;
   private lastRenderTimestamp = 0;
+  private droppedFrames = 0;
+  private readonly frameDtHistory = new Float32Array(120);
+  private readonly frameDtScratch = new Float32Array(120);
+  private frameDtCursor = 0;
+  private frameDtCount = 0;
   private lastBridgeJointSegment = -1;
   private memoryMb: number | null = null;
   private memoryCheckFrames = 0;
@@ -986,10 +1008,18 @@ export class Game {
   render = (ctx: CanvasRenderingContext2D, alpha = 1, fps = 0): void => {
     const t0 = performance.now();
     this.lastFps = fps;
-    if (this.lastRenderTimestamp > 0) {
+    if (!this.isPaused && this.lastRenderTimestamp > 0) {
       const dt = Math.min(t0 - this.lastRenderTimestamp, 100);
       this.frameTimeMs = this.frameTimeMs * 0.85 + dt * 0.15;
-    } else if (fps > 0) {
+      this.frameDtHistory[this.frameDtCursor] = dt;
+      this.frameDtCursor = (this.frameDtCursor + 1) % this.frameDtHistory.length;
+      if (this.frameDtCount < this.frameDtHistory.length) {
+        this.frameDtCount++;
+      }
+      if (dt > 18.5) {
+        this.droppedFrames++;
+      }
+    } else if (fps > 0 && this.lastRenderTimestamp <= 0) {
       this.frameTimeMs = 1000 / fps;
     }
     this.lastRenderTimestamp = t0;
@@ -1064,19 +1094,41 @@ export class Game {
     this.view.nextTrack =
       this.forkChoice === 'right' ? this.activeNextTrackLookahead : undefined;
 
-    this.background.render(
-      ctx,
-      width,
-      height,
-      this.renderPalette,
-      this.beatPulse,
-      this.downbeatPulse,
-      alpha,
-      grooveIntensity,
-    );
-    this.roadRenderer.render(ctx, this.track, this.view, this.renderPalette, this.traffic, this.beatPulse);
+    const tBg0 = performance.now();
+    if (this.renderBg) {
+      this.background.render(
+        ctx,
+        width,
+        height,
+        this.renderPalette,
+        this.beatPulse,
+        this.downbeatPulse,
+        alpha,
+        grooveIntensity,
+      );
+    } else {
+      ctx.fillStyle = this.renderPalette.skyTop;
+      ctx.fillRect(0, 0, width, height);
+    }
+    const tRoad0 = performance.now();
+    this.view.skipProps = !this.renderProps;
+    if (this.renderRoad) {
+      this.roadRenderer.render(
+        ctx,
+        this.track,
+        this.view,
+        this.renderPalette,
+        this.traffic,
+        this.beatPulse,
+      );
+    }
+    const tCar0 = performance.now();
     drawPlayerCar(ctx, this.car, width, height, alpha);
-    this.background.renderForegroundWeather(ctx, width, height);
+    const tFgWeather0 = performance.now();
+    if (this.renderBg) {
+      this.background.renderForegroundWeather(ctx, width, height);
+    }
+    const tParts0 = performance.now();
     this.particles.render(ctx, alpha);
     drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
 
@@ -1084,7 +1136,15 @@ export class Game {
       drawPauseOverlay(ctx, width, height);
     }
 
-    const renderElapsed = performance.now() - t0;
+    const tEnd = performance.now();
+    const bgElapsed = tRoad0 - tBg0 + (tParts0 - tFgWeather0);
+    const roadElapsed = tCar0 - tRoad0;
+    const carOverlayElapsed = tFgWeather0 - tCar0 + (tEnd - tParts0);
+    const renderElapsed = tEnd - t0;
+
+    this.bgRenderMs = this.bgRenderMs * 0.85 + bgElapsed * 0.15;
+    this.roadRenderMs = this.roadRenderMs * 0.85 + roadElapsed * 0.15;
+    this.carOverlayMs = this.carOverlayMs * 0.85 + carOverlayElapsed * 0.15;
     this.renderTimeMs = this.renderTimeMs * 0.85 + renderElapsed * 0.15;
   };
 
@@ -1420,7 +1480,17 @@ export class Game {
       // M8 Performance Profiler telemetry
       simTimeMs: Math.round(this.simTimeMs * 100) / 100,
       renderTimeMs: Math.round(this.renderTimeMs * 100) / 100,
+      bgRenderMs: Math.round(this.bgRenderMs * 100) / 100,
+      roadRenderMs: Math.round(this.roadRenderMs * 100) / 100,
+      roadSlicesMs: Math.round(this.roadRenderer.stats.slicesMs * 100) / 100,
+      roadPropsMs: Math.round(this.roadRenderer.stats.propsMs * 100) / 100,
+      roadTrafficMs: Math.round(this.roadRenderer.stats.trafficMs * 100) / 100,
+      carOverlayMs: Math.round(this.carOverlayMs * 100) / 100,
+      compositorGapMs:
+        Math.round(Math.max(0, this.frameTimeMs - this.simTimeMs - this.renderTimeMs) * 10) / 10,
       frameTimeMs: Math.round(this.frameTimeMs * 10) / 10,
+      ...this.computeFrameWindowStats(),
+      droppedFrames: this.droppedFrames,
       fixedStepsLastFrame: this.fixedStepsLastFrame,
       drawnSegments: this.roadRenderer.stats.drawnSegments,
       drawnProps: this.roadRenderer.stats.drawnProps,
@@ -1428,6 +1498,41 @@ export class Game {
       memoryMb: this.memoryMb,
     };
   };
+
+  private computeFrameWindowStats(): {
+    p95FrameMs: number;
+    maxFrameMs: number;
+    minFps: number;
+  } {
+    const nFrames = this.frameDtCount;
+    if (nFrames === 0) {
+      return {
+        p95FrameMs: Math.round(this.frameTimeMs * 10) / 10,
+        maxFrameMs: Math.round(this.frameTimeMs * 10) / 10,
+        minFps: this.lastFps,
+      };
+    }
+    let maxVal = 0;
+    for (let i = 0; i < nFrames; i++) {
+      const v = this.frameDtHistory[i]!;
+      this.frameDtScratch[i] = v;
+      if (v > maxVal) maxVal = v;
+    }
+    for (let i = 1; i < nFrames; i++) {
+      const key = this.frameDtScratch[i]!;
+      let j = i - 1;
+      while (j >= 0 && this.frameDtScratch[j]! > key) {
+        this.frameDtScratch[j + 1] = this.frameDtScratch[j]!;
+        j--;
+      }
+      this.frameDtScratch[j + 1] = key;
+    }
+    const p95Idx = Math.min(nFrames - 1, Math.floor(nFrames * 0.95));
+    const p95FrameMs = Math.round(this.frameDtScratch[p95Idx]! * 10) / 10;
+    const maxFrameMs = Math.round(maxVal * 10) / 10;
+    const minFps = maxVal > 0 ? Math.round(1000 / maxVal) : this.lastFps;
+    return { p95FrameMs, maxFrameMs, minFps };
+  }
 }
 
 /**

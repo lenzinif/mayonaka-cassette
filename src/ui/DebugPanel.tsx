@@ -136,9 +136,22 @@ export function DebugPanel({
     const report = {
       timestamp: new Date().toISOString(),
       fps: snap.fps,
+      minFps: snap.minFps,
       frameTimeMs: snap.frameTimeMs,
+      p95FrameMs: snap.p95FrameMs,
+      maxFrameMs: snap.maxFrameMs,
+      droppedFrames: snap.droppedFrames,
       simTimeMs: snap.simTimeMs,
       renderTimeMs: snap.renderTimeMs,
+      compositorGapMs: snap.compositorGapMs,
+      breakdown: {
+        bgRenderMs: snap.bgRenderMs,
+        roadRenderMs: snap.roadRenderMs,
+        roadSlicesMs: snap.roadSlicesMs,
+        roadPropsMs: snap.roadPropsMs,
+        roadTrafficMs: snap.roadTrafficMs,
+        carOverlayMs: snap.carOverlayMs,
+      },
       fixedStepsLastFrame: snap.fixedStepsLastFrame,
       geometry: {
         drawnSegments: snap.drawnSegments,
@@ -182,7 +195,7 @@ export function DebugPanel({
         : 'border-pink-500 bg-pink-950/90 text-pink-300 animate-pulse';
 
   return (
-    <aside className="pointer-events-auto absolute top-14 right-4 bottom-4 z-10 flex w-96 flex-col rounded border border-cyan-400/50 bg-[#0d0221]/94 font-mono text-xs text-fuchsia-100 shadow-[0_0_35px_rgba(5,217,232,0.3)] backdrop-blur-md">
+    <aside className="pointer-events-auto absolute top-14 right-4 bottom-4 z-10 flex w-96 flex-col rounded border border-cyan-400/50 bg-[#0d0221]/95 font-mono text-xs text-fuchsia-100 [contain:layout_style_paint]">
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-fuchsia-500/30 px-3 py-2.5">
         <div className="flex items-center gap-2">
@@ -282,8 +295,8 @@ export function DebugPanel({
         </div>
         <div className="relative mt-1 h-1.5 w-full overflow-hidden rounded bg-fuchsia-950/80">
           <div
-            className="h-full bg-linear-to-r from-emerald-400 via-cyan-400 to-pink-500 transition-all duration-75"
-            style={{ width: `${budgetPct}%` }}
+            className="h-full w-full origin-left bg-linear-to-r from-emerald-400 via-cyan-400 to-pink-500 will-change-transform"
+            style={{ transform: `scaleX(${budgetPct / 100})` }}
           />
         </div>
       </div>
@@ -526,7 +539,23 @@ export function DebugPanel({
                 <span className="font-bold tabular-nums text-cyan-200">{frameDt.toFixed(2)} ms</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-pink-300">2D Canvas Render:</span>
+                <span className="text-fuchsia-200">Window P95 / Max (Min FPS):</span>
+                <span className="font-bold tabular-nums text-amber-300">
+                  {(snap?.p95FrameMs ?? frameDt).toFixed(1)} / {(snap?.maxFrameMs ?? frameDt).toFixed(1)} ms ({snap?.minFps ?? fps} FPS)
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-fuchsia-200">Dropped Frames (&gt;18.5ms):</span>
+                <span
+                  className={`font-bold tabular-nums ${
+                    (snap?.droppedFrames ?? 0) > 0 ? 'text-pink-300' : 'text-emerald-300'
+                  }`}
+                >
+                  {snap?.droppedFrames ?? 0}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-pink-300">2D Canvas Render (JS):</span>
                 <span className="tabular-nums text-pink-200">{renderMs.toFixed(2)} ms</span>
               </div>
               <div className="flex justify-between">
@@ -536,10 +565,53 @@ export function DebugPanel({
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-cyan-300">Available Headroom:</span>
+                <span className="text-amber-300">Compositor / GPU Gap:</span>
+                <span
+                  className={`font-bold tabular-nums ${
+                    (snap?.compositorGapMs ?? 0) > 6 ? 'text-pink-300' : 'text-amber-200'
+                  }`}
+                >
+                  {(snap?.compositorGapMs ?? 0).toFixed(1)} ms
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-cyan-300">Available JS Headroom:</span>
                 <span className="font-bold tabular-nums text-emerald-300">
                   {Math.max(0, 16.67 - totalLoadMs).toFixed(2)} ms
                 </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section: JS Render Subsystem Breakdown */}
+          <div className="rounded border border-pink-400/30 bg-[#070114]/85 p-2.5">
+            <div className="text-[10px] font-bold tracking-wider text-pink-300 uppercase">
+              RENDER SUBSYSTEM BREAKDOWN (JS)
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px]">
+              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
+                <span className="text-fuchsia-300">SKY / BG:</span>
+                <strong className="tabular-nums text-cyan-200">{(snap?.bgRenderMs ?? 0).toFixed(2)} ms</strong>
+              </div>
+              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
+                <span className="text-fuchsia-300">ROAD TOTAL:</span>
+                <strong className="tabular-nums text-pink-200">{(snap?.roadRenderMs ?? 0).toFixed(2)} ms</strong>
+              </div>
+              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
+                <span className="text-fuchsia-300">ROAD SLICES:</span>
+                <strong className="tabular-nums text-cyan-200">{(snap?.roadSlicesMs ?? 0).toFixed(2)} ms</strong>
+              </div>
+              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
+                <span className="text-fuchsia-300">ROADSIDE PROPS:</span>
+                <strong className="tabular-nums text-amber-200">{(snap?.roadPropsMs ?? 0).toFixed(2)} ms</strong>
+              </div>
+              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
+                <span className="text-fuchsia-300">TRAFFIC:</span>
+                <strong className="tabular-nums text-emerald-200">{(snap?.roadTrafficMs ?? 0).toFixed(2)} ms</strong>
+              </div>
+              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
+                <span className="text-fuchsia-300">CAR / FX / SODA:</span>
+                <strong className="tabular-nums text-pink-200">{(snap?.carOverlayMs ?? 0).toFixed(2)} ms</strong>
               </div>
             </div>
           </div>

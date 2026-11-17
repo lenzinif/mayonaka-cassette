@@ -626,83 +626,77 @@ export function drawMelonSodaInset(
     }
   }
 
-  // Clip interior of the glass trapezoid (or cutaway sight-window on cans)
-  ctx.save();
-  ctx.beginPath();
+  // Interior dark backdrop without slow per-frame ctx.clip() stencil layer
+  const minTopY = isCan ? -15 : -22;
+  const maxX = isCan ? 14 : topHalfW;
+  ctx.fillStyle =
+    soda.skin === 'tofu-cup' ? 'rgba(28, 36, 58, 0.88)' : 'rgba(18, 10, 38, 0.84)';
   if (isCan) {
-    ctx.rect(-14, -15, 28, 33);
+    ctx.fillRect(-14, -15, 28, 33);
   } else {
+    ctx.beginPath();
     ctx.moveTo(-topHalfW, -22);
     ctx.lineTo(topHalfW, -22);
     ctx.lineTo(botHalfW, 18);
     ctx.lineTo(-botHalfW, 18);
     ctx.closePath();
+    ctx.fill();
   }
-  ctx.clip();
-
-  // Interior dark backdrop
-  ctx.fillStyle =
-    soda.skin === 'tofu-cup' ? 'rgba(28, 36, 58, 0.88)' : 'rgba(18, 10, 38, 0.84)';
-  ctx.fillRect(-24, -26, 48, 50);
 
   // Wet condensation trails on left/right inner glass walls from recent sloshes
   if (soda.wetLeft > 0.05) {
     ctx.fillStyle = liquidColor;
     ctx.globalAlpha = 0.28 * soda.wetLeft;
-    const hLeft = soda.wetLeft * 15;
-    ctx.fillRect(-topHalfW, -7 - hLeft, 3, hLeft + 4);
+    const hLeft = Math.round(soda.wetLeft * 15);
+    const wallX = isCan ? -14 : -Math.round((topHalfW + botHalfW) * 0.5);
+    ctx.fillRect(wallX, -7 - hLeft, 2, hLeft + 4);
     ctx.globalAlpha = 1;
   }
   if (soda.wetRight > 0.05) {
     ctx.fillStyle = liquidColor;
     ctx.globalAlpha = 0.28 * soda.wetRight;
-    const hRight = soda.wetRight * 15;
-    ctx.fillRect(topHalfW - 3, -7 - hRight, 3, hRight + 4);
+    const hRight = Math.round(soda.wetRight * 15);
+    const wallX = isCan ? 12 : Math.round((topHalfW + botHalfW) * 0.5) - 2;
+    ctx.fillRect(wallX, -7 - hRight, 2, hRight + 4);
     ctx.globalAlpha = 1;
   }
 
-  // Compute multi-point curved wave meniscus across x in [-22, +22]
+  // Compute pixel-column wave meniscus across container width (zero ctx.clip / path tessellation)
   // Base resting level is y = -7 (15 px below the rim at y = -22).
   // At `theta = threshold`, the wave edge reaches right up to the rim (`y = -22`)!
   const baseLevelY = -7 + heave * 0.85;
   const slopeScale = 14 / threshold;
+  const colW = 2;
+  const meniscusH = danger > 0.65 ? 3 : 2;
+  const wallSlope = isCan ? 0 : 40 / Math.max(1, topHalfW - botHalfW);
 
-  // Draw lower deep liquid gradient layer
-  ctx.fillStyle = liquidDeepColor;
-  ctx.beginPath();
-  ctx.moveTo(-22, 24);
-  for (let s = 0; s <= 8; s++) {
-    const xNorm = -1 + (s / 8) * 2;
-    ctx.lineTo(xNorm * 22, computeWaveYAt(xNorm, baseLevelY, theta, slopeScale, crest, threshold, phase) + 4);
-  }
-  ctx.lineTo(22, 24);
-  ctx.closePath();
-  ctx.fill();
+  for (let x = -maxX; x < maxX; x += colW) {
+    const xMid = x + colW * 0.5;
+    const xEdgeDist = Math.abs(xMid) + colW * 0.5;
+    const colBot = isCan
+      ? 18
+      : Math.floor(Math.min(18, 18 - Math.max(0, xEdgeDist - botHalfW) * wallSlope));
+    if (colBot <= minTopY) continue;
 
-  // Draw upper liquid body following the curved wave
-  ctx.fillStyle = liquidColor;
-  ctx.beginPath();
-  ctx.moveTo(-22, 10);
-  for (let s = 0; s <= 12; s++) {
-    const xNorm = -1 + (s / 12) * 2;
-    ctx.lineTo(xNorm * 22, computeWaveYAt(xNorm, baseLevelY, theta, slopeScale, crest, threshold, phase));
-  }
-  ctx.lineTo(22, 10);
-  ctx.closePath();
-  ctx.fill();
+    const wy = Math.round(
+      computeWaveYAt(xMid / 22, baseLevelY, theta, slopeScale, crest, threshold, phase),
+    );
+    const colTop = Math.max(minTopY, Math.min(colBot, wy));
+    const deepTop = Math.max(colTop, Math.min(colBot, wy + 4));
 
-  // Draw bright foam meniscus crest along the wave top
-  ctx.strokeStyle = liquidHighlight;
-  ctx.lineWidth = danger > 0.65 ? 2.5 : 1.8;
-  ctx.beginPath();
-  for (let s = 0; s <= 12; s++) {
-    const xNorm = -1 + (s / 12) * 2;
-    const wx = xNorm * 22;
-    const wy = computeWaveYAt(xNorm, baseLevelY, theta, slopeScale, crest, threshold, phase);
-    if (s === 0) ctx.moveTo(wx, wy);
-    else ctx.lineTo(wx, wy);
+    if (deepTop > colTop) {
+      ctx.fillStyle = liquidColor;
+      ctx.fillRect(x, colTop, colW, deepTop - colTop);
+    }
+    if (colBot > deepTop) {
+      ctx.fillStyle = liquidDeepColor;
+      ctx.fillRect(x, deepTop, colW, colBot - deepTop);
+    }
+    if (colTop < colBot) {
+      ctx.fillStyle = liquidHighlight;
+      ctx.fillRect(x, colTop, colW, Math.min(meniscusH, colBot - colTop));
+    }
   }
-  ctx.stroke();
 
   if (soda.skin === 'melon-soda') {
     // Fluted kissaten vertical glass rib highlights
@@ -711,72 +705,68 @@ export function drawMelonSodaInset(
     ctx.fillRect(0, -20, 2, 36);
     ctx.fillRect(9, -20, 2, 36);
 
-    // Rising carbonation fizz bubbles
+    // Rising carbonation fizz bubbles (clamped within inner glass bounds)
     ctx.fillStyle = '#e0fff0';
     for (let b = 0; b < 6; b++) {
-      const bx = -11 + b * 4.4 + Math.sin(phase * 2 + b) * 1.2;
+      const bx = Math.max(-11, Math.min(9, -11 + b * 4.4 + Math.sin(phase * 2 + b) * 1.2));
       const topLimit = computeWaveYAt(bx / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2;
       const by = 16 - ((phase * 14 + b * 6.5) % Math.max(4, 16 - topLimit));
-      if (by > topLimit) {
+      if (by > topLimit && by >= minTopY) {
         ctx.fillRect(Math.round(bx), Math.round(by), 2, 2);
       }
     }
 
-    // Two independent buoyant pixel-art ice cubes riding the local wave height
+    // Two independent buoyant pixel-art ice cubes riding the local wave height (zero save/rotate overhead)
     for (let i = 0; i < ICE_POSITIONS.length; i++) {
-      const ix = Math.round(ICE_POSITIONS[i]! + floatTilt * 2.5);
-      const iy = Math.round(computeWaveYAt(ix / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2);
-      ctx.save();
-      ctx.translate(ix, iy);
-      ctx.rotate(floatTilt * 0.4 + (i === 0 ? -0.12 : 0.15));
+      const ix = Math.max(-11, Math.min(11, Math.round(ICE_POSITIONS[i]! + floatTilt * 2.5)));
+      const iy = Math.max(
+        minTopY + 3,
+        Math.min(14, Math.round(computeWaveYAt(ix / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2)),
+      );
+      const tiltStep = Math.round(Math.max(-1, Math.min(1, floatTilt * 1.5)));
       ctx.fillStyle = 'rgba(225, 255, 252, 0.62)';
-      ctx.fillRect(-3, -3, 6, 5);
+      ctx.fillRect(ix - 3, iy - 3 + tiltStep, 6, 5);
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(-3, -3, 5, 1);
-      ctx.fillRect(-3, -3, 1, 4);
-      ctx.restore();
+      ctx.fillRect(ix - 3, iy - 3 + tiltStep, 5, 1);
+      ctx.fillRect(ix - 3, iy - 3 + tiltStep, 1, 4);
     }
 
-    // Buoyant pixel-art Vanilla Ice Cream Scoop + Maraschino Cherry bobbing & tilting on the wave
-    const scoopX = Math.round(floatTilt * 3.8);
-    const scoopY = Math.round(computeWaveYAt(scoopX / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 1 + floatY * 0.35);
-    ctx.save();
-    ctx.translate(scoopX, scoopY);
-    ctx.rotate(floatTilt * 0.55);
+    // Buoyant pixel-art Vanilla Ice Cream Scoop + Maraschino Cherry bobbing on the wave
+    const scoopX = Math.max(-7, Math.min(7, Math.round(floatTilt * 3.8)));
+    const scoopY = Math.max(
+      minTopY + 12,
+      Math.min(12, Math.round(computeWaveYAt(scoopX / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 1 + floatY * 0.35)),
+    );
 
     // Pixel-stepped dome for vanilla scoop
     ctx.fillStyle = '#fff6d6';
-    ctx.fillRect(-6, -4, 12, 4);
-    ctx.fillRect(-5, -6, 10, 2);
-    ctx.fillRect(-3, -7, 6, 1);
+    ctx.fillRect(scoopX - 6, scoopY - 4, 12, 4);
+    ctx.fillRect(scoopX - 5, scoopY - 6, 10, 2);
+    ctx.fillRect(scoopX - 3, scoopY - 7, 6, 1);
     // Scalloped cream base
     ctx.fillStyle = '#ffebb3';
-    ctx.fillRect(-7, -1, 14, 2);
+    ctx.fillRect(scoopX - 7, scoopY - 1, 14, 2);
 
-    // Pixel-art Maraschino cherry + highlight + stem
+    // Pixel-art Maraschino cherry + highlight + pixel-stepped stem
     ctx.fillStyle = '#ff2a6d';
-    ctx.fillRect(-1, -10, 5, 4);
-    ctx.fillRect(0, -11, 3, 6);
+    ctx.fillRect(scoopX - 1, scoopY - 10, 5, 4);
+    ctx.fillRect(scoopX, scoopY - 11, 3, 6);
     ctx.fillStyle = '#ff9ebb';
-    ctx.fillRect(0, -10, 1, 1);
-
-    ctx.strokeStyle = '#ff5c93';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(1, -11);
-    ctx.quadraticCurveTo(4, -15, 6, -16);
-    ctx.stroke();
-
-    ctx.restore();
+    ctx.fillRect(scoopX, scoopY - 10, 1, 1);
+    ctx.fillStyle = '#ff5c93';
+    ctx.fillRect(scoopX + 1, scoopY - 13, 1, 2);
+    ctx.fillRect(scoopX + 2, scoopY - 15, 2, 2);
+    ctx.fillRect(scoopX + 4, scoopY - 16, 2, 1);
   } else if (soda.skin === 'tofu-cup') {
     // Subtle water surface specular glint in the Initial D paper cup
-    const glintX = Math.round(floatTilt * 4);
-    const glintY = Math.round(computeWaveYAt(glintX / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2);
+    const glintX = Math.max(-9, Math.min(9, Math.round(floatTilt * 4)));
+    const glintY = Math.max(
+      minTopY + 1,
+      Math.min(16, Math.round(computeWaveYAt(glintX / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 2)),
+    );
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(glintX - 5, glintY, 10, 1);
   }
-
-  ctx.restore(); // end interior clip
 
   // 4. Container rim & outline
   ctx.strokeStyle = isSpilling ? '#ff2a6d' : isCresting ? '#ffd319' : '#c8f6ff';

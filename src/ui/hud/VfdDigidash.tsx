@@ -66,27 +66,27 @@ export const VfdDigidash = memo(function VfdDigidash({
           </span>
         )}
         {isDrifting && (
-          <span className="rounded border border-cyan-300 bg-cyan-950/92 px-2 py-0.5 text-cyan-200 shadow-[0_0_10px_rgba(5,217,232,0.5)]">
+          <span className="rounded border border-cyan-300 bg-cyan-950/92 px-2 py-0.5 text-cyan-200">
             DRIFTING {driftTime >= 0.1 ? `${driftTime.toFixed(1)}S` : ''}
           </span>
         )}
         {isOverdrive && (
-          <span className="animate-pulse rounded border border-amber-300 bg-amber-950/92 px-2 py-0.5 text-amber-200 shadow-[0_0_12px_rgba(251,191,36,0.55)]">
+          <span className="rounded border border-amber-300 bg-amber-950/92 px-2 py-0.5 text-amber-200">
             OVERDRIVE
           </span>
         )}
         {showDownshiftPrompt && (
-          <span className="animate-pulse rounded border border-amber-400 bg-amber-950/92 px-2 py-0.5 text-amber-200">
+          <span className="rounded border border-amber-400 bg-amber-950/92 px-2 py-0.5 text-amber-200">
             BOGGING! DOWNSHIFT
           </span>
         )}
         {!autoShift && isRedlining && (
-          <span className="animate-pulse rounded border border-pink-400 bg-pink-950/92 px-2 py-0.5 text-pink-200 shadow-[0_0_10px_rgba(255,42,109,0.5)]">
+          <span className="rounded border border-pink-400 bg-pink-950/92 px-2 py-0.5 text-pink-200">
             REV LIMIT! SHIFT UP
           </span>
         )}
         {shiftSweetSpot && (
-          <span className="animate-pulse rounded border border-emerald-300 bg-emerald-950/92 px-2 py-0.5 text-emerald-200 shadow-[0_0_10px_rgba(16,185,129,0.4)]">
+          <span className="rounded border border-emerald-300 bg-emerald-950/92 px-2 py-0.5 text-emerald-200">
             SHIFT ON BEAT [SPACE]
           </span>
         )}
@@ -94,7 +94,7 @@ export const VfdDigidash = memo(function VfdDigidash({
           <span
             className={`rounded border px-1.5 py-0.5 text-[9px] font-bold tabular-nums ${
               lastShiftTier === 'PERFECT'
-                ? 'border-emerald-300 bg-emerald-950/90 text-emerald-200 shadow-[0_0_8px_rgba(16,185,129,0.4)]'
+                ? 'border-emerald-300 bg-emerald-950/90 text-emerald-200'
                 : 'border-cyan-300 bg-cyan-950/90 text-cyan-200'
             }`}
           >
@@ -107,23 +107,23 @@ export const VfdDigidash = memo(function VfdDigidash({
       </div>
 
       {/* Unified JDM VFD Instrument Cluster Binnacle */}
-      <div className="flex flex-col gap-2 rounded-lg border-2 border-cyan-400/50 bg-[#060b14]/96 p-2.5 shadow-[0_0_25px_rgba(5,217,232,0.22)]">
+      <div className="flex flex-col gap-2 rounded-lg border-2 border-cyan-400/50 bg-[#060b14]/96 p-2.5">
         {/* Upper Deck: VFD Groove Flux Meter with Tier Zones */}
         <div className="flex flex-col gap-1 rounded border border-cyan-500/20 bg-[#040811]/85 px-2.5 py-1.5">
           <div className="flex items-center justify-between text-[9px] font-bold tracking-widest uppercase">
             <div className="flex items-center gap-2">
               <span className="text-cyan-300">GROOVE FLUX</span>
-              <span className="text-xs font-black tabular-nums text-white [text-shadow:0_0_8px_#05d9e8]">
+              <span className="text-xs font-black tabular-nums text-white">
                 {groove}%
               </span>
             </div>
             <div className="flex items-center gap-1">
               <span
-                className={`rounded px-1.5 py-0.2 text-[8px] font-black tracking-wider transition-all duration-150 ${
+                className={`rounded px-1.5 py-0.2 text-[8px] font-black tracking-wider ${
                   grooveTier === 'OVERDRIVE'
-                    ? 'border border-amber-300 bg-amber-950/90 text-amber-200 shadow-[0_0_10px_rgba(251,191,36,0.6)] animate-pulse'
+                    ? 'border border-amber-300 bg-amber-950/90 text-amber-200'
                     : grooveTier === 'HIGH'
-                      ? 'border border-pink-400 bg-pink-950/90 text-pink-200 shadow-[0_0_8px_rgba(255,42,109,0.5)]'
+                      ? 'border border-pink-400 bg-pink-950/90 text-pink-200'
                       : grooveTier === 'MEDIUM'
                         ? 'border border-cyan-400 bg-cyan-950/90 text-cyan-200'
                         : 'border border-zinc-700 bg-zinc-900/90 text-zinc-400'
@@ -188,7 +188,7 @@ export const VfdDigidash = memo(function VfdDigidash({
             {/* Active Gear Display + Gate */}
             <div className="my-1 flex items-center justify-between">
               <div className="flex items-baseline gap-1">
-                <span className="text-3xl font-black italic text-cyan-300 [text-shadow:0_0_12px_#05d9e8]">
+                <span className="text-3xl font-black italic text-cyan-300">
                   {gear}
                 </span>
                 <span className="text-[9px] font-bold text-cyan-500/70">
@@ -201,9 +201,9 @@ export const VfdDigidash = memo(function VfdDigidash({
                 {GEAR_NUMBERS.map((g) => (
                   <span
                     key={g}
-                    className={`rounded-xs px-1 py-0.5 tabular-nums transition-colors ${
+                    className={`rounded-xs px-1 py-0.5 tabular-nums ${
                       gear === g
-                        ? 'bg-cyan-400 text-slate-950 shadow-[0_0_8px_#05d9e8]'
+                        ? 'bg-cyan-400 text-slate-950'
                         : g < gear
                           ? 'bg-cyan-950/70 text-cyan-300/80 border border-cyan-500/30'
                           : 'bg-[#03070d] text-cyan-800'
@@ -263,7 +263,7 @@ export const VfdDigidash = memo(function VfdDigidash({
                   title="Beat-Shift Sweet Spot"
                 />
                 <div
-                  className={`h-full w-full origin-left transition-transform duration-75 will-change-transform ${
+                  className={`h-full w-full origin-left will-change-transform ${
                     rpm >= 0.92
                       ? 'bg-pink-500'
                       : isLugging
@@ -300,7 +300,7 @@ export const VfdDigidash = memo(function VfdDigidash({
                   888
                 </span>
                 {/* Lit segments */}
-                <span className="absolute inset-0 text-4xl font-black italic tabular-nums tracking-tight text-cyan-200 [text-shadow:0_0_14px_#05d9e8]">
+                <span className="absolute inset-0 text-4xl font-black italic tabular-nums tracking-tight text-cyan-200">
                   {String(speedKmh).padStart(3, '0')}
                 </span>
               </div>
@@ -317,7 +317,7 @@ export const VfdDigidash = memo(function VfdDigidash({
               </div>
               <div className="h-2 w-full overflow-hidden rounded-xs border border-cyan-400/30 bg-[#03070d]">
                 <div
-                  className="h-full w-full origin-left bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-300 transition-transform duration-75 will-change-transform"
+                  className="h-full w-full origin-left bg-gradient-to-r from-cyan-400 via-fuchsia-500 to-amber-300 will-change-transform"
                   style={{ transform: `scaleX(${speedPct / 100})` }}
                 />
               </div>
