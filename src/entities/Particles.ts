@@ -81,6 +81,7 @@ export class ParticleSystem {
   }));
 
   private writeCursor = 0;
+  private activeParticleCount = 0;
   private smokeAccum = 0;
   private sparkAccum = 0;
   private prngState = 0x5f3759df;
@@ -92,19 +93,16 @@ export class ParticleSystem {
     spriteFrame: 0,
   };
 
-  /** Counts currently active particles (useful for telemetry & unit tests). */
+  /** Counts currently active particles in O(1) time (useful for telemetry & unit tests). */
   get activeCount(): number {
-    let count = 0;
-    for (let i = 0; i < this.pool.length; i++) {
-      if (this.pool[i]!.active) count++;
-    }
-    return count;
+    return this.activeParticleCount;
   }
 
   /** Clears all active particles. */
   reset(): void {
     this.smokeAccum = 0;
     this.sparkAccum = 0;
+    this.activeParticleCount = 0;
     for (let i = 0; i < this.pool.length; i++) {
       this.pool[i]!.active = false;
     }
@@ -126,6 +124,7 @@ export class ParticleSystem {
       const p = this.pool[idx]!;
       if (!p.active) {
         this.writeCursor = (idx + 1) % this.pool.length;
+        this.activeParticleCount++;
         return p;
       }
     }
@@ -154,6 +153,7 @@ export class ParticleSystem {
       p.life += dt;
       if (p.life >= p.maxLife) {
         p.active = false;
+        this.activeParticleCount = Math.max(0, this.activeParticleCount - 1);
         continue;
       }
       p.x += p.vx * dt;
@@ -383,7 +383,10 @@ export class ParticleSystem {
    * Zero allocations in `render()` (AGENTS.md §4.3).
    */
   render(ctx: CanvasRenderingContext2D, alpha = 1): void {
-    ctx.save();
+    if (this.activeParticleCount === 0) return;
+
+    let lastAlpha = 1;
+    let lastFillStyle = '';
     for (let i = 0; i < this.pool.length; i++) {
       const p = this.pool[i]!;
       if (!p.active) continue;
@@ -391,37 +394,59 @@ export class ParticleSystem {
       const t = Math.max(0, Math.min(1, p.life / Math.max(0.01, p.maxLife)));
       const px = Math.round(p.prevX + (p.x - p.prevX) * alpha);
       const py = Math.round(p.prevY + (p.y - p.prevY) * alpha);
+      const rawAlpha =
+        p.kind === 'smoke' ? (1 - t) * 0.68 : p.kind === 'spark' ? 1 - t * 0.75 : 1 - t * 0.7;
+      const qAlpha = Math.max(0.1, Math.round(rawAlpha * 5) * 0.2);
+      if (qAlpha !== lastAlpha) {
+        ctx.globalAlpha = qAlpha;
+        lastAlpha = qAlpha;
+      }
 
       if (p.kind === 'smoke') {
-        // Pixel-stepped expanding puff with dithered core
         const puffSize = Math.round(p.size + t * 5);
         const half = Math.floor(puffSize * 0.5);
-        ctx.globalAlpha = Math.max(0, (1 - t) * 0.68);
-        ctx.fillStyle = p.color;
+        if (p.color !== lastFillStyle) {
+          ctx.fillStyle = p.color;
+          lastFillStyle = p.color;
+        }
         ctx.fillRect(px - half, py - half, puffSize, puffSize);
         if (t < 0.45) {
-          ctx.fillStyle = p.secondaryColor;
+          if (p.secondaryColor !== lastFillStyle) {
+            ctx.fillStyle = p.secondaryColor;
+            lastFillStyle = p.secondaryColor;
+          }
           ctx.fillRect(px - 1, py - 1, 2, 2);
         }
       } else if (p.kind === 'spark') {
-        ctx.globalAlpha = Math.max(0, 1 - t * 0.75);
-        // Pixel streak along velocity vector
         const tailX = Math.round(px - p.vx * 0.018);
         const tailY = Math.round(py - p.vy * 0.018);
-        ctx.fillStyle = p.color;
+        if (p.color !== lastFillStyle) {
+          ctx.fillStyle = p.color;
+          lastFillStyle = p.color;
+        }
         ctx.fillRect(tailX, tailY, p.size, p.size);
-        ctx.fillStyle = p.secondaryColor;
+        if (p.secondaryColor !== lastFillStyle) {
+          ctx.fillStyle = p.secondaryColor;
+          lastFillStyle = p.secondaryColor;
+        }
         ctx.fillRect(px, py, Math.max(1, p.size - 1), Math.max(1, p.size - 1));
       } else {
-        // Pixel debris chip
-        ctx.globalAlpha = Math.max(0, 1 - t * 0.7);
-        ctx.fillStyle = p.color;
+        if (p.color !== lastFillStyle) {
+          ctx.fillStyle = p.color;
+          lastFillStyle = p.color;
+        }
         ctx.fillRect(px - 1, py - 1, p.size, p.size);
-        ctx.fillStyle = p.secondaryColor;
-        ctx.fillRect(px, py, 1, 1);
+        if (t < 0.4) {
+          if (p.secondaryColor !== lastFillStyle) {
+            ctx.fillStyle = p.secondaryColor;
+            lastFillStyle = p.secondaryColor;
+          }
+          ctx.fillRect(px, py, 1, 1);
+        }
       }
     }
-    ctx.globalAlpha = 1;
-    ctx.restore();
+    if (lastAlpha !== 1) {
+      ctx.globalAlpha = 1;
+    }
   }
 }

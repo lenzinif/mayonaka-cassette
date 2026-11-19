@@ -345,4 +345,56 @@ describe('RoadRenderer — Rendering Environments', () => {
     expect(renderer.stats.propsMs).toBeGreaterThanOrEqual(0);
     expect(renderer.stats.trafficMs).toBeGreaterThanOrEqual(0);
   });
+
+  it('skips redundant ctx.clip() stencil passes on non-bridge hills unless legacyRaster is enabled and counts pylon spans', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('standard');
+
+    // Create a gentle crest below horizon (crestTop seg 4 at worldY=300, seg 8 dips to 0)
+    // and place a tall building behind crest + two linked pylons so both crest clip & wire span trigger
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      const y = i <= 4 ? (i / 4) * 320 : i <= 8 ? 320 - (i - 4) * 160 : -320;
+      const y2 = i + 1 <= 4 ? ((i + 1) / 4) * 320 : i + 1 <= 8 ? 320 - (i + 1 - 4) * 160 : -320;
+      seg.p1.worldY = y;
+      seg.p2.worldY = y2;
+    }
+    track.segments[8]!.sprites.push({ kind: 'building', offset: 2.0, variant: 0 });
+    track.segments[6]!.sprites.push({ kind: 'pylon', offset: 3.2, variant: 0, chainId: 1 });
+    track.segments[12]!.sprites.push({ kind: 'pylon', offset: 3.2, variant: 0, chainId: 1 });
+
+    let clipCalls = 0;
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      clip: () => {
+        clipCalls++;
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, { ...defaultView, legacyRaster: false }, PALETTE_NIGHT_FUNK);
+    expect(renderer.stats.crestClips).toBe(0);
+    expect(clipCalls).toBe(0);
+    expect(renderer.stats.drawnPylonSpans).toBeGreaterThan(0);
+
+    renderer.render(ctx, track, { ...defaultView, legacyRaster: true }, PALETTE_NIGHT_FUNK);
+    expect(renderer.stats.crestClips).toBeGreaterThan(0);
+    expect(clipCalls).toBeGreaterThan(0);
+  });
 });

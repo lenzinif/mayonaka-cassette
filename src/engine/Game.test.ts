@@ -817,4 +817,140 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
     expect(leftEvents).toContain('lapCompleted');
     expect(leftEvents).not.toContain('runCompleted');
   });
+
+  it('tracks full-song session benchmark report, section breakdown, seekToBar, and resetPerfBenchmark', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(60);
+    const game = new Game({ input, bridge });
+
+    const noop = () => {};
+    const mockCtx = {
+      canvas: { width: 640, height: 360 },
+      save: noop,
+      restore: noop,
+      fillRect: noop,
+      strokeRect: noop,
+      fillText: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      ellipse: noop,
+      rect: noop,
+      clip: noop,
+      fill: noop,
+      stroke: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      setTransform: noop,
+      setLineDash: noop,
+      createLinearGradient: () => ({ addColorStop: noop }),
+      createRadialGradient: () => ({ addColorStop: noop }),
+      drawImage: noop,
+    } as unknown as CanvasRenderingContext2D;
+
+    game.render(mockCtx, 1, 60);
+    game.update(1 / 120);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.seekToBar(8);
+    expect(game.roadBarIndex).toBe(8);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+
+    const report = game.getBenchmarkReport();
+    expect(report.session.frames).toBeGreaterThanOrEqual(2);
+    expect(report.session.avgFps).toBeGreaterThan(0);
+    expect(report.session.pct60Fps).toBeGreaterThanOrEqual(0);
+    expect(report.sections.length).toBeGreaterThan(0);
+
+    const snap = bridge.getSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.sessionAvgFps).toBeGreaterThan(0);
+    expect(snap!.pct60Fps).toBeGreaterThanOrEqual(0);
+
+    game.resetPerfBenchmark();
+    const resetReport = game.getBenchmarkReport();
+    expect(resetReport.session.frames).toBe(0);
+    expect(resetReport.session.droppedFrames).toBe(0);
+    expect(resetReport.sections.length).toBe(0);
+  });
+
+  it('exercises fork rendering, off-road gravel particles, truck collisions, and stage transition with zero errors', () => {
+    const input = new FakeInput();
+    input.setDown('accelerate', true);
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(60);
+    const game = new Game({ input, bridge });
+    const events: GameEvent['type'][] = [];
+    bridge.onEvent((e) => events.push(e.type));
+
+    const noop = () => {};
+    const mockCtx = {
+      canvas: { width: 640, height: 360 },
+      save: noop,
+      restore: noop,
+      fillRect: noop,
+      strokeRect: noop,
+      fillText: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      ellipse: noop,
+      rect: noop,
+      clip: noop,
+      fill: noop,
+      stroke: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      setTransform: noop,
+      setLineDash: noop,
+      createLinearGradient: () => ({ addColorStop: noop }),
+      createRadialGradient: () => ({ addColorStop: noop }),
+      drawImage: noop,
+    } as unknown as CanvasRenderingContext2D;
+
+    // 1. Fork trigger + render
+    game.triggerForkTest();
+    expect(game.forkActive).toBe(true);
+    game.render(mockCtx, 1, 60);
+
+    // 2. Off-road gravel particle emission
+    game.triggerOffRoadTest();
+    for (let i = 0; i < 12; i++) {
+      game.update(1 / 120);
+    }
+    expect(game.car.isOffRoad).toBe(true);
+    expect(game.particles.activeCount).toBeGreaterThan(0);
+    game.render(mockCtx, 1, 60);
+
+    // 3. Truck collision & burst
+    game.car.x = 0;
+    game.car.prevX = 0;
+    game.triggerTruckCollisionTest();
+    for (let i = 0; i < 4; i++) {
+      game.update(1 / 120);
+    }
+    expect(events).toContain('collision');
+    expect(game.particles.activeCount).toBeGreaterThan(0);
+    game.render(mockCtx, 1, 60);
+
+    // 4. Stage transition (Next Song)
+    game.triggerNextSongTest();
+    for (let i = 0; i < 20; i++) {
+      game.update(1 / 120);
+    }
+    expect(events).toContain('stageTransition');
+    expect(game.traffic.trucks.length).toBeGreaterThan(0);
+    game.render(mockCtx, 1, 60);
+  });
 });

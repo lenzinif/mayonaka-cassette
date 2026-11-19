@@ -54,6 +54,14 @@ export interface RoadView {
   alpha?: number;
   /** Diagnostic toggle to isolate road slices vs roadside props rasterization cost. */
   skipProps?: boolean;
+  /** Diagnostic toggle to disable catenary power-line wire strokes. */
+  skipPylonWires?: boolean;
+  /** Diagnostic toggle to disable AI Kei Truck rendering. */
+  skipTraffic?: boolean;
+  /** Diagnostic flag enabling synchronous subsystem measurement. */
+  syncGpuProbe?: boolean;
+  /** Diagnostic A/B toggle reverting to unoptimized raster path when true. */
+  legacyRaster?: boolean;
 }
 
 /**
@@ -63,6 +71,8 @@ export interface RoadRenderStats {
   drawnSegments: number;
   drawnProps: number;
   drawnTrucks: number;
+  drawnPylonSpans: number;
+  crestClips: number;
   slicesMs: number;
   propsMs: number;
   trafficMs: number;
@@ -108,6 +118,8 @@ export class RoadRenderer {
     drawnSegments: 0,
     drawnProps: 0,
     drawnTrucks: 0,
+    drawnPylonSpans: 0,
+    crestClips: 0,
     slicesMs: 0,
     propsMs: 0,
     trafficMs: 0,
@@ -124,7 +136,10 @@ export class RoadRenderer {
     this.stats.drawnSegments = 0;
     this.stats.drawnProps = 0;
     this.stats.drawnTrucks = 0;
-    const sampleSubsystems = (this.profileTick++ & 7) === 0;
+    this.stats.drawnPylonSpans = 0;
+    this.stats.crestClips = 0;
+    const legacy = Boolean(view.legacyRaster);
+    const sampleSubsystems = Boolean(view.syncGpuProbe || legacy) && (view.syncGpuProbe || (this.profileTick++ & 7) === 0);
     let sampleSlicesMs = 0;
     let samplePropsMs = 0;
     let sampleTrafficMs = 0;
@@ -240,12 +255,10 @@ export class RoadRenderer {
       if (p2.screenY < p1.screenY && p2.screenY < segClipY) {
         // Distant LOD: cull degenerate sub-pixel road slices near vanishing point
         const dy = p1.screenY - p2.screenY;
-        if (
-          dy >= 0.15 ||
-          p1.screenW >= 8 ||
-          seg.sprites.length > 0 ||
-          firstTruckIdx !== -1
-        ) {
+        const shouldDrawSlice = legacy
+          ? dy >= 0.15 || p1.screenW >= 8 || seg.sprites.length > 0 || firstTruckIdx !== -1
+          : dy >= 0.25 || n <= 90 || seg.sprites.length > 0 || firstTruckIdx !== -1;
+        if (shouldDrawSlice) {
           this.stats.drawnSegments++;
           const tSeg0 = sampleSubsystems ? performance.now() : 0;
           this.renderSegment(
@@ -261,6 +274,7 @@ export class RoadRenderer {
             isCameraOnBridge,
             horizonY,
             view.grooveIntensity ?? 0.5,
+            legacy,
           );
           if (sampleSubsystems) {
             sampleSlicesMs += performance.now() - tSeg0;
@@ -270,7 +284,8 @@ export class RoadRenderer {
 
       const ppu = (p1.scale * width) / 2;
       const scaledPpu = (ppu * roadWidth) / 2000;
-      if (scaledPpu < 0.001) continue;
+      const refPpu = scaledPpu * (640 / Math.max(1, width));
+      if (refPpu < (legacy ? 0.001 : 0.004)) continue;
 
       const sprites = view.skipProps ? EMPTY_SPRITES : seg.sprites;
       if (sprites.length === 0 && firstTruckIdx === -1) continue;
@@ -278,8 +293,13 @@ export class RoadRenderer {
       // Skip segment sprites/traffic if occluded behind a hill crest
       if (p1.screenY - 12000 * scaledPpu >= segClipY) continue;
 
-      // Smooth distant alpha fade-in (0.001 -> 0.006) to eliminate abrupt pop-in & flickering at the horizon
-      const propAlpha = Math.min(1, Math.max(0, (scaledPpu - 0.001) / 0.005));
+      // Smooth distant alpha fade-in over far ~28% of drawDistance + low refPpu horizon band
+      const distAlpha =
+        !legacy && drawDistance > 0 && n > drawDistance * 0.72
+          ? Math.max(0.05, Math.min(1, (1 - n / drawDistance) / 0.28))
+          : 1;
+      const ppuAlpha = Math.min(1, Math.max(0, (refPpu - 0.001) / 0.005));
+      const propAlpha = legacy ? ppuAlpha : Math.min(distAlpha, ppuAlpha);
       const needsPropAlpha = propAlpha < 0.98;
       let crestClipActive = false;
 
@@ -318,9 +338,45 @@ export class RoadRenderer {
 
         const spriteScale = s.scale ?? 1;
         const propPpu = scaledPpu * spriteScale;
+        const propRefPpu = propPpu * (640 / Math.max(1, width));
 
-        // Cheap distant LOD: skip far-field (Band D) props when scaledPpu is tiny (<0.0012)
-        if (Math.abs(s.offset) >= 6.0 && propPpu < 0.0012) continue;
+        // Distance culling calibrated against real projected propPpu (640x360) and drawDistance
+        if (!legacy) {
+          if (Math.abs(s.offset) >= 6.0 && (n > drawDistance * 0.45 || propRefPpu < 0.011)) {
+            continue;
+          }
+          if (
+            Math.abs(s.offset) >= 3.0 &&
+            n > drawDistance * 0.65 &&
+            resolvedKind !== 'building' &&
+            resolvedKind !== 'pylon'
+          ) {
+            continue;
+          }
+          if (
+            (resolvedKind === 'shrub' ||
+              resolvedKind === 'bench' ||
+              resolvedKind === 'chevron' ||
+              resolvedKind === 'jihanki' ||
+              resolvedKind === 'phonebooth' ||
+              resolvedKind === 'bus-stop') &&
+            (n > drawDistance * 0.55 || propRefPpu < 0.011)
+          ) {
+            continue;
+          }
+          if (
+            (resolvedKind === 'sign' ||
+              resolvedKind === 'lamp' ||
+              resolvedKind === 'toro' ||
+              resolvedKind === 'kiosk' ||
+              resolvedKind === 'canopy') &&
+            (n > drawDistance * 0.65 || propRefPpu < 0.0095)
+          ) {
+            continue;
+          }
+        } else if (Math.abs(s.offset) >= 6.0 && propPpu < 0.0012) {
+          continue;
+        }
 
         const effectiveOffset = getEffectivePropOffset(
           s.offset,
@@ -333,7 +389,7 @@ export class RoadRenderer {
 
         // Phase 3: Always register every visible pylon in the longitudinal wire chain regardless of lateral cull,
         // so catenary spans never pop off when the near tower slides past the viewport edge.
-        if (resolvedKind === 'pylon' && s.chainId !== undefined) {
+        if (resolvedKind === 'pylon' && s.chainId !== undefined && !view.skipPylonWires) {
           this.handlePylonChainWires(
             ctx,
             s,
@@ -342,6 +398,7 @@ export class RoadRenderer {
             propPpu,
             seg.index,
             isNextSeg ? view.nextTrack!.segments.length : segments.length,
+            legacy,
           );
         }
 
@@ -364,6 +421,7 @@ export class RoadRenderer {
           !crestClipActive &&
           segClipY < height &&
           p1.screenY > segClipY &&
+          (legacy || isCameraOnBridge) &&
           typeof ctx.clip === 'function'
         ) {
           ctx.save();
@@ -375,13 +433,19 @@ export class RoadRenderer {
           ctx.closePath();
           ctx.clip();
           crestClipActive = true;
+          this.stats.crestClips++;
         }
+
+        const propGroundY =
+          !legacy && !isCameraOnBridge && p1.screenY > segClipY
+            ? Math.min(p1.screenY, Math.max(segClipY, horizonY))
+            : p1.screenY;
 
         drawProp(
           ctx,
           resolvedKind,
           sx,
-          p1.screenY,
+          propGroundY,
           propPpu,
           effectiveOffset < 0 ? -1 : 1,
           s.variant,
@@ -403,7 +467,7 @@ export class RoadRenderer {
       }
 
       // AI Kei Trucks on this segment (diverging onto the left/right Y-fork branch)
-      if (traffic && firstTruckIdx !== -1) {
+      if (traffic && firstTruckIdx !== -1 && !view.skipTraffic) {
         const tTraffic0 = sampleSubsystems ? performance.now() : 0;
         let tIdx = firstTruckIdx;
         while (tIdx !== -1) {
@@ -502,7 +566,9 @@ export class RoadRenderer {
 
     // Phase 3 Edge case (b): extrapolate wires for nearest visible tower behind camera
     const tWires0 = sampleSubsystems ? performance.now() : 0;
-    this.extrapolateNearestPylonWires(ctx, width, height);
+    if (!view.skipPylonWires && !view.skipProps) {
+      this.extrapolateNearestPylonWires(ctx, width, height, legacy);
+    }
     if (sampleSubsystems) {
       samplePropsMs += performance.now() - tWires0;
       this.stats.slicesMs = this.stats.slicesMs * 0.75 + sampleSlicesMs * 0.25;
@@ -519,6 +585,7 @@ export class RoadRenderer {
     propPpu: number,
     segIndex: number,
     trackSegCount: number,
+    legacy = false,
   ): void {
     const chainId = sprite.chainId!;
     const variant = sprite.variant;
@@ -556,46 +623,92 @@ export class RoadRenderer {
 
         const pOffset = slot * 10;
         let drewAnyWire = false;
-        for (let k = 0; k < 5; k++) {
-          const xNear = this.currentPylonPoints[k * 2]!;
-          const yNear = this.currentPylonPoints[k * 2 + 1]!;
-          const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-          const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
-
-          drewAnyWire = true;
-          const dx = xFar - xNear;
-          const dy = yFar - yNear;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-
-          // Sag proportional to screen span distance (~0.08–0.12, min 1.5px)
-          const sagRatio = isCrossing ? 0.05 : 0.09;
-          const sag = Math.max(1.5, dist * sagRatio);
-          const midX = (xNear + xFar) * 0.5;
-          const midY = (yNear + yFar) * 0.5 + sag;
-
-          ctx.beginPath();
-          ctx.moveTo(xNear, yNear);
-          ctx.quadraticCurveTo(midX, midY, xFar, yFar);
-          ctx.stroke();
-        }
-
-        // Faint neon sheen highlight if close enough to screen
-        if (drewAnyWire && propPpu > 0.0035) {
-          ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+        if (legacy) {
           for (let k = 0; k < 5; k++) {
             const xNear = this.currentPylonPoints[k * 2]!;
-            const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+            const yNear = this.currentPylonPoints[k * 2 + 1]!;
             const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+
+            drewAnyWire = true;
+            const dx = xFar - xNear;
+            const dy = yFar - yNear;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            const sagRatio = isCrossing ? 0.05 : 0.09;
+            const sag = Math.max(1.5, dist * sagRatio);
+            const midX = (xNear + xFar) * 0.5;
+            const midY = (yNear + yFar) * 0.5 + sag;
+
+            ctx.beginPath();
+            ctx.moveTo(xNear, yNear);
+            ctx.quadraticCurveTo(midX, midY, xFar, yFar);
+            ctx.stroke();
+          }
+
+          if (drewAnyWire) {
+            this.stats.drawnPylonSpans++;
+          }
+
+          if (drewAnyWire && propPpu > 0.0035) {
+            ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+            for (let k = 0; k < 5; k++) {
+              const xNear = this.currentPylonPoints[k * 2]!;
+              const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+              const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+
+              const dx = xFar - xNear;
+              const dy = yFar - yNear;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const sagRatio = isCrossing ? 0.05 : 0.09;
+              const sag = Math.max(1.5, dist * sagRatio);
+              ctx.beginPath();
+              ctx.moveTo(xNear, yNear);
+              ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+              ctx.stroke();
+            }
+          }
+        } else {
+          // Batched catenary wire draw: 1 beginPath + 5 quadratic curves + 1 stroke
+          ctx.beginPath();
+          for (let k = 0; k < 5; k++) {
+            const xNear = this.currentPylonPoints[k * 2]!;
+            const yNear = this.currentPylonPoints[k * 2 + 1]!;
+            const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
             const dx = xFar - xNear;
             const dy = yFar - yNear;
             const dist = Math.sqrt(dx * dx + dy * dy);
             const sagRatio = isCrossing ? 0.05 : 0.09;
             const sag = Math.max(1.5, dist * sagRatio);
-            ctx.beginPath();
+            const midX = (xNear + xFar) * 0.5;
+            const midY = (yNear + yFar) * 0.5 + sag;
+
             ctx.moveTo(xNear, yNear);
-            ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+            ctx.quadraticCurveTo(midX, midY, xFar, yFar);
+          }
+          ctx.stroke();
+          this.stats.drawnPylonSpans++;
+
+          if (propPpu > 0.018) {
+            ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+            ctx.beginPath();
+            for (let k = 0; k < 5; k++) {
+              const xNear = this.currentPylonPoints[k * 2]!;
+              const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+              const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+
+              const dx = xFar - xNear;
+              const dy = yFar - yNear;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              const sagRatio = isCrossing ? 0.05 : 0.09;
+              const sag = Math.max(1.5, dist * sagRatio);
+              ctx.moveTo(xNear, yNear);
+              ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+            }
             ctx.stroke();
           }
         }
@@ -650,6 +763,7 @@ export class RoadRenderer {
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
+    legacy = false,
   ): void {
     ctx.strokeStyle = '#2d1c4a';
     ctx.lineWidth = 1;
@@ -704,15 +818,26 @@ export class RoadRenderer {
 
       const pOffset = s * 10;
 
-      for (let k = 0; k < 5; k++) {
-        const xNear = this.chainSlotPoints[pOffset + k * 2]!;
-        const yNear = this.chainSlotPoints[pOffset + k * 2 + 1]!;
-        const exitX = xNear + dirX * extLen;
-        const exitY = yNear + dirY * extLen;
+      if (legacy) {
+        for (let k = 0; k < 5; k++) {
+          const xNear = this.chainSlotPoints[pOffset + k * 2]!;
+          const yNear = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+          const exitX = xNear + dirX * extLen;
+          const exitY = yNear + dirY * extLen;
 
+          ctx.beginPath();
+          ctx.moveTo(xNear, yNear);
+          ctx.lineTo(exitX, exitY);
+          ctx.stroke();
+        }
+      } else {
         ctx.beginPath();
-        ctx.moveTo(xNear, yNear);
-        ctx.lineTo(exitX, exitY);
+        for (let k = 0; k < 5; k++) {
+          const xNear = this.chainSlotPoints[pOffset + k * 2]!;
+          const yNear = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+          ctx.moveTo(xNear, yNear);
+          ctx.lineTo(xNear + dirX * extLen, yNear + dirY * extLen);
+        }
         ctx.stroke();
       }
     }
@@ -731,6 +856,7 @@ export class RoadRenderer {
     isCameraOnBridge = false,
     horizonY = 180,
     grooveIntensity = 0.5,
+    legacy = false,
   ): void {
     const { p1, p2, stripe } = seg;
     let x1 = p1.screenX;
@@ -792,12 +918,15 @@ export class RoadRenderer {
         forkZoneStartZ,
         trackLength,
         forkChoice ?? 'right',
+        legacy,
       );
       return;
     }
 
     const sliceH = y1 - y2;
-    if (!isBridge && w1 < 20 && p1.screenY - p2.screenY < 2.2) {
+    const useFastSliceRect =
+      !isBridge && (legacy ? w1 < 20 && p1.screenY - p2.screenY < 2.2 : p1.screenY - p2.screenY <= 2.2);
+    if (useFastSliceRect) {
       // Distant thin-slice fast path: axis-aligned fillRect avoids path tessellation
       const mx = (x1 + x2) * 0.5;
       const mw = (w1 + w2) * 0.5;
@@ -859,11 +988,14 @@ export class RoadRenderer {
     forkZoneStartZ: number,
     trackLength: number,
     choice: 'left' | 'right',
+    legacy = false,
   ): void {
     const { p1, p2, stripe } = seg;
     const span = Math.max(1, trackLength - forkZoneStartZ);
     const t1 = clamp01((p1.worldZ - forkZoneStartZ) / span);
     const t2 = clamp01((p2.worldZ - forkZoneStartZ) / span);
+    const useFastForkRect = !legacy && p1.screenY - p2.screenY <= 2.2;
+    const sliceH = y1 - y2;
 
     if (t2 <= FORK_WIDEN_END_T) {
       // Phase 1: Pre-split widening zone with center chevron warning gore
@@ -874,6 +1006,27 @@ export class RoadRenderer {
 
       const outerW1 = w1 * (1 + pEase1 * 0.2);
       const outerW2 = w2 * (1 + pEase2 * 0.2);
+      const ir1 = r1 * 0.7;
+      const ir2 = r2 * 0.7;
+      const c1 = ir1 * pEase1;
+      const c2 = ir2 * pEase2;
+
+      if (useFastForkRect) {
+        const mx = (x1 + x2) * 0.5;
+        const ow = (outerW1 + outerW2) * 0.5;
+        const mr = (r1 + r2) * 0.5;
+        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillRect(mx - ow - mr, y2, (ow + mr) * 2, sliceH);
+        ctx.fillStyle = palette.road[stripe];
+        ctx.fillRect(mx - ow, y2, ow * 2, sliceH);
+        if (c2 > 0.5) {
+          const mc = (c1 + c2) * 0.5;
+          ctx.fillStyle =
+            stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
+          ctx.fillRect(mx - mc, y2, mc * 2, sliceH);
+        }
+        return;
+      }
 
       // Outer rumble strips (batched pair)
       ctx.fillStyle = palette.rumble[stripe];
@@ -884,10 +1037,6 @@ export class RoadRenderer {
       polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
 
       // Central median gore chevron / triangle (widens smoothly from width 0 at t=0 to ir at t=0.18)
-      const ir1 = r1 * 0.7;
-      const ir2 = r2 * 0.7;
-      const c1 = ir1 * pEase1;
-      const c2 = ir2 * pEase2;
       if (c2 > 0.5) {
         ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
         polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
@@ -919,6 +1068,27 @@ export class RoadRenderer {
       const outerW2 = w2 * (1.2 + splitEase2 * 0.48);
       const gap1 = w1 * splitEase1 * FORK_PEAK_INNER_GAP;
       const gap2 = w2 * splitEase2 * FORK_PEAK_INNER_GAP;
+      const ir1 = r1 * 0.7;
+      const ir2 = r2 * 0.7;
+
+      if (useFastForkRect) {
+        const mx = (x1 + x2) * 0.5;
+        const ow = (outerW1 + outerW2) * 0.5;
+        const gap = (gap1 + gap2) * 0.5;
+        const mr = (r1 + r2) * 0.5;
+        const ir = (ir1 + ir2) * 0.5;
+        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillRect(mx - ow - mr, y2, mr, sliceH);
+        ctx.fillRect(mx + ow, y2, mr, sliceH);
+        ctx.fillStyle = palette.road[stripe];
+        ctx.fillRect(mx - ow, y2, Math.max(1, ow - gap), sliceH);
+        ctx.fillRect(mx + gap, y2, Math.max(1, ow - gap), sliceH);
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
+        ctx.fillRect(mx - gap - ir, y2, ir, sliceH);
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
+        ctx.fillRect(mx + gap, y2, ir, sliceH);
+        return;
+      }
 
       // Outer rumble strips (batched pair)
       ctx.fillStyle = palette.rumble[stripe];
@@ -933,8 +1103,6 @@ export class RoadRenderer {
       polygon(ctx, x1 + gap1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + gap2, y2);
 
       // Inner median V-curbs
-      const ir1 = r1 * 0.7;
-      const ir2 = r2 * 0.7;
       ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
       polygon(ctx, x1 - gap1 - ir1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - gap2 - ir2, y2);
 
@@ -968,6 +1136,34 @@ export class RoadRenderer {
       const cLeft2 = x2 + cCenter2 - cHalfW2;
       const cRight2 = x2 + cCenter2 + cHalfW2;
 
+      if (useFastForkRect) {
+        const cLeft = (cLeft1 + cLeft2) * 0.5;
+        const cRight = (cRight1 + cRight2) * 0.5;
+        const mr = (r1 + r2) * 0.5;
+        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillRect(cLeft - mr, y2, cRight - cLeft + mr * 2, sliceH);
+        ctx.fillStyle = palette.road[stripe];
+        ctx.fillRect(cLeft, y2, Math.max(1, cRight - cLeft), sliceH);
+
+        const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
+        const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
+        if (unchosenAlpha > 0.08) {
+          const prevAlpha = ctx.globalAlpha;
+          ctx.globalAlpha = prevAlpha * unchosenAlpha;
+          const uSign = choice === 'left' ? 1 : -1;
+          const eMid = smoothstep(Math.max(0, u2Unchosen));
+          const uCenter = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * eMid) * ((w1 + w2) * 0.5);
+          const uHalfW = 0.58 * (1 - 0.2 * eMid) * ((w1 + w2) * 0.5);
+          const uLeft = (x1 + x2) * 0.5 + uCenter - uHalfW;
+          ctx.fillStyle = palette.rumble[stripe];
+          ctx.fillRect(uLeft - mr, y2, uHalfW * 2 + mr * 2, sliceH);
+          ctx.fillStyle = palette.road[stripe];
+          ctx.fillRect(uLeft, y2, uHalfW * 2, sliceH);
+          ctx.globalAlpha = prevAlpha;
+        }
+        return;
+      }
+
       // Chosen branch outer rumble strips (batched pair)
       ctx.fillStyle = palette.rumble[stripe];
       drawRumblePairSplit(ctx, cLeft1, cRight1, y1, cLeft2, cRight2, y2, r1, r2);
@@ -998,11 +1194,11 @@ export class RoadRenderer {
           const leftLine2 = x2 - (1 / 3) * w2;
           if (leftLine1 > cLeft1 + l1 * 2) {
             const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
-            ctx.save();
-            ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+            const prevAlpha = ctx.globalAlpha;
+            ctx.globalAlpha = prevAlpha * alpha;
             ctx.fillStyle = palette.lane;
             polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
-            ctx.restore();
+            ctx.globalAlpha = prevAlpha;
           }
         } else {
           // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
@@ -1016,11 +1212,11 @@ export class RoadRenderer {
           const rightLine2 = x2 + (1 / 3) * w2;
           if (rightLine1 < cRight1 - l1 * 2) {
             const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
-            ctx.save();
-            ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+            const prevAlpha = ctx.globalAlpha;
+            ctx.globalAlpha = prevAlpha * alpha;
             ctx.fillStyle = palette.lane;
             polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
-            ctx.restore();
+            ctx.globalAlpha = prevAlpha;
           }
         }
       }
@@ -1029,8 +1225,8 @@ export class RoadRenderer {
       const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
       const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
       if (unchosenAlpha > 0.02) {
-        ctx.save();
-        ctx.globalAlpha = unchosenAlpha;
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = prevAlpha * unchosenAlpha;
         const uSign = choice === 'left' ? 1 : -1;
         const u1Unchosen = Math.max(0, (t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
         const e1 = smoothstep(u1Unchosen);
@@ -1052,7 +1248,7 @@ export class RoadRenderer {
 
         ctx.fillStyle = palette.road[stripe];
         polygon(ctx, uLeft1, y1, uRight1, y1, uRight2, y2, uLeft2, y2);
-        ctx.restore();
+        ctx.globalAlpha = prevAlpha;
       }
     }
   }

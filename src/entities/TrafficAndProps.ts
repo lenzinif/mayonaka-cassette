@@ -116,6 +116,7 @@ function propHitHalfWidth(kind: PropKind): number {
  */
 export class TrafficManager {
   readonly trucks: KeiTruck[] = [];
+  private readonly truckPool: KeiTruck[] = [];
   /**
    * Per-segment head index into `this.trucks` (`-1` when no truck is on that segment).
    * Rebuilt in-place every `update()` so `RoadRenderer` can draw trucks in Pass 2 with O(1) lookup and zero allocations.
@@ -187,23 +188,18 @@ export class TrafficManager {
           const forkBranch: -1 | 1 =
             laneOffset < -0.2 ? -1 : laneOffset > 0.2 ? 1 : truckId % 2 === 0 ? 1 : -1;
 
-          this.trucks.push({
-            id: truckId,
-            z,
-            prevZ: z,
-            baseLaneOffset: laneOffset,
-            laneOffset,
-            prevLaneOffset: laneOffset,
-            lateralVel: 0,
-            tiltAngle: 0,
-            prevTiltAngle: 0,
-            knockedTimer: 0,
-            speedRatio,
-            variant,
-            segmentIndex: segIdx,
-            nextInSegment: -1,
-            forkBranch,
-          });
+          this.trucks.push(
+            this.acquireTruck(
+              this.trucks.length,
+              truckId,
+              z,
+              laneOffset,
+              speedRatio,
+              variant,
+              segIdx,
+              forkBranch,
+            ),
+          );
         }
       }
     } else {
@@ -215,35 +211,95 @@ export class TrafficManager {
         const truckId = nextId++;
         const forkBranch: -1 | 1 =
           laneOffset < -0.2 ? -1 : laneOffset > 0.2 ? 1 : truckId % 2 === 0 ? 1 : -1;
-        this.trucks.push({
-          id: truckId,
-          z: segIdx * track.segmentLength,
-          prevZ: segIdx * track.segmentLength,
-          baseLaneOffset: laneOffset,
-          laneOffset,
-          prevLaneOffset: laneOffset,
-          lateralVel: 0,
-          tiltAngle: 0,
-          prevTiltAngle: 0,
-          knockedTimer: 0,
-          speedRatio: rng.range(0.38, 0.5),
-          variant: rng.rangeInt(0, 2),
-          segmentIndex: segIdx,
-          nextInSegment: -1,
-          forkBranch,
-        });
+        this.trucks.push(
+          this.acquireTruck(
+            this.trucks.length,
+            truckId,
+            segIdx * track.segmentLength,
+            laneOffset,
+            rng.range(0.38, 0.5),
+            rng.rangeInt(0, 2),
+            segIdx,
+            forkBranch,
+          ),
+        );
       }
     }
 
     this.rebuildSpatialIndex(track);
   }
 
-  /**
-   * Returns the index into `this.trucks` of the first truck on `segmentIndex`, or `-1` if none.
-   */
+  private acquireTruck(
+    poolIdx: number,
+    id: number,
+    z: number,
+    baseLaneOffset: number,
+    speedRatio: number,
+    variant: number,
+    segmentIndex: number,
+    forkBranch: -1 | 1,
+  ): KeiTruck {
+    let truck = this.truckPool[poolIdx];
+    if (!truck) {
+      truck = {
+        id,
+        z,
+        prevZ: z,
+        baseLaneOffset,
+        laneOffset: baseLaneOffset,
+        prevLaneOffset: baseLaneOffset,
+        lateralVel: 0,
+        tiltAngle: 0,
+        prevTiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio,
+        variant,
+        segmentIndex,
+        nextInSegment: -1,
+        forkBranch,
+      };
+      this.truckPool[poolIdx] = truck;
+    } else {
+      truck.id = id;
+      truck.z = z;
+      truck.prevZ = z;
+      truck.baseLaneOffset = baseLaneOffset;
+      truck.laneOffset = baseLaneOffset;
+      truck.prevLaneOffset = baseLaneOffset;
+      truck.lateralVel = 0;
+      truck.tiltAngle = 0;
+      truck.prevTiltAngle = 0;
+      truck.knockedTimer = 0;
+      truck.speedRatio = speedRatio;
+      truck.variant = variant;
+      truck.segmentIndex = segmentIndex;
+      truck.nextInSegment = -1;
+      truck.forkBranch = forkBranch;
+    }
+    return truck;
+  }
+
+  /** Returns the index into `this.trucks` of the first truck on `segmentIndex`, or `-1` if none. */
   getFirstTruckOnSegment(segmentIndex: number): number {
     if (segmentIndex < 0 || segmentIndex >= this.segmentHeads.length) return -1;
     return this.segmentHeads[segmentIndex]!;
+  }
+
+  /** Places the first pooled truck directly ahead of `playerWorldZ` at `laneX` and clears cooldown for collision testing. */
+  placeTruckAheadForTest(playerWorldZ: number, laneX: number, trackLen: number): void {
+    this.collisionCooldown = 0;
+    const truck = this.trucks[0];
+    if (!truck || trackLen <= 0) return;
+    const targetZ = (playerWorldZ + 90) % trackLen;
+    truck.z = targetZ;
+    truck.prevZ = targetZ;
+    truck.baseLaneOffset = laneX;
+    truck.laneOffset = laneX;
+    truck.prevLaneOffset = laneX;
+    truck.lateralVel = 0;
+    truck.tiltAngle = 0;
+    truck.prevTiltAngle = 0;
+    truck.knockedTimer = 0;
   }
 
   /**
@@ -654,8 +710,8 @@ export function drawKeiTruck(
   const bedColor = TRUCK_BED_COLORS[v]!;
   const cargoColor = TRUCK_CARGO_COLORS[v]!;
 
-  // Distant low-LOD silhouette (<10px wide): 5 crisp pixel rects, zero save/restore overhead
-  if (w < 10) {
+  // Distant low-LOD silhouette (<16px wide): 5 crisp pixel rects, zero save/restore overhead
+  if (w < 16) {
     const sx = Math.round(screenX - w * 0.5);
     const sy = Math.round(screenY);
     const cabH = Math.max(2, Math.round(h * 0.42));
@@ -674,6 +730,40 @@ export function drawKeiTruck(
   }
 
   const halfW = Math.max(2, Math.round(w * 0.5));
+
+  // Mid-LOD fast path (<28px wide without knockdown/tilt): crisp 10-rect truck, zero save/translate/rotate/restore
+  if (w < 28 && !isKnocked && Math.abs(tiltAngle) < 0.02) {
+    const rx = Math.round(screenX);
+    const ry = Math.round(screenY);
+    const tireW = Math.max(2, Math.round(w * 0.2));
+    const tireH = Math.max(2, Math.round(h * 0.23));
+    const cabW = Math.round(w * 0.88);
+    const cabH = Math.round(h * 0.44);
+    const bedH = Math.round(h * 0.34);
+    const bedY = ry - Math.round(tireH * 0.75 + bedH);
+
+    ctx.fillStyle = 'rgba(8, 2, 20, 0.6)';
+    ctx.fillRect(rx - halfW - 1, ry - 1, w + 2, 2);
+    ctx.fillStyle = '#12091f';
+    ctx.fillRect(rx - halfW + 1, ry - tireH, tireW, tireH);
+    ctx.fillRect(rx + halfW - tireW - 1, ry - tireH, tireW, tireH);
+    ctx.fillStyle = cabColor;
+    ctx.fillRect(rx - Math.round(cabW * 0.5), ry - h, cabW, cabH);
+    ctx.fillStyle = '#1a0c33';
+    ctx.fillRect(rx - Math.round(cabW * 0.34), ry - h + Math.round(cabH * 0.16), Math.round(cabW * 0.68), Math.round(cabH * 0.46));
+    ctx.fillStyle = cargoColor;
+    ctx.fillRect(rx - Math.round(w * 0.41), ry - Math.round(h * 0.65), Math.round(w * 0.82), Math.round(h * 0.27));
+    ctx.fillStyle = bedColor;
+    ctx.fillRect(rx - halfW, bedY, w, bedH);
+    const tailW = Math.max(2, Math.round(w * 0.22));
+    const tailY = bedY + bedH - Math.max(2, Math.round(bedH * 0.26)) - 1;
+    ctx.fillStyle = '#ff2a6d';
+    ctx.fillRect(rx - Math.round(halfW * 0.9), tailY, tailW, 2);
+    ctx.fillRect(rx + Math.round(halfW * 0.9) - tailW, tailY, tailW, 2);
+    ctx.fillStyle = '#ffd319';
+    ctx.fillRect(rx - Math.max(1, Math.round(w * 0.09)), tailY, Math.max(2, Math.round(w * 0.18)), 2);
+    return;
+  }
 
   ctx.save();
   ctx.translate(Math.round(screenX), Math.round(screenY));
