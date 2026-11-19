@@ -135,21 +135,25 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 
 Every performance optimization or runtime bug investigation **must** follow an empirical measure-first loop. Speculative rewrites based solely on reading code are forbidden.
 
-1. **Reproduce & Record a Live Baseline Before Editing:**
-   - Always run the game in a real browser (`npm run dev`, using `?autostart&debug` + Autopilot `F4`, `F3` `PERF MON`, `DebugPanel` → `PERF PROFILER` / `DUMP BENCHMARK`, or browser DevTools Performance traces) before modifying code.
-   - Capture baseline stability metrics across active gameplay (not just `frameTimeMs` averages): `fps`, `minFps`, `p95FrameMs`, `maxFrameMs`, `droppedFrames` (`>18.5 ms`), `simTimeMs`, and `renderTimeMs`.
-2. **Isolate JS CPU vs. Browser Raster / GPU Compositor (`compositorGapMs`):**
-   - Inspect the engine telemetry breakdown (`bgRenderMs`, `roadRenderMs` [`roadSlicesMs`, `roadPropsMs`, `roadTrafficMs`], `carOverlayMs`) alongside `compositorGapMs = frameTimeMs - simTimeMs - renderTimeMs`.
-   - If `frameTimeMs` spikes while `simTimeMs + renderTimeMs` stays low, the bottleneck is outside JS — in browser GPU fill-rate, Canvas pixel upscaling, or DOM/CSS compositor repaints (`CRTOverlay`, `RhythmBezel`, `box-shadow`, `backdrop-blur`). Optimizing JS draw loops will not fix a compositor-bound frame drop.
+1. **Reproduce & Record a Full-Song Live Baseline Before Editing:**
+   - Always run the game in a real browser (`npm run dev`, e.g. `?autostart&debug&autopilot&track=stellae` for real corpus tracks in `test-tracks/`).
+   - Never rely solely on a short 2-second rolling window or the synthetic fallback loop. Capture session-wide and per-section/per-bar metrics across active gameplay via `window.__MAYONAKA_DIAG__.getFullReport()` or `DebugPanel` → `PERF PROFILER` → `DUMP BENCHMARK`: `sessionAvgFps`, `sessionMinFps`, `pct60Fps`, `p95FrameMs`, `maxFrameMs`, frame-time histogram (`60` / `45-59` / `30-44` / `<30` FPS), and the heaviest bars/sections (`intro`, `build`, `drop`, `breakdown`, `outro`).
+2. **Understand Deferred Canvas 2D Rasterization vs. `compositorGapMs`:**
+   - In Chromium/Blink (Accelerated 2D Canvas on Skia/Ganesh/Direct2D), `ctx.fill()`, `ctx.stroke()`, `ctx.clip()`, `ctx.fillRect()`, and `ctx.drawImage()` inside `Game.render()` record `PaintOp` commands into an in-memory command buffer (`~1–2.5 ms` JS CPU time). Actual GPU path tessellation, hardware stencil clipping (`ctx.clip()`), quadratic Bézier subdivision (`quadraticCurveTo`), and overdraw rasterization execute **after `requestAnimationFrame` returns**, which appears inside `compositorGapMs = frameTimeMs - simTimeMs - renderTimeMs`.
+   - **Low JS `renderTimeMs` + high `compositorGapMs` does NOT exempt Canvas 2D draw calls.** Use `window.__MAYONAKA_DIAG__.setIsolation({ syncGpuProbe: true, ... })` (which forces synchronous GPU flushes between `Background`, `RoadRenderer`, and `Car/FX` and toggles `renderBg`, `renderRoad`, `renderProps`, `renderPylonWires`, `renderTraffic`, `renderCar`) alongside DOM/CSS isolation (`?nocrt`, `?nohud`, `?nobezel`) to separate deferred GPU Canvas rasterization from DOM/CSS compositor repaints (`CRTOverlay`, `RhythmBezel`, `box-shadow`, `backdrop-blur`).
 3. **Never Use Node/Mock Tests as Proof of FPS:**
-   - Vitest runs in `node` (`AgentBenchmark.test.ts`, `RoadRenderer.test.ts`, `RoadsideProps.test.ts` with `noop` mock contexts). Passing Node tests validates determinism and zero-GC logic only — never real Canvas 2D rasterization, texture upload cost, or CSS compositing performance.
-4. **One Hypothesis at a Time (Falsifiable A/B Verification):**
-   - Apply one targeted change (or isolation toggle) per experiment and compare live browser telemetry before and after.
-   - Treat caching and offscreen canvases as **unproven until benchmarked**: allocating large transparent offscreen `<canvas>` surfaces and blitting scaled `drawImage` calls can increase GPU texture uploads and alpha-blending overdraw on Direct2D/Skia, making FPS *worse* than direct `fillRect` calls. Revert immediately if `p95FrameMs` / `minFps` do not measurably improve.
+   - Vitest runs in `node` (`AgentBenchmark.test.ts`, `RoadRenderer.test.ts`, `RoadsideProps.test.ts` with `noop` mock contexts). Passing Node tests validates determinism and zero-GC logic only — never real Canvas 2D GPU rasterization, stencil clipping cost, texture upload cost, or CSS compositing performance.
+4. **One Hypothesis at a Time & Canvas Draw-Op Complexity Rules:**
+   - Apply one targeted change (or isolation toggle) per experiment and compare live browser telemetry (`sessionAvgFps`, `p95FrameMs`, `pct60Fps`) before and after.
+   - Prefer eliminating GPU Canvas rasterization bottlenecks directly:
+     - Avoid per-segment `ctx.save() + ctx.clip() + ctx.restore()` stencil thrashing (`RoadRenderer`) whenever opaque ground/road slices already occlude lower pixels.
+     - Calibrate `ppu` LOD thresholds against actual projected values (`ppu = scale * width * 0.5`, which at `drawDistance = 200`, `640px` width stays `>= 0.0067`), culling non-essential distant Band C/D props and using compact `fillRect` silhouettes at far/mid distance.
+     - Batch `ctx.beginPath()`/`ctx.stroke()` calls (catenary power lines) and group consecutive `fillRect` draws by `fillStyle`.
+     - Treat offscreen `<canvas>` caches as **unproven until benchmarked**: single pre-baked repeating background strips (e.g. a static `640×64` skyline or clouds) can eliminate hundreds of per-frame rects, whereas per-prop scaled sprite atlases can increase GPU texture uploads and alpha-blending overdraw on Direct2D/Skia. Revert immediately if `p95FrameMs` / `pct60Fps` do not measurably improve.
 5. **Zero-GC Instrumentation:**
-   - All frame-timing buffers and rolling windows in the engine must use pre-allocated scalars or `TypedArray` ring buffers (`§4.3`). Inner loops (e.g., per-segment pass in `RoadRenderer`) must be sub-sampled (such as 1 in every 8 frames) instead of invoking `performance.now()` hundreds of times per frame.
+   - All frame-timing buffers, rolling windows, and per-bar benchmark arrays in the engine must use pre-allocated scalars or `TypedArray` buffers (`§4.3`). Never invoke `performance.now()` hundreds of times per frame inside inner segment loops (`RoadRenderer`) during normal gameplay (subsystem loop timing runs only when `syncGpuProbe` is explicitly enabled).
 6. **Mandatory Verification Gate & Honest Block Reporting:**
-   - Before declaring any fix complete, run `npm run check` (`eslint .`, `vitest run`, `tsc --noEmit && vite build`) **and** re-verify live 60 FPS telemetry (`p95FrameMs <= 16.7 ms`, `droppedFrames` flat) in the browser after the final edit.
+   - Before declaring any fix complete, run `npm run check` (`eslint .`, `vitest run`, `tsc --noEmit && vite build`) **and** re-verify live full-song 60 FPS telemetry (`sessionAvgFps >= 59`, `p95FrameMs <= 16.7 ms`, `pct60Fps >= 98%`) in the browser on a real corpus track (e.g. `Stellae`) after the final edit.
    - If the agent environment blocks running Node, builds, or the browser, stop immediately rather than shipping unverified optimizations, and report the exact commands the user needs to run locally.
 
 ---

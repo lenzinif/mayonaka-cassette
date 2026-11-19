@@ -424,6 +424,8 @@ export class Background {
   private readonly cloudPadX = new Float32Array(CLOUD_COUNT);
   private readonly cloudPadTop = new Float32Array(CLOUD_COUNT);
   private cachedCloudPaletteId: StagePalette['id'] | null = null;
+  private static readonly SKYLINE_STRIP_H = 72;
+  private readonly skylineStripCache = new Map<StagePalette['id'], OffscreenCanvas>();
 
   constructor() {
     // 1. Layer 1: Mountain ridges & Mayonaka rolling hills
@@ -820,13 +822,24 @@ export class Background {
       const starCol1 = palette.starColors ? palette.starColors[0] : palette.mountainRim;
       const starCol2 = palette.starColors ? palette.starColors[1] : '#fff3b0';
 
-      // 2a. Twinkling Stars
-      for (let i = 0; i < STAR_COUNT; i++) {
-        const sx = Math.round((this.starX[i]! * width - starScroll + width * 3) % width);
-        const sy = Math.round(this.starY[i]! * (horizonY - 44)) + 4;
+      // 2a. Twinkling Stars (batched into 2 fillStyle passes to eliminate per-star state churn)
+      ctx.fillStyle = starCol1;
+      for (let i = 0; i < STAR_COUNT; i += 3) {
         const twinkle = Math.sin(renderSkyTime * 3.2 + this.starPhase[i]!);
         if (twinkle > -0.25) {
-          ctx.fillStyle = i % 3 === 0 ? starCol1 : starCol2;
+          const sx = Math.round((this.starX[i]! * width - starScroll + width * 3) % width);
+          const sy = Math.round(this.starY[i]! * (horizonY - 44)) + 4;
+          const size = twinkle > 0.65 || pulse > 0.6 ? 2 : 1;
+          ctx.fillRect(sx, sy, size, size);
+        }
+      }
+      ctx.fillStyle = starCol2;
+      for (let i = 0; i < STAR_COUNT; i++) {
+        if (i % 3 === 0) continue;
+        const twinkle = Math.sin(renderSkyTime * 3.2 + this.starPhase[i]!);
+        if (twinkle > -0.25) {
+          const sx = Math.round((this.starX[i]! * width - starScroll + width * 3) % width);
+          const sy = Math.round(this.starY[i]! * (horizonY - 44)) + 4;
           const size = twinkle > 0.65 || pulse > 0.6 ? 2 : 1;
           ctx.fillRect(sx, sy, size, size);
         }
@@ -1270,122 +1283,69 @@ export class Background {
       ctx.globalAlpha = 1;
     }
 
-    // 7b. Skyline buildings & window matrices (rendered in front of water reflections)
-    for (let pass = 0; pass <= Math.ceil(width / CITY_SPAN); pass++) {
-      const baseOffset = pass * CITY_SPAN - renderScroll2;
-      for (let t = 0; t < CITY_TOWERS; t++) {
-        const tx = Math.round(baseOffset + t * towerSpacing);
-        const tw = this.towerWidths[t]!;
-        if (tx + tw < -10 || tx > width + 10) continue;
+    // 7b. Skyline buildings & window matrices (pre-baked OffscreenCanvas strip in browser; direct fallback in Node)
+    const skylineStrip = this.ensureSkylineStrip(palette);
+    const repeatCount = Math.ceil(width / CITY_SPAN);
+    if (skylineStrip) {
+      const stripTopY = horizonY - Background.SKYLINE_STRIP_H;
+      for (let pass = 0; pass <= repeatCount; pass++) {
+        ctx.drawImage(skylineStrip, Math.round(pass * CITY_SPAN - renderScroll2), stripTopY);
+      }
+      // Dynamic per-frame antenna beacons and lightning rooftop flashes only
+      for (let pass = 0; pass <= repeatCount; pass++) {
+        const baseOffset = pass * CITY_SPAN - renderScroll2;
+        for (let t = 0; t < CITY_TOWERS; t++) {
+          const tx = Math.round(baseOffset + t * towerSpacing);
+          const tw = this.towerWidths[t]!;
+          if (tx + tw < -10 || tx > width + 10) continue;
 
-        let th: number;
-        let isPierBeacon = false;
-        if (isSunsetBoulevard) {
-          th = computeCoastalTowerHeight(t);
-        } else if (isAkibaNight) {
-          th = 18 + ((t * 13 + 7) % 32);
-        } else {
-          th = computeCoastalTowerHeight(t);
-          isPierBeacon = t === 11 || t === 20;
-        }
-        if (th <= 0) continue;
+          const isPierBeacon = !isSunsetBoulevard && !isAkibaNight && (t === 11 || t === 20);
+          const th = isAkibaNight ? 18 + ((t * 13 + 7) % 32) : computeCoastalTowerHeight(t);
+          if (th <= 0) continue;
 
-        const ty = skylineBaseY - th;
-        const style = this.towerStyle[t]!;
-
-        // 7a. Building silhouette (clean silhouette with lightning roof highlight)
-        ctx.fillStyle = isSunsetBoulevard ? COLOR_SUNSET_SKYLINE : COLOR_NIGHT_SKYLINE;
-        if (style === 1) {
-          // Stepped art-deco tower
-          const stepW = Math.max(4, Math.floor(tw * 0.65));
-          const stepH = Math.floor(th * 0.45);
-          ctx.fillRect(tx, ty + stepH, tw, th - stepH + (horizonY - skylineBaseY));
-          ctx.fillRect(tx + Math.floor((tw - stepW) * 0.5), ty, stepW, stepH);
-        } else if (style === 2) {
-          // Slanted rooftop tower
-          ctx.beginPath();
-          ctx.moveTo(tx, ty + 6);
-          ctx.lineTo(tx + tw, ty);
-          ctx.lineTo(tx + tw, skylineBaseY + (horizonY - skylineBaseY));
-          ctx.lineTo(tx, skylineBaseY + (horizonY - skylineBaseY));
-          ctx.closePath();
-          ctx.fill();
-        } else {
-          // Classic high-rise
-          ctx.fillRect(tx, ty, tw, th + (horizonY - skylineBaseY));
-        }
-
-        // Rooftop neon highlight during lightning
-        if (this.lightningAlpha > 0.12 && style !== 2) {
-          ctx.fillStyle = lTheme.boltMid;
-          ctx.globalAlpha = this.lightningAlpha * 0.65;
-          ctx.fillRect(tx, ty, tw, 1);
-          ctx.globalAlpha = 1;
-        }
-
-        // 7b. Radio antenna with blinking red/cyan LED beacon
-        const antH = isSunsetBoulevard
-          ? 0
-          : isPierBeacon
-            ? 10
-            : this.towerAntennaH[t]!;
-        if (antH > 0) {
-          const antX = tx + Math.floor(tw * 0.5);
-          ctx.fillStyle = '#1e1438';
-          ctx.fillRect(antX, ty - antH, 1, antH);
-
-          // LED beacon at the tip of the antenna
-          const blink = Math.sin(renderSkyTime * 4.5 + this.towerBlinkPhase[t]!);
-          if (blink > 0.1 || isPierBeacon) {
-            ctx.fillStyle =
-              t === 11
-                ? COLOR_BEACON_CYAN
-                : t === 20
-                  ? COLOR_BEACON_RED
-                  : t % 2 === 0
-                    ? COLOR_BEACON_RED
-                    : COLOR_BEACON_CYAN;
-            ctx.fillRect(antX - 1, ty - antH - 1, 2, 2);
+          const ty = skylineBaseY - th;
+          const style = this.towerStyle[t]!;
+          if (this.lightningAlpha > 0.12 && style !== 2) {
+            ctx.fillStyle = lTheme.boltMid;
+            ctx.globalAlpha = this.lightningAlpha * 0.65;
+            ctx.fillRect(tx, ty, tw, 1);
+            ctx.globalAlpha = 1;
           }
-        }
 
-        // Waterfront quayside streetlamps for Mayonaka Bay
-        if (isMayonakaBay && (t === 10 || t === 11 || t === 20 || t === 21)) {
-          const lampX = t <= 11 ? tx + tw - 2 : tx + 1;
-          ctx.fillStyle = '#fff3b0';
-          ctx.fillRect(lampX, skylineBaseY - 2, 2, 2);
-        }
-
-        // 7c. Realistic city windows: individual apartments/offices turning on/off occasionally
-        if (th >= 10) {
-          const winCols = tw >= 18 ? 3 : 2;
-          const winRows = Math.min(6, Math.floor(th / 5));
-          const wPal = WINDOW_PALETTES[palette.id] ?? WINDOW_PALETTES.night!;
-
-          let lastColIdx = -1;
-          for (let r = 0; r < winRows; r++) {
-            const wy = ty + 4 + r * 5;
-            if (wy >= skylineBaseY - 2) break;
-            for (let c = 0; c < winCols; c++) {
-              const wx = tx + 3 + c * 5;
-              if (wx + 2 > tx + tw - 2) continue;
-
-              // Unique deterministic seed per window: skip 15% dark windows immediately and run Math.sin only on 20% blinking windows
-              const winSeed = (t * 67 + r * 31 + c * 17) % 100;
-              if (winSeed >= 85) continue;
-              if (winSeed >= 65 && Math.sin(renderSkyTime * 0.35 + winSeed * 0.73) <= -0.15) {
-                continue;
-              }
-
-              const colIdx = (t + r * 2 + c * 3 + winSeed) % 3;
-              if (colIdx !== lastColIdx) {
-                ctx.fillStyle = colIdx === 0 ? wPal.col1 : colIdx === 1 ? wPal.col2 : wPal.col3;
-                lastColIdx = colIdx;
-              }
-              ctx.fillRect(wx, wy, 2, 2);
+          const antH = isSunsetBoulevard ? 0 : isPierBeacon ? 10 : this.towerAntennaH[t]!;
+          if (antH > 0) {
+            const blink = Math.sin(renderSkyTime * 4.5 + this.towerBlinkPhase[t]!);
+            if (blink > 0.1 || isPierBeacon) {
+              const antX = tx + Math.floor(tw * 0.5);
+              ctx.fillStyle =
+                t === 11
+                  ? COLOR_BEACON_CYAN
+                  : t === 20
+                    ? COLOR_BEACON_RED
+                    : t % 2 === 0
+                      ? COLOR_BEACON_RED
+                      : COLOR_BEACON_CYAN;
+              ctx.fillRect(antX - 1, ty - antH - 1, 2, 2);
             }
           }
         }
+      }
+    } else {
+      for (let pass = 0; pass <= repeatCount; pass++) {
+        const baseOffset = pass * CITY_SPAN - renderScroll2;
+        this.drawSkylineStaticPass(
+          ctx,
+          baseOffset,
+          width,
+          horizonY,
+          skylineBaseY,
+          palette,
+          towerSpacing,
+          renderSkyTime,
+          true,
+          this.lightningAlpha,
+          lTheme.boltMid,
+        );
       }
     }
 
@@ -1651,6 +1611,178 @@ export class Background {
    */
   prewarmPalette(palette: StagePalette): void {
     this.ensureCloudCanvases(palette);
+    this.ensureSkylineStrip(palette);
+  }
+
+  private ensureSkylineStrip(palette: StagePalette): OffscreenCanvas | null {
+    if (typeof OffscreenCanvas === 'undefined') return null;
+    const cached = this.skylineStripCache.get(palette.id);
+    if (cached) return cached;
+
+    const strip = new OffscreenCanvas(CITY_SPAN, Background.SKYLINE_STRIP_H);
+    const sCtx = strip.getContext('2d');
+    if (!sCtx) return null;
+
+    const isSunsetBoulevard = palette.id === 'og_future_funk';
+    const horizonY = Background.SKYLINE_STRIP_H;
+    const skylineBaseY = isSunsetBoulevard ? horizonY - 10 : horizonY - 4;
+    const towerSpacing = CITY_SPAN / CITY_TOWERS;
+
+    // Render pass -1 and 0 so towers crossing CITY_SPAN wrap seamlessly at x = 0 / 640
+    this.drawSkylineStaticPass(
+      sCtx,
+      -CITY_SPAN,
+      CITY_SPAN,
+      horizonY,
+      skylineBaseY,
+      palette,
+      towerSpacing,
+      0,
+      false,
+      0,
+      '',
+    );
+    this.drawSkylineStaticPass(
+      sCtx,
+      0,
+      CITY_SPAN,
+      horizonY,
+      skylineBaseY,
+      palette,
+      towerSpacing,
+      0,
+      false,
+      0,
+      '',
+    );
+
+    this.skylineStripCache.set(palette.id, strip);
+    return strip;
+  }
+
+  private drawSkylineStaticPass(
+    ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D,
+    baseOffset: number,
+    clipWidth: number,
+    horizonY: number,
+    skylineBaseY: number,
+    palette: StagePalette,
+    towerSpacing: number,
+    renderSkyTime: number,
+    includeDynamicDetails: boolean,
+    lightningAlpha: number,
+    boltMidColor: string,
+  ): void {
+    const isSunsetBoulevard = palette.id === 'og_future_funk';
+    const isAkibaNight = palette.id === 'akiba_night';
+    const isMayonakaBay = !isSunsetBoulevard && !isAkibaNight;
+    const wPal = WINDOW_PALETTES[palette.id] ?? WINDOW_PALETTES.night!;
+
+    for (let t = 0; t < CITY_TOWERS; t++) {
+      const tx = Math.round(baseOffset + t * towerSpacing);
+      const tw = this.towerWidths[t]!;
+      if (tx + tw < -10 || tx > clipWidth + 10) continue;
+
+      let th: number;
+      let isPierBeacon = false;
+      if (isSunsetBoulevard) {
+        th = computeCoastalTowerHeight(t);
+      } else if (isAkibaNight) {
+        th = 18 + ((t * 13 + 7) % 32);
+      } else {
+        th = computeCoastalTowerHeight(t);
+        isPierBeacon = t === 11 || t === 20;
+      }
+      if (th <= 0) continue;
+
+      const ty = skylineBaseY - th;
+      const style = this.towerStyle[t]!;
+
+      ctx.fillStyle = isSunsetBoulevard ? COLOR_SUNSET_SKYLINE : COLOR_NIGHT_SKYLINE;
+      if (style === 1) {
+        const stepW = Math.max(4, Math.floor(tw * 0.65));
+        const stepH = Math.floor(th * 0.45);
+        ctx.fillRect(tx, ty + stepH, tw, th - stepH + (horizonY - skylineBaseY));
+        ctx.fillRect(tx + Math.floor((tw - stepW) * 0.5), ty, stepW, stepH);
+      } else if (style === 2) {
+        ctx.beginPath();
+        ctx.moveTo(tx, ty + 6);
+        ctx.lineTo(tx + tw, ty);
+        ctx.lineTo(tx + tw, skylineBaseY + (horizonY - skylineBaseY));
+        ctx.lineTo(tx, skylineBaseY + (horizonY - skylineBaseY));
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.fillRect(tx, ty, tw, th + (horizonY - skylineBaseY));
+      }
+
+      if (includeDynamicDetails && lightningAlpha > 0.12 && style !== 2) {
+        ctx.fillStyle = boltMidColor;
+        ctx.globalAlpha = lightningAlpha * 0.65;
+        ctx.fillRect(tx, ty, tw, 1);
+        ctx.globalAlpha = 1;
+      }
+
+      const antH = isSunsetBoulevard ? 0 : isPierBeacon ? 10 : this.towerAntennaH[t]!;
+      if (antH > 0) {
+        const antX = tx + Math.floor(tw * 0.5);
+        ctx.fillStyle = '#1e1438';
+        ctx.fillRect(antX, ty - antH, 1, antH);
+
+        if (includeDynamicDetails) {
+          const blink = Math.sin(renderSkyTime * 4.5 + this.towerBlinkPhase[t]!);
+          if (blink > 0.1 || isPierBeacon) {
+            ctx.fillStyle =
+              t === 11
+                ? COLOR_BEACON_CYAN
+                : t === 20
+                  ? COLOR_BEACON_RED
+                  : t % 2 === 0
+                    ? COLOR_BEACON_RED
+                    : COLOR_BEACON_CYAN;
+            ctx.fillRect(antX - 1, ty - antH - 1, 2, 2);
+          }
+        }
+      }
+
+      if (isMayonakaBay && (t === 10 || t === 11 || t === 20 || t === 21)) {
+        const lampX = t <= 11 ? tx + tw - 2 : tx + 1;
+        ctx.fillStyle = '#fff3b0';
+        ctx.fillRect(lampX, skylineBaseY - 2, 2, 2);
+      }
+
+      if (th >= 10) {
+        const winCols = tw >= 18 ? 3 : 2;
+        const winRows = Math.min(6, Math.floor(th / 5));
+
+        let lastColIdx = -1;
+        for (let r = 0; r < winRows; r++) {
+          const wy = ty + 4 + r * 5;
+          if (wy >= skylineBaseY - 2) break;
+          for (let c = 0; c < winCols; c++) {
+            const wx = tx + 3 + c * 5;
+            if (wx + 2 > tx + tw - 2) continue;
+
+            const winSeed = (t * 67 + r * 31 + c * 17) % 100;
+            if (winSeed >= 85) continue;
+            if (
+              includeDynamicDetails &&
+              winSeed >= 65 &&
+              Math.sin(renderSkyTime * 0.35 + winSeed * 0.73) <= -0.15
+            ) {
+              continue;
+            }
+
+            const colIdx = (t + r * 2 + c * 3 + winSeed) % 3;
+            if (colIdx !== lastColIdx) {
+              ctx.fillStyle = colIdx === 0 ? wPal.col1 : colIdx === 1 ? wPal.col2 : wPal.col3;
+              lastColIdx = colIdx;
+            }
+            ctx.fillRect(wx, wy, 2, 2);
+          }
+        }
+      }
+    }
   }
 
   /**

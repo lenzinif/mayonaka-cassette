@@ -11,7 +11,7 @@ import {
 import type { AutopilotMode } from '@src/core/AutopilotDriver';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { memo, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 
 const STORAGE_KEY = 'mayonaka-cassette.tuning.v1';
 const LEGACY_STORAGE_KEY = 'outrun-futurefunk.tuning.v1';
@@ -63,6 +63,67 @@ const GROUPS = Array.from(new Set(TUNING_CONTROLS.map((c) => c.group)));
 const NOOP_SUBSCRIBE = () => () => {};
 const NULL_SNAPSHOT = () => null;
 
+interface IsolationToggles {
+  renderBg: boolean;
+  renderRoad: boolean;
+  renderProps: boolean;
+  renderPylonWires: boolean;
+  renderTraffic: boolean;
+  renderCar: boolean;
+  syncGpuProbe: boolean;
+  legacyRaster: boolean;
+}
+
+const MemoizedTuningControls = memo(function MemoizedTuningControls({
+  values,
+  onChange,
+}: {
+  values: Tuning;
+  onChange: (key: TuningKey, value: number) => void;
+}) {
+  return (
+    <>
+      {GROUPS.map((group) => (
+        <div key={group} className="space-y-2.5">
+          <div className="border-b border-fuchsia-500/25 pb-1 text-[10px] font-bold tracking-[0.2em] text-pink-400 uppercase">
+            {group}
+          </div>
+          {TUNING_CONTROLS.filter((c) => c.group === group).map((ctrl) => {
+            const current = values[ctrl.key];
+            const isModified = current !== DEFAULT_TUNING[ctrl.key];
+            return (
+              <label key={ctrl.key} className="block space-y-0.5">
+                <div className="flex justify-between text-[11px]">
+                  <span
+                    className={isModified ? 'font-semibold text-cyan-300' : 'text-fuchsia-100'}
+                  >
+                    {ctrl.label}
+                  </span>
+                  <span className="tabular-nums text-fuchsia-300">
+                    {current}
+                    {ctrl.unit ? ` ${ctrl.unit}` : ''}
+                  </span>
+                </div>
+                <div className="text-[10px] leading-tight text-fuchsia-300/65">{ctrl.hint}</div>
+                <input
+                  type="range"
+                  min={ctrl.min}
+                  max={ctrl.max}
+                  step={ctrl.step}
+                  value={current}
+                  onChange={(e) => onChange(ctrl.key, Number(e.target.value))}
+                  onPointerUp={(e) => e.currentTarget.blur()}
+                  className="h-1.5 w-full cursor-pointer appearance-none rounded bg-fuchsia-950 accent-cyan-400"
+                />
+              </label>
+            );
+          })}
+        </div>
+      ))}
+    </>
+  );
+});
+
 type DebugTab = 'tuning' | 'profiler';
 
 /**
@@ -78,18 +139,69 @@ export function DebugPanel({
   onToggleAutopilot,
   onSetAutopilotMode,
 }: DebugPanelProps) {
-  const [tab, setTab] = useState<DebugTab>('tuning');
+  const [tab, setTab] = useState<DebugTab>(() => {
+    if (typeof window === 'undefined') return 'tuning';
+    const params = new URLSearchParams(window.location.search);
+    return params.get('debug')?.toLowerCase() === 'profiler' || params.has('profiler')
+      ? 'profiler'
+      : 'tuning';
+  });
   const [values, setValues] = useState<Tuning>(() => ({ ...tuning }));
   const [copied, setCopied] = useState(false);
   const [copiedPerf, setCopiedPerf] = useState(false);
+  const [reportJson, setReportJson] = useState('');
+  const [isolation, setIsolation] = useState<IsolationToggles>({
+    renderBg: true,
+    renderRoad: true,
+    renderProps: true,
+    renderPylonWires: true,
+    renderTraffic: true,
+    renderCar: true,
+    syncGpuProbe: false,
+    legacyRaster: false,
+  });
 
   const snap = useSyncExternalStore(
     open && bridge ? bridge.subscribe : NOOP_SUBSCRIBE,
     open && bridge ? bridge.getSnapshot : NULL_SNAPSHOT,
   );
 
+  const refreshReportJson = useCallback(() => {
+    if (typeof window !== 'undefined' && window.__MAYONAKA_DIAG__) {
+      setReportJson(JSON.stringify(window.__MAYONAKA_DIAG__.getFullReport()));
+    }
+  }, []);
+
   useEffect(() => {
-    if (open) setValues({ ...tuning });
+    if (!open || tab !== 'profiler') return;
+    refreshReportJson();
+    const id = window.setInterval(refreshReportJson, 1000);
+    return () => window.clearInterval(id);
+  }, [open, tab, refreshReportJson]);
+
+  const handleChange = useCallback((key: TuningKey, value: number) => {
+    tuning[key] = value;
+    setValues((prev) => ({ ...prev, [key]: value }));
+    saveCurrentTuning();
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      setValues({ ...tuning });
+      const diagGame = window.__MAYONAKA_DIAG__?.game;
+      if (diagGame) {
+        setIsolation({
+          renderBg: diagGame.renderBg,
+          renderRoad: diagGame.renderRoad,
+          renderProps: diagGame.renderProps,
+          renderPylonWires: diagGame.renderPylonWires,
+          renderTraffic: diagGame.renderTraffic,
+          renderCar: diagGame.renderCar,
+          syncGpuProbe: diagGame.syncGpuProbe,
+          legacyRaster: diagGame.legacyRaster,
+        });
+      }
+    }
   }, [open]);
 
   // Keyboard shortcut: pressing '1', '2', '3' while debug panel is open switches theme
@@ -107,10 +219,14 @@ export function DebugPanel({
 
   if (!open) return null;
 
-  const handleChange = (key: TuningKey, value: number) => {
-    tuning[key] = value;
-    setValues((prev) => ({ ...prev, [key]: value }));
-    saveCurrentTuning();
+  const handleToggleIsolation = (key: keyof IsolationToggles) => {
+    const nextVal = !isolation[key];
+    setIsolation((prev) => ({ ...prev, [key]: nextVal }));
+    if (key === 'renderCar') {
+      window.__MAYONAKA_DIAG__?.setIsolation({ renderCar: nextVal, renderParticles: nextVal });
+    } else {
+      window.__MAYONAKA_DIAG__?.setIsolation({ [key]: nextVal });
+    }
   };
 
   const handleReset = () => {
@@ -132,42 +248,48 @@ export function DebugPanel({
   };
 
   const handleCopyPerfReport = async () => {
-    if (!snap) return;
-    const report = {
+    const fullReport = window.__MAYONAKA_DIAG__?.getFullReport();
+    if (!fullReport && !snap) return;
+    const report = fullReport ?? {
       timestamp: new Date().toISOString(),
-      fps: snap.fps,
-      minFps: snap.minFps,
-      frameTimeMs: snap.frameTimeMs,
-      p95FrameMs: snap.p95FrameMs,
-      maxFrameMs: snap.maxFrameMs,
-      droppedFrames: snap.droppedFrames,
-      simTimeMs: snap.simTimeMs,
-      renderTimeMs: snap.renderTimeMs,
-      compositorGapMs: snap.compositorGapMs,
+      fps: snap!.fps,
+      minFps: snap!.minFps,
+      sessionAvgFps: snap!.sessionAvgFps,
+      sessionMinFps: snap!.sessionMinFps,
+      pct60Fps: snap!.pct60Fps,
+      frameTimeMs: snap!.frameTimeMs,
+      p95FrameMs: snap!.p95FrameMs,
+      maxFrameMs: snap!.maxFrameMs,
+      droppedFrames: snap!.droppedFrames,
+      simTimeMs: snap!.simTimeMs,
+      renderTimeMs: snap!.renderTimeMs,
+      compositorGapMs: snap!.compositorGapMs,
       breakdown: {
-        bgRenderMs: snap.bgRenderMs,
-        roadRenderMs: snap.roadRenderMs,
-        roadSlicesMs: snap.roadSlicesMs,
-        roadPropsMs: snap.roadPropsMs,
-        roadTrafficMs: snap.roadTrafficMs,
-        carOverlayMs: snap.carOverlayMs,
+        bgRenderMs: snap!.bgRenderMs,
+        roadRenderMs: snap!.roadRenderMs,
+        roadSlicesMs: snap!.roadSlicesMs,
+        roadPropsMs: snap!.roadPropsMs,
+        roadTrafficMs: snap!.roadTrafficMs,
+        carOverlayMs: snap!.carOverlayMs,
       },
-      fixedStepsLastFrame: snap.fixedStepsLastFrame,
+      fixedStepsLastFrame: snap!.fixedStepsLastFrame,
       geometry: {
-        drawnSegments: snap.drawnSegments,
-        drawnProps: snap.drawnProps,
-        drawnTrucks: snap.drawnTrucks,
-        activeParticles: snap.activeParticles,
+        drawnSegments: snap!.drawnSegments,
+        drawnProps: snap!.drawnProps,
+        drawnTrucks: snap!.drawnTrucks,
+        drawnPylonSpans: snap!.drawnPylonSpans,
+        crestClips: snap!.crestClips,
+        activeParticles: snap!.activeParticles,
         drawDistance: tuning.drawDistance,
       },
       memory: {
-        heapMb: snap.memoryMb,
+        heapMb: snap!.memoryMb,
       },
       stage: {
-        number: snap.stageNumber,
-        palette: snap.stagePaletteName,
-        speedKmh: Math.round(snap.speedKmh),
-        grooveTier: snap.grooveTier,
+        number: snap!.stageNumber,
+        palette: snap!.stagePaletteName,
+        speedKmh: Math.round(snap!.speedKmh),
+        grooveTier: snap!.grooveTier,
       },
     };
     try {
@@ -487,46 +609,178 @@ export function DebugPanel({
             </button>
           </div>
 
-          {GROUPS.map((group) => (
-            <div key={group} className="space-y-2.5">
-              <div className="border-b border-fuchsia-500/25 pb-1 text-[10px] font-bold tracking-[0.2em] text-pink-400 uppercase">
-                {group}
-              </div>
-              {TUNING_CONTROLS.filter((c) => c.group === group).map((ctrl) => {
-                const current = values[ctrl.key];
-                const isModified = current !== DEFAULT_TUNING[ctrl.key];
-                return (
-                  <label key={ctrl.key} className="block space-y-0.5">
-                    <div className="flex justify-between text-[11px]">
-                      <span
-                        className={isModified ? 'font-semibold text-cyan-300' : 'text-fuchsia-100'}
-                      >
-                        {ctrl.label}
-                      </span>
-                      <span className="tabular-nums text-fuchsia-300">
-                        {current}
-                        {ctrl.unit ? ` ${ctrl.unit}` : ''}
-                      </span>
-                    </div>
-                    <div className="text-[10px] leading-tight text-fuchsia-300/65">{ctrl.hint}</div>
-                    <input
-                      type="range"
-                      min={ctrl.min}
-                      max={ctrl.max}
-                      step={ctrl.step}
-                      value={current}
-                      onChange={(e) => handleChange(ctrl.key, Number(e.target.value))}
-                      onPointerUp={(e) => e.currentTarget.blur()}
-                      className="h-1.5 w-full cursor-pointer appearance-none rounded bg-fuchsia-950 accent-cyan-400"
-                    />
-                  </label>
-                );
-              })}
-            </div>
-          ))}
+          <MemoizedTuningControls values={values} onChange={handleChange} />
         </div>
       ) : (
         <div className="flex-1 space-y-3.5 overflow-y-auto p-3">
+          {/* Section: Full-Song Session Scorecard */}
+          <div className="rounded border border-emerald-400/40 bg-[#070114]/90 p-2.5">
+            <div className="flex items-center justify-between text-[10px] font-bold tracking-wider text-emerald-300 uppercase">
+              <span>FULL-SONG SESSION SCORECARD</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  window.__MAYONAKA_DIAG__?.resetBenchmark();
+                  refreshReportJson();
+                  e.currentTarget.blur();
+                }}
+                className="cursor-pointer rounded border border-emerald-400/50 bg-emerald-950/70 px-1.5 py-0.5 text-[9px] font-bold text-emerald-200 hover:bg-emerald-900/80"
+              >
+                RESET BENCH
+              </button>
+            </div>
+            <div className="mt-1.5 flex justify-between text-[10px] text-cyan-200/90">
+              <span>
+                Track: {snap?.trackTitle ?? 'Loading...'} ({snap?.bpm ?? 0} BPM)
+              </span>
+              <span>
+                Bar: {snap?.roadBarIndex ?? 0} / {snap?.totalBars ?? 0} ({snap?.sectionRole ?? 'intro'})
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px]">
+              <div className="rounded bg-[#160730]/60 px-2 py-1">
+                <div className="text-[9px] text-fuchsia-300/75">AVG FPS</div>
+                <strong className="text-xs tabular-nums text-emerald-300">
+                  {(snap?.sessionAvgFps ?? fps).toFixed(1)}
+                </strong>
+              </div>
+              <div className="rounded bg-[#160730]/60 px-2 py-1">
+                <div className="text-[9px] text-fuchsia-300/75">MIN FPS</div>
+                <strong className="text-xs tabular-nums text-amber-300">
+                  {snap?.sessionMinFps ?? fps}
+                </strong>
+              </div>
+              <div className="rounded bg-[#160730]/60 px-2 py-1">
+                <div className="text-[9px] text-fuchsia-300/75">60 FPS %</div>
+                <strong className="text-xs tabular-nums text-cyan-300">
+                  {(snap?.pct60Fps ?? 100).toFixed(1)}%
+                </strong>
+              </div>
+            </div>
+            <div className="mt-1.5 flex justify-between text-[10px] text-fuchsia-200/85">
+              <span>
+                Crest Clips: <strong className="tabular-nums text-pink-300">{snap?.crestClips ?? 0}</strong>
+              </span>
+              <span>
+                Pylon Spans: <strong className="tabular-nums text-cyan-300">{snap?.drawnPylonSpans ?? 0}</strong>
+              </span>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-[9px]">
+              {(
+                [
+                  [0, 'INTRO B0'],
+                  [8, 'BUILD B8'],
+                  [16, 'DROP B16'],
+                  [48, 'BREAK B48'],
+                  [72, 'DROP2 B72'],
+                  [104, 'OUTRO B104'],
+                ] as const
+              ).map(([bar, label]) => (
+                <button
+                  key={bar}
+                  type="button"
+                  onClick={(e) => {
+                    window.__MAYONAKA_DIAG__?.seekToBar(bar);
+                    refreshReportJson();
+                    e.currentTarget.blur();
+                  }}
+                  className="cursor-pointer rounded border border-cyan-400/50 bg-cyan-950/60 px-1 py-1 font-bold text-cyan-200 hover:bg-cyan-900/80"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div className="mt-1.5 grid grid-cols-4 gap-1 text-[9px]">
+              {(
+                [
+                  ['FORK', () => window.__MAYONAKA_DIAG__?.triggerForkTest()],
+                  ['NEXT SONG', () => window.__MAYONAKA_DIAG__?.triggerNextSongTest()],
+                  ['OFF-ROAD', () => window.__MAYONAKA_DIAG__?.triggerOffRoadTest()],
+                  ['HIT TRUCK', () => window.__MAYONAKA_DIAG__?.triggerTruckCollisionTest()],
+                ] as const
+              ).map(([label, handler]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={(e) => {
+                    handler();
+                    refreshReportJson();
+                    e.currentTarget.blur();
+                  }}
+                  className="cursor-pointer rounded border border-pink-400/55 bg-pink-950/60 px-1 py-1 font-bold text-pink-200 hover:bg-pink-900/80"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Section: Live Subsystem Isolation Toggles */}
+          <div className="rounded border border-amber-400/35 bg-[#070114]/85 p-2.5">
+            <div className="flex items-center justify-between text-[10px] font-bold tracking-wider text-amber-300 uppercase">
+              <span>SUBSYSTEM ISOLATION</span>
+              <span className="text-[9px] font-normal text-fuchsia-300">A/B GPU PROBE</span>
+            </div>
+            <div className="mt-2 grid grid-cols-3 gap-1 text-[9px]">
+              {(
+                [
+                  ['renderBg', 'SKY/BG'],
+                  ['renderRoad', 'ROAD'],
+                  ['renderProps', 'PROPS'],
+                  ['renderPylonWires', 'WIRES'],
+                  ['renderTraffic', 'TRAFFIC'],
+                  ['renderCar', 'CAR/FX'],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={(e) => {
+                    handleToggleIsolation(key);
+                    e.currentTarget.blur();
+                  }}
+                  className={`cursor-pointer rounded border px-1.5 py-1 font-bold transition ${
+                    isolation[key]
+                      ? 'border-cyan-400/70 bg-cyan-950/60 text-cyan-200'
+                      : 'border-pink-500/50 bg-pink-950/60 text-pink-300 line-through'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={(e) => {
+                handleToggleIsolation('syncGpuProbe');
+                e.currentTarget.blur();
+              }}
+              className={`mt-1.5 flex w-full cursor-pointer items-center justify-between rounded border px-2 py-1 text-[10px] font-bold transition ${
+                isolation.syncGpuProbe
+                  ? 'border-amber-400 bg-amber-950/70 text-amber-200'
+                  : 'border-fuchsia-500/30 bg-[#160730]/50 text-fuchsia-300'
+              }`}
+            >
+              <span>GPU SYNC PROBE (Flush Canvas)</span>
+              <span>{isolation.syncGpuProbe ? 'ACTIVE' : 'OFF'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                handleToggleIsolation('legacyRaster');
+                e.currentTarget.blur();
+              }}
+              className={`mt-1.5 flex w-full cursor-pointer items-center justify-between rounded border px-2 py-1 text-[10px] font-bold transition ${
+                isolation.legacyRaster
+                  ? 'border-pink-400 bg-pink-950/75 text-pink-200'
+                  : 'border-fuchsia-500/30 bg-[#160730]/50 text-fuchsia-300'
+              }`}
+            >
+              <span>A/B BASELINE (LEGACY RASTER)</span>
+              <span>{isolation.legacyRaster ? 'ON' : 'OFF'}</span>
+            </button>
+          </div>
+
           {/* Section: Frame Timing Budget */}
           <div className="rounded border border-cyan-400/30 bg-[#070114]/85 p-2.5">
             <div className="flex items-center justify-between text-[10px] font-bold tracking-wider text-cyan-300 uppercase">
@@ -672,6 +926,19 @@ export function DebugPanel({
                 </span>
               </div>
             </div>
+          </div>
+
+          {/* Raw Benchmark Report (DOM-readable for automated & manual inspection) */}
+          <div className="rounded border border-cyan-400/25 bg-[#05010f]/95 p-2">
+            <div className="text-[9px] font-bold tracking-wider text-cyan-300 uppercase">
+              LIVE REPORT JSON
+            </div>
+            <pre
+              data-testid="perf-report-json"
+              className="mt-1 max-h-40 overflow-auto text-[9px] leading-tight whitespace-pre-wrap break-all text-fuchsia-200/85"
+            >
+              {reportJson}
+            </pre>
           </div>
 
           {/* Benchmark Advice */}

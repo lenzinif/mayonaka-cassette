@@ -854,6 +854,30 @@ export class FunkAudioEngine {
   }
 
   /**
+   * Seeks gameplay track playback & BeatClock to `timeSec` (clamped inside `[0, durationSec)`).
+   * Used by diagnostics (`seekToBar`) to inspect arbitrary musical sections rapidly.
+   */
+  seekTo(timeSec: number): void {
+    const dur = Math.max(0.1, this.beatClock.map.durationSec);
+    const clamped = Math.max(0, Math.min(dur - 0.02, timeSec));
+    this.stopOutgoingSource();
+    this.crossfadeRemainingSec = 0;
+    this.crossfadeTotalSec = 0;
+    this.resetDubState();
+    this.virtualTrackSec = clamped;
+    this.beatClock.resetCrossingState();
+    if (this.ctx && this.ctx.state === 'running' && !this.isPaused) {
+      this.startSourceNode(clamped, 0.01);
+      this.pendingTrackStart = false;
+    } else {
+      if (this.ctx) {
+        this.lastAudioTimeSec = this.ctx.currentTime;
+      }
+      this.pendingTrackStart = true;
+    }
+  }
+
+  /**
    * Rewinds the active track and BeatClock back to `0.0s` (beat 0, bar 0) so that
    * when the player starts driving from a standstill after browsing the main menu,
    * the audio clock and road start in phase without accumulated menu lag.
