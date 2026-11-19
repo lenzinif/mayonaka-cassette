@@ -3,7 +3,7 @@ import { tuning } from '@src/config/tuning';
 
 const EMPTY_SPRITES: readonly RoadSprite[] = [];
 import { drawKeiTruck, type TrafficManager } from '@src/entities/TrafficAndProps';
-import type { StagePalette } from './palette';
+import { lerpHexColor, type StagePalette } from './palette';
 import { clamp01, interpolate, percentRemaining, project, smoothstep } from './RoadProjection';
 import {
   findSegment,
@@ -89,6 +89,8 @@ export interface RoadRenderStats {
 export class RoadRenderer {
   private readonly visible: RoadSegment[] = new Array<RoadSegment>(MAX_DRAW_DISTANCE);
   private readonly clipY = new Float32Array(MAX_DRAW_DISTANCE);
+  /** 1 when any nearer segment between camera and index `n` is a bridge (requiring stencil clip behind crests). */
+  private readonly clipNeedsStencil = new Uint8Array(MAX_DRAW_DISTANCE);
 
   // --- Phase 3 Power Line Chain State (Zero GC) ---
   private static readonly MAX_CHAIN_SLOTS = 8;
@@ -110,6 +112,15 @@ export class RoadRenderer {
   private cachedBridgeWater0 = '';
   private cachedBridgeWater1 = '';
   private cachedBridgeWaterGrad: CanvasGradient | null = null;
+
+  // Cached Nyquist-filtered far-horizon colors for coalesced sub-pixel slices (Zero GC)
+  private cachedHorizonFog = '';
+  private cachedHorizonRumble0 = '';
+  private cachedHorizonRumble1 = '';
+  private cachedHorizonCurbColor = '#4a4a6a';
+  private cachedHorizonRoad0 = '';
+  private cachedHorizonRoad1 = '';
+  private cachedHorizonRoadColor = '#141928';
 
   private profileTick = 0;
 
@@ -171,10 +182,33 @@ export class RoadRenderer {
       view.nextTrack.segments.length > 0;
     const nextTrackStartPassIdx = segments.length - base.index;
 
+    // Refresh cached Nyquist-filtered far-horizon colors only on palette change (Zero GC)
+    if (
+      this.cachedHorizonFog !== palette.fog ||
+      this.cachedHorizonRumble0 !== palette.rumble[0] ||
+      this.cachedHorizonRumble1 !== palette.rumble[1] ||
+      this.cachedHorizonRoad0 !== palette.road[0] ||
+      this.cachedHorizonRoad1 !== palette.road[1]
+    ) {
+      this.cachedHorizonFog = palette.fog;
+      this.cachedHorizonRumble0 = palette.rumble[0];
+      this.cachedHorizonRumble1 = palette.rumble[1];
+      this.cachedHorizonRoad0 = palette.road[0];
+      this.cachedHorizonRoad1 = palette.road[1];
+      const midRumble = lerpHexColor(palette.rumble[0], palette.rumble[1], 0.5);
+      this.cachedHorizonCurbColor = lerpHexColor(midRumble, palette.fog, 0.45);
+      this.cachedHorizonRoadColor = lerpHexColor(palette.road[0], palette.road[1], 0.5);
+    }
+
+    const horizonY = Math.floor(height * 0.5);
+    const cameraSeg = findSegment(track, view.position);
+    const isCameraOnBridge = cameraSeg ? cameraSeg.env === 'bridge' : false;
+
     // Pass 1: front-to-back projection & hill-crest occlusion horizon (maxy).
     let x = 0;
     let dx = -(base.curve * basePercent);
     let maxy = height;
+    let seenBridge = isCameraOnBridge;
     for (let n = 0; n < drawDistance; n++) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
       const seg = isNextSeg
@@ -197,8 +231,12 @@ export class RoadRenderer {
       );
       x += dx;
       dx += seg.curve;
+      if (seg.env === 'bridge') {
+        seenBridge = true;
+      }
       this.visible[n] = seg;
       this.clipY[n] = maxy;
+      this.clipNeedsStencil[n] = seenBridge ? 1 : 0;
 
       if (
         seg.p1.cameraZ > cameraDepth &&
@@ -210,9 +248,6 @@ export class RoadRenderer {
     }
 
     // Pass 2: painter's algorithm (back-to-front).
-    const horizonY = Math.floor(height * 0.5);
-    const cameraSeg = findSegment(track, view.position);
-    const isCameraOnBridge = cameraSeg ? cameraSeg.env === 'bridge' : false;
     if (isCameraOnBridge) {
       // Pre-fill palette-harmonized bay water surface once below the horizon (avoids ~180 full-width overdraws on bridge climbs)
       const waterColors = palette.water ?? palette.grass;
@@ -243,22 +278,68 @@ export class RoadRenderer {
       }
       ctx.fillRect(0, horizonY, width, height - horizonY);
     }
+
+    // Zero-gap distant slice coalescing state (prevents sky slits on distant hills while keeping low draw counts)
+    let coalesceTopY = Number.POSITIVE_INFINITY;
+    let coalesceEnv: RoadSegment['env'] | null = null;
+    let coalesceCount = 0;
+
     for (let n = drawDistance - 1; n >= 0; n--) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
       const seg = this.visible[n]!;
       const { p1, p2 } = seg;
-      if (p1.cameraZ <= cameraDepth) continue; // behind the projection plane
+      if (p1.cameraZ <= cameraDepth) {
+        coalesceTopY = Number.POSITIVE_INFINITY;
+        coalesceEnv = null;
+        coalesceCount = 0;
+        continue; // behind the projection plane
+      }
 
       const firstTruckIdx = !isNextSeg && traffic ? traffic.getFirstTruckOnSegment(seg.index) : -1;
       const segClipY = this.clipY[n]!;
+      const segForkZoneStartZ = isNextSeg ? undefined : view.forkZoneStartZ;
       // Skip segments occluded behind a hill crest
       if (p2.screenY < p1.screenY && p2.screenY < segClipY) {
-        // Distant LOD: cull degenerate sub-pixel road slices near vanishing point
-        const dy = p1.screenY - p2.screenY;
-        const shouldDrawSlice = legacy
-          ? dy >= 0.15 || p1.screenW >= 8 || seg.sprites.length > 0 || firstTruckIdx !== -1
-          : dy >= 0.25 || n <= 90 || seg.sprites.length > 0 || firstTruckIdx !== -1;
-        if (shouldDrawSlice) {
+        if (coalesceEnv !== seg.env || p2.screenY < coalesceTopY - 0.5) {
+          coalesceTopY = Number.POSITIVE_INFINITY;
+          coalesceCount = 0;
+        }
+        const effectiveTopY = Math.min(p2.screenY, coalesceTopY);
+        const clampedBottomY = Math.min(p1.screenY, segClipY);
+        const combinedDy = clampedBottomY - effectiveTopY;
+
+        let shouldDeferSlice = false;
+        if (legacy) {
+          const dy = p1.screenY - p2.screenY;
+          shouldDeferSlice = !(dy >= 0.15 || p1.screenW >= 8 || seg.sprites.length > 0 || firstTruckIdx !== -1);
+        } else if (
+          n > 60 &&
+          combinedDy < 0.75 &&
+          seg.sprites.length === 0 &&
+          firstTruckIdx === -1 &&
+          !(segForkZoneStartZ !== undefined && p2.worldZ > segForkZoneStartZ && trackLength > segForkZoneStartZ)
+        ) {
+          const nextSeg = this.visible[n - 1];
+          const nextClipY = this.clipY[n - 1]!;
+          if (
+            nextSeg &&
+            nextSeg.p1.cameraZ > cameraDepth &&
+            nextSeg.env === seg.env &&
+            nextSeg.p2.screenY < nextSeg.p1.screenY &&
+            nextSeg.p2.screenY < nextClipY &&
+            Math.abs(nextSeg.p2.screenY - p1.screenY) <= 1.0
+          ) {
+            shouldDeferSlice = true;
+          }
+        }
+
+        if (shouldDeferSlice) {
+          if (!legacy) {
+            coalesceTopY = effectiveTopY;
+            coalesceEnv = seg.env;
+            coalesceCount++;
+          }
+        } else {
           this.stats.drawnSegments++;
           const tSeg0 = sampleSubsystems ? performance.now() : 0;
           this.renderSegment(
@@ -267,7 +348,7 @@ export class RoadRenderer {
             seg,
             palette,
             view.beatPulse ?? 0,
-            isNextSeg ? undefined : view.forkZoneStartZ,
+            segForkZoneStartZ,
             trackLength,
             view.forkChoice,
             segClipY,
@@ -275,11 +356,20 @@ export class RoadRenderer {
             horizonY,
             view.grooveIntensity ?? 0.5,
             legacy,
+            coalesceCount > 0 ? effectiveTopY : undefined,
+            coalesceCount > 0,
           );
           if (sampleSubsystems) {
             sampleSlicesMs += performance.now() - tSeg0;
           }
+          coalesceTopY = Number.POSITIVE_INFINITY;
+          coalesceEnv = null;
+          coalesceCount = 0;
         }
+      } else {
+        coalesceTopY = Number.POSITIVE_INFINITY;
+        coalesceEnv = null;
+        coalesceCount = 0;
       }
 
       const ppu = (p1.scale * width) / 2;
@@ -293,14 +383,15 @@ export class RoadRenderer {
       // Skip segment sprites/traffic if occluded behind a hill crest
       if (p1.screenY - 12000 * scaledPpu >= segClipY) continue;
 
-      // Smooth distant alpha fade-in over far ~28% of drawDistance + low refPpu horizon band
+      // Smooth distant alpha fade-in over far ~18% of drawDistance + low refPpu horizon band
       const distAlpha =
-        !legacy && drawDistance > 0 && n > drawDistance * 0.72
-          ? Math.max(0.05, Math.min(1, (1 - n / drawDistance) / 0.28))
+        !legacy && drawDistance > 0 && n > drawDistance * 0.82
+          ? Math.max(0.05, Math.min(1, (1 - n / drawDistance) / 0.18))
           : 1;
       const ppuAlpha = Math.min(1, Math.max(0, (refPpu - 0.001) / 0.005));
       const propAlpha = legacy ? ppuAlpha : Math.min(distAlpha, ppuAlpha);
       const needsPropAlpha = propAlpha < 0.98;
+      const needsStencilClip = legacy || this.clipNeedsStencil[n] === 1;
       let crestClipActive = false;
 
       if (needsPropAlpha && sprites.length > 0) {
@@ -309,7 +400,6 @@ export class RoadRenderer {
 
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
       const tProps0 = sampleSubsystems && sprites.length > 0 ? performance.now() : 0;
-      const segForkZoneStartZ = isNextSeg ? undefined : view.forkZoneStartZ;
       for (let i = 0; i < sprites.length; i++) {
         const s = sprites[i]!;
 
@@ -421,7 +511,7 @@ export class RoadRenderer {
           !crestClipActive &&
           segClipY < height &&
           p1.screenY > segClipY &&
-          (legacy || isCameraOnBridge) &&
+          needsStencilClip &&
           typeof ctx.clip === 'function'
         ) {
           ctx.save();
@@ -436,16 +526,11 @@ export class RoadRenderer {
           this.stats.crestClips++;
         }
 
-        const propGroundY =
-          !legacy && !isCameraOnBridge && p1.screenY > segClipY
-            ? Math.min(p1.screenY, Math.max(segClipY, horizonY))
-            : p1.screenY;
-
         drawProp(
           ctx,
           resolvedKind,
           sx,
-          propGroundY,
+          p1.screenY,
           propPpu,
           effectiveOffset < 0 ? -1 : 1,
           s.variant,
@@ -469,6 +554,7 @@ export class RoadRenderer {
       // AI Kei Trucks on this segment (diverging onto the left/right Y-fork branch)
       if (traffic && firstTruckIdx !== -1 && !view.skipTraffic) {
         const tTraffic0 = sampleSubsystems ? performance.now() : 0;
+        let truckClipActive = false;
         let tIdx = firstTruckIdx;
         while (tIdx !== -1) {
           const truck = traffic.trucks[tIdx]!;
@@ -534,6 +620,24 @@ export class RoadRenderer {
 
               const truckAlpha = Math.min(propAlpha, forkBranchAlpha);
               if (truckAlpha > 0.02) {
+                if (
+                  !truckClipActive &&
+                  needsStencilClip &&
+                  segClipY < height &&
+                  truckScreenY > segClipY &&
+                  typeof ctx.clip === 'function'
+                ) {
+                  ctx.save();
+                  ctx.beginPath();
+                  ctx.moveTo(0, 0);
+                  ctx.lineTo(width, 0);
+                  ctx.lineTo(width, segClipY);
+                  ctx.lineTo(0, segClipY);
+                  ctx.closePath();
+                  ctx.clip();
+                  truckClipActive = true;
+                  this.stats.crestClips++;
+                }
                 if (truckAlpha < 0.98) {
                   ctx.globalAlpha = truckAlpha;
                 }
@@ -557,6 +661,9 @@ export class RoadRenderer {
             }
           }
           tIdx = truck.nextInSegment;
+        }
+        if (truckClipActive) {
+          ctx.restore();
         }
         if (sampleSubsystems) {
           sampleTrafficMs += performance.now() - tTraffic0;
@@ -857,13 +964,16 @@ export class RoadRenderer {
     horizonY = 180,
     grooveIntensity = 0.5,
     legacy = false,
+    overrideTopY?: number,
+    isCoalesced = false,
   ): void {
     const { p1, p2, stripe } = seg;
     let x1 = p1.screenX;
     let y1 = p1.screenY;
     let w1 = p1.screenW;
     const x2 = p2.screenX;
-    const y2 = p2.screenY - 1; // 1px overlap hides anti-aliasing seams between slices
+    const topScreenY = overrideTopY !== undefined ? overrideTopY : p2.screenY;
+    const y2 = topScreenY - 1; // 1px overlap hides anti-aliasing seams between slices
     const w2 = p2.screenW;
 
     // Clip near edge to segClipY (screen bottom or hill crest) along the projected edge so
@@ -885,7 +995,10 @@ export class RoadRenderer {
 
     const isBridge = seg.env === 'bridge';
 
-    // Bridge water surface or regular grass ground fill (clamped at horizonY to avoid state-churn alpha flips)
+    // Bridge bay water surface vs full-elevation terrain ground fill.
+    // Non-bridge terrain ALWAYS fills [y2, y1] (including hills rising above horizonY) so the road
+    // and roadside props remain solidly grounded on terrain and hill crests naturally occlude
+    // farther slices/props behind them via Painter's Algorithm without ctx.clip().
     if (isBridge && isCameraOnBridge) {
       if (stripe === 0 && y1 > horizonY) {
         const waterColors = palette.water ?? palette.grass;
@@ -893,12 +1006,15 @@ export class RoadRenderer {
         ctx.fillStyle = waterColors[0];
         ctx.fillRect(0, waterY2, width, y1 - waterY2);
       }
-    } else {
-      const grassY2 = Math.max(horizonY, y2);
-      if (y1 > grassY2) {
+    } else if (isBridge) {
+      const baseY2 = Math.max(horizonY, y2);
+      if (y1 > baseY2) {
         ctx.fillStyle = palette.grass[stripe];
-        ctx.fillRect(0, grassY2, width, y1 - grassY2);
+        ctx.fillRect(0, baseY2, width, y1 - baseY2);
       }
+    } else {
+      ctx.fillStyle = isCoalesced ? palette.grass[1] : palette.grass[stripe];
+      ctx.fillRect(0, y2, width, y1 - y2);
     }
 
     // OutRun physical Y-fork geometry in the final outro segments when forkZoneStartZ is active
@@ -924,22 +1040,35 @@ export class RoadRenderer {
     }
 
     const sliceH = y1 - y2;
+    const rawDy = p1.screenY - p2.screenY;
     const useFastSliceRect =
-      !isBridge && (legacy ? w1 < 20 && p1.screenY - p2.screenY < 2.2 : p1.screenY - p2.screenY <= 2.2);
+      !isBridge &&
+      (legacy
+        ? w1 < 20 && rawDy < 2.2
+        : isCoalesced || (rawDy <= 1.6 && Math.abs(w1 - w2) <= 4.5 && Math.abs(x1 - x2) <= 3.5));
     if (useFastSliceRect) {
-      // Distant thin-slice fast path: axis-aligned fillRect avoids path tessellation
+      // Distant thin-slice fast path: separate non-overlapping curb & asphalt fillRects avoid both
+      // path tessellation and sub-pixel rumble color bleed across the asphalt surface.
       const mx = (x1 + x2) * 0.5;
       const mw = (w1 + w2) * 0.5;
       const mr = (r1 + r2) * 0.5;
-      ctx.fillStyle = palette.rumble[stripe];
-      ctx.fillRect(mx - mw - mr, y2, (mw + mr) * 2, sliceH);
-      ctx.fillStyle = palette.road[stripe];
-      ctx.fillRect(mx - mw, y2, mw * 2, sliceH);
-      if (stripe === 0 && w1 >= 6) {
+      const roadLeft = Math.round(mx - mw);
+      const roadRight = Math.round(mx + mw);
+      const roadSpan = Math.max(1, roadRight - roadLeft);
+      const curbW = Math.max(1, Math.round(mr));
+
+      ctx.fillStyle = isCoalesced ? this.cachedHorizonCurbColor : palette.rumble[stripe];
+      ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
+      ctx.fillRect(roadRight, y2, curbW, sliceH);
+
+      ctx.fillStyle = isCoalesced ? this.cachedHorizonRoadColor : palette.road[stripe];
+      ctx.fillRect(roadLeft, y2, roadSpan, sliceH);
+
+      if (!isCoalesced && stripe === 0 && w1 >= 6) {
         ctx.fillStyle = palette.lane;
-        const lw = mw / Math.max(32, 8 * LANES);
-        const laneStep = (mw * 2) / LANES;
-        let lx = mx - mw + laneStep;
+        const lw = Math.max(1, mw / Math.max(32, 8 * LANES));
+        const laneStep = roadSpan / LANES;
+        let lx = roadLeft + laneStep;
         for (let lane = 1; lane < LANES; lane++) {
           ctx.fillRect(lx - lw * 0.5, y2, lw, sliceH);
           lx += laneStep;
@@ -994,7 +1123,9 @@ export class RoadRenderer {
     const span = Math.max(1, trackLength - forkZoneStartZ);
     const t1 = clamp01((p1.worldZ - forkZoneStartZ) / span);
     const t2 = clamp01((p2.worldZ - forkZoneStartZ) / span);
-    const useFastForkRect = !legacy && p1.screenY - p2.screenY <= 2.2;
+    const rawDy = p1.screenY - p2.screenY;
+    const useFastForkRect =
+      !legacy && rawDy <= 1.6 && Math.abs(w1 - w2) <= 4.5 && Math.abs(x1 - x2) <= 3.5;
     const sliceH = y1 - y2;
 
     if (t2 <= FORK_WIDEN_END_T) {
@@ -1015,10 +1146,14 @@ export class RoadRenderer {
         const mx = (x1 + x2) * 0.5;
         const ow = (outerW1 + outerW2) * 0.5;
         const mr = (r1 + r2) * 0.5;
+        const roadLeft = Math.round(mx - ow);
+        const roadRight = Math.round(mx + ow);
+        const curbW = Math.max(1, Math.round(mr));
         ctx.fillStyle = palette.rumble[stripe];
-        ctx.fillRect(mx - ow - mr, y2, (ow + mr) * 2, sliceH);
+        ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
+        ctx.fillRect(roadRight, y2, curbW, sliceH);
         ctx.fillStyle = palette.road[stripe];
-        ctx.fillRect(mx - ow, y2, ow * 2, sliceH);
+        ctx.fillRect(roadLeft, y2, Math.max(1, roadRight - roadLeft), sliceH);
         if (c2 > 0.5) {
           const mc = (c1 + c2) * 0.5;
           ctx.fillStyle =
@@ -1077,16 +1212,22 @@ export class RoadRenderer {
         const gap = (gap1 + gap2) * 0.5;
         const mr = (r1 + r2) * 0.5;
         const ir = (ir1 + ir2) * 0.5;
+        const leftOuter = Math.round(mx - ow);
+        const leftInner = Math.round(mx - gap);
+        const rightInner = Math.round(mx + gap);
+        const rightOuter = Math.round(mx + ow);
+        const curbW = Math.max(1, Math.round(mr));
+        const innerCurbW = Math.max(1, Math.round(ir));
         ctx.fillStyle = palette.rumble[stripe];
-        ctx.fillRect(mx - ow - mr, y2, mr, sliceH);
-        ctx.fillRect(mx + ow, y2, mr, sliceH);
+        ctx.fillRect(leftOuter - curbW, y2, curbW, sliceH);
+        ctx.fillRect(rightOuter, y2, curbW, sliceH);
         ctx.fillStyle = palette.road[stripe];
-        ctx.fillRect(mx - ow, y2, Math.max(1, ow - gap), sliceH);
-        ctx.fillRect(mx + gap, y2, Math.max(1, ow - gap), sliceH);
+        ctx.fillRect(leftOuter, y2, Math.max(1, leftInner - leftOuter), sliceH);
+        ctx.fillRect(rightInner, y2, Math.max(1, rightOuter - rightInner), sliceH);
         ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
-        ctx.fillRect(mx - gap - ir, y2, ir, sliceH);
+        ctx.fillRect(leftInner - innerCurbW, y2, innerCurbW, sliceH);
         ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
-        ctx.fillRect(mx + gap, y2, ir, sliceH);
+        ctx.fillRect(rightInner, y2, innerCurbW, sliceH);
         return;
       }
 
@@ -1137,11 +1278,12 @@ export class RoadRenderer {
       const cRight2 = x2 + cCenter2 + cHalfW2;
 
       if (useFastForkRect) {
-        const cLeft = (cLeft1 + cLeft2) * 0.5;
-        const cRight = (cRight1 + cRight2) * 0.5;
-        const mr = (r1 + r2) * 0.5;
+        const cLeft = Math.round((cLeft1 + cLeft2) * 0.5);
+        const cRight = Math.round((cRight1 + cRight2) * 0.5);
+        const curbW = Math.max(1, Math.round((r1 + r2) * 0.5));
         ctx.fillStyle = palette.rumble[stripe];
-        ctx.fillRect(cLeft - mr, y2, cRight - cLeft + mr * 2, sliceH);
+        ctx.fillRect(cLeft - curbW, y2, curbW, sliceH);
+        ctx.fillRect(cRight, y2, curbW, sliceH);
         ctx.fillStyle = palette.road[stripe];
         ctx.fillRect(cLeft, y2, Math.max(1, cRight - cLeft), sliceH);
 
@@ -1154,11 +1296,13 @@ export class RoadRenderer {
           const eMid = smoothstep(Math.max(0, u2Unchosen));
           const uCenter = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * eMid) * ((w1 + w2) * 0.5);
           const uHalfW = 0.58 * (1 - 0.2 * eMid) * ((w1 + w2) * 0.5);
-          const uLeft = (x1 + x2) * 0.5 + uCenter - uHalfW;
+          const uLeft = Math.round((x1 + x2) * 0.5 + uCenter - uHalfW);
+          const uRight = Math.round((x1 + x2) * 0.5 + uCenter + uHalfW);
           ctx.fillStyle = palette.rumble[stripe];
-          ctx.fillRect(uLeft - mr, y2, uHalfW * 2 + mr * 2, sliceH);
+          ctx.fillRect(uLeft - curbW, y2, curbW, sliceH);
+          ctx.fillRect(uRight, y2, curbW, sliceH);
           ctx.fillStyle = palette.road[stripe];
-          ctx.fillRect(uLeft, y2, uHalfW * 2, sliceH);
+          ctx.fillRect(uLeft, y2, Math.max(1, uRight - uLeft), sliceH);
           ctx.globalAlpha = prevAlpha;
         }
         return;

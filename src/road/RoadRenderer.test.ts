@@ -397,4 +397,151 @@ describe('RoadRenderer — Rendering Environments', () => {
     expect(renderer.stats.crestClips).toBeGreaterThan(0);
     expect(clipCalls).toBeGreaterThan(0);
   });
+
+  it('draws full-width opaque grass terrain above horizonY on uphill segments so hills and props stay grounded', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('standard');
+    // Steep uphill climb pushing road segments well above horizonY (180)
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      seg.p1.worldY = i * 420;
+      seg.p2.worldY = (i + 1) * 420;
+    }
+
+    const grassRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: (x: number, y: number, w: number, h: number) => {
+        if (
+          ctx.fillStyle === PALETTE_NIGHT_FUNK.grass[0] ||
+          ctx.fillStyle === PALETTE_NIGHT_FUNK.grass[1]
+        ) {
+          grassRects.push({ x, y, w, h });
+        }
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+
+    // At least several full-width grass terrain bands must rise above horizonY (180)
+    const aboveHorizonGrass = grassRects.filter((r) => r.x === 0 && r.w === 640 && r.y < 160 && r.h > 0);
+    expect(aboveHorizonGrass.length).toBeGreaterThan(0);
+  });
+
+  it('never draws rumble fillRect across the center asphalt on distant fast slices (no neon road stripes)', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('standard');
+    for (let i = 50; i < 120; i++) {
+      track.segments.push({
+        index: i,
+        p1: createPoint(0, i * track.segmentLength),
+        p2: createPoint(0, (i + 1) * track.segmentLength),
+        curve: 0,
+        stripe: Math.floor(i / 3) % 2 === 0 ? 0 : 1,
+        sprites: [],
+        fog: 1,
+        env: 'standard',
+      });
+    }
+    track.length = track.segments.length * track.segmentLength;
+
+    const rumbleRects: Array<{ x: number; w: number }> = [];
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: (x: number, _y: number, w: number) => {
+        if (
+          ctx.fillStyle === PALETTE_NIGHT_FUNK.rumble[0] ||
+          ctx.fillStyle === PALETTE_NIGHT_FUNK.rumble[1]
+        ) {
+          rumbleRects.push({ x, w });
+        }
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, { ...defaultView, drawDistance: 120 }, PALETTE_NIGHT_FUNK);
+
+    expect(rumbleRects.length).toBeGreaterThan(0);
+    // Centered straight road center X = 320: no rumble fillRect may ever span across the asphalt center (x < 320 < x + w)
+    const overlappingAsphaltCenter = rumbleRects.filter((r) => r.x < 320 && r.x + r.w > 320);
+    expect(overlappingAsphaltCenter.length).toBe(0);
+  });
+
+  it('activates ctx.clip() when a bridge crest occludes props behind it', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('bridge');
+    // Steep bridge arch peaking at segment 5 (worldY=2200) and dropping steeply behind the crest
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      const yOf = (idx: number) => {
+        if (idx <= 5) return Math.sin((idx / 5) * Math.PI * 0.5) * 2200;
+        if (idx <= 16) return 2200 - (idx - 5) * 700;
+        return 2200 - 11 * 700;
+      };
+      seg.p1.worldY = yOf(i);
+      seg.p2.worldY = yOf(i + 1);
+    }
+    // Tall suspension tower behind the bridge crest peeks over segClipY while its base is occluded
+    track.segments[10]!.sprites.push({ kind: 'suspension-tower', offset: 0, variant: 0 });
+
+    let clipCalls = 0;
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      clip: () => {
+        clipCalls++;
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+    expect(renderer.stats.crestClips).toBeGreaterThan(0);
+    expect(clipCalls).toBeGreaterThan(0);
+  });
 });
