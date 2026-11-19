@@ -522,7 +522,71 @@ export class Game {
     this.audio.seekTo(targetSec);
     this.syncController.resetForTrack(true, this.car.speedRatio > 0.25, 2.0);
     this.updateRoadProgressTelemetry();
+    this.updateForkState();
     this.benchmarkWarmupFrames = 2;
+    this.renderDirty = true;
+    this.bridge.publish(this.buildSnapshot);
+  }
+
+  /**
+   * Jumps immediately into the stage fork approach with highway speed so fork rendering and UI can be stress-tested.
+   */
+  triggerForkTest(): void {
+    this.hasStartedDriving = true;
+    this.seekToBar(Math.max(0, this.totalBars - 5));
+    this.car.speed = tuning.maxSpeed * 0.85;
+    this.car.gearbox.update(this.car.speed, tuning.maxSpeed);
+    this.updateRoadProgressTelemetry();
+    this.updateForkState();
+    this.bridge.publish(this.buildSnapshot);
+  }
+
+  /**
+   * Positions the car just ahead of the stage transition line on the right fork so next-song loading/crossfade triggers immediately.
+   */
+  triggerNextSongTest(): void {
+    this.hasStartedDriving = true;
+    this.forkChoice = 'right';
+    this.car.x = 0.5;
+    this.car.prevX = 0.5;
+    this.position = Math.max(0, this.track.length - this.track.segmentLength * 3);
+    this.prevPosition = this.position;
+    this.car.speed = tuning.maxSpeed * 0.85;
+    this.car.gearbox.update(this.car.speed, tuning.maxSpeed);
+    this.updateRoadProgressTelemetry();
+    this.updateForkState();
+    this.benchmarkWarmupFrames = 2;
+    this.renderDirty = true;
+    this.bridge.publish(this.buildSnapshot);
+  }
+
+  /**
+   * Moves the car onto the off-road shoulder at high speed to stress-test gravel particles, audio muffle, and HUD updates.
+   */
+  triggerOffRoadTest(): void {
+    this.hasStartedDriving = true;
+    this.car.x = 1.45;
+    this.car.prevX = 1.45;
+    this.car.speed = tuning.maxSpeed * 0.85;
+    this.car.gearbox.update(this.car.speed, tuning.maxSpeed);
+    this.renderDirty = true;
+    this.bridge.publish(this.buildSnapshot);
+  }
+
+  /**
+   * Places a Kei Truck directly ahead of the car bumper at highway speed to trigger a collision & particle burst on the next step.
+   */
+  triggerTruckCollisionTest(): void {
+    this.hasStartedDriving = true;
+    if (this.forkActive) {
+      this.seekToBar(Math.min(16, Math.max(0, Math.floor(this.totalBars * 0.2))));
+    }
+    this.car.bumpVx = 0;
+    this.car.speed = tuning.maxSpeed * 0.9;
+    this.car.gearbox.update(this.car.speed, tuning.maxSpeed);
+    const playerZOffset = tuning.cameraHeight * cameraDepthFromFov(tuning.fieldOfView);
+    const playerWorldZ = this.position + playerZOffset;
+    this.traffic.placeTruckAheadForTest(playerWorldZ, this.car.x, this.track.length);
     this.renderDirty = true;
     this.bridge.publish(this.buildSnapshot);
   }
@@ -704,6 +768,9 @@ export class Game {
     this.autopilot = options.autopilot;
     if (this.autopilot) {
       this.autopilot.setPerception(this.buildAutopilotPerception());
+    }
+    for (let i = 0; i < 3; i++) {
+      this.background.prewarmPalette(getStagePalette(i));
     }
     this.updateRoadProgressTelemetry();
   }
@@ -904,6 +971,8 @@ export class Game {
     this.lapTime = 0;
     this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
 
+    this.benchmarkWarmupFrames = 2;
+    this.lastRenderTimestamp = 0;
     this.renderDirty = true;
     this.updateRoadProgressTelemetry();
     this.bridge.emit({
@@ -1283,7 +1352,7 @@ export class Game {
         this.renderPalette = this.palette;
       } else {
         const smoothT = rawT * rawT * (3 - 2 * rawT);
-        const step = Math.round(smoothT * 64);
+        const step = Math.round(smoothT * 16);
         if (step !== this.lastPaletteBlendStep) {
           this.lastPaletteBlendStep = step;
           blendStagePalette(
@@ -1297,8 +1366,8 @@ export class Game {
       }
     }
 
-    this.activeNextTrackLookahead =
-      this.forkChoice === 'right' ? this.getNextLookaheadTrack() : undefined;
+    const lookahead = this.getNextLookaheadTrack();
+    this.activeNextTrackLookahead = this.forkChoice === 'right' ? lookahead : undefined;
 
     this.background.update(dt, playerSeg.curve, this.car.speedRatio, triggerExtremeLightning);
     if (this.lastRenderTimestamp === 0) {
@@ -1542,7 +1611,7 @@ export class Game {
 
     const lookaheadThreshold = Math.max(
       0,
-      this.track.length - (tuning.drawDistance + 64) * this.track.segmentLength,
+      this.track.length - (tuning.drawDistance + 140) * this.track.segmentLength,
     );
     if (this.position < lookaheadThreshold) {
       return undefined;

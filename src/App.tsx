@@ -41,6 +41,10 @@ export interface MayonakaDiagApi {
   setIsolation: (opts: MayonakaDiagIsolation) => void;
   seekToBar: (barIndex: number) => void;
   loadTestTrack: (query: string) => Promise<boolean>;
+  triggerForkTest: () => void;
+  triggerNextSongTest: () => void;
+  triggerOffRoadTest: () => void;
+  triggerTruckCollisionTest: () => void;
   game: Game;
 }
 
@@ -352,6 +356,10 @@ export function App() {
               },
               seekToBar: (barIndex: number) => game.seekToBar(barIndex),
               loadTestTrack,
+              triggerForkTest: () => game.triggerForkTest(),
+              triggerNextSongTest: () => game.triggerNextSongTest(),
+              triggerOffRoadTest: () => game.triggerOffRoadTest(),
+              triggerTruckCollisionTest: () => game.triggerTruckCollisionTest(),
               game,
             };
             if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {

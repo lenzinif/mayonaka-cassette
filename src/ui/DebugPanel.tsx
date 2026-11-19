@@ -690,6 +690,29 @@ export function DebugPanel({
                 </button>
               ))}
             </div>
+            <div className="mt-1.5 grid grid-cols-4 gap-1 text-[9px]">
+              {(
+                [
+                  ['FORK', () => window.__MAYONAKA_DIAG__?.triggerForkTest()],
+                  ['NEXT SONG', () => window.__MAYONAKA_DIAG__?.triggerNextSongTest()],
+                  ['OFF-ROAD', () => window.__MAYONAKA_DIAG__?.triggerOffRoadTest()],
+                  ['HIT TRUCK', () => window.__MAYONAKA_DIAG__?.triggerTruckCollisionTest()],
+                ] as const
+              ).map(([label, handler]) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={(e) => {
+                    handler();
+                    refreshReportJson();
+                    e.currentTarget.blur();
+                  }}
+                  className="cursor-pointer rounded border border-pink-400/55 bg-pink-950/60 px-1 py-1 font-bold text-pink-200 hover:bg-pink-900/80"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Section: Live Subsystem Isolation Toggles */}

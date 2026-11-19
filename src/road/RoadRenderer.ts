@@ -918,6 +918,7 @@ export class RoadRenderer {
         forkZoneStartZ,
         trackLength,
         forkChoice ?? 'right',
+        legacy,
       );
       return;
     }
@@ -987,11 +988,14 @@ export class RoadRenderer {
     forkZoneStartZ: number,
     trackLength: number,
     choice: 'left' | 'right',
+    legacy = false,
   ): void {
     const { p1, p2, stripe } = seg;
     const span = Math.max(1, trackLength - forkZoneStartZ);
     const t1 = clamp01((p1.worldZ - forkZoneStartZ) / span);
     const t2 = clamp01((p2.worldZ - forkZoneStartZ) / span);
+    const useFastForkRect = !legacy && p1.screenY - p2.screenY <= 2.2;
+    const sliceH = y1 - y2;
 
     if (t2 <= FORK_WIDEN_END_T) {
       // Phase 1: Pre-split widening zone with center chevron warning gore
@@ -1002,6 +1006,27 @@ export class RoadRenderer {
 
       const outerW1 = w1 * (1 + pEase1 * 0.2);
       const outerW2 = w2 * (1 + pEase2 * 0.2);
+      const ir1 = r1 * 0.7;
+      const ir2 = r2 * 0.7;
+      const c1 = ir1 * pEase1;
+      const c2 = ir2 * pEase2;
+
+      if (useFastForkRect) {
+        const mx = (x1 + x2) * 0.5;
+        const ow = (outerW1 + outerW2) * 0.5;
+        const mr = (r1 + r2) * 0.5;
+        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillRect(mx - ow - mr, y2, (ow + mr) * 2, sliceH);
+        ctx.fillStyle = palette.road[stripe];
+        ctx.fillRect(mx - ow, y2, ow * 2, sliceH);
+        if (c2 > 0.5) {
+          const mc = (c1 + c2) * 0.5;
+          ctx.fillStyle =
+            stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
+          ctx.fillRect(mx - mc, y2, mc * 2, sliceH);
+        }
+        return;
+      }
 
       // Outer rumble strips (batched pair)
       ctx.fillStyle = palette.rumble[stripe];
@@ -1012,10 +1037,6 @@ export class RoadRenderer {
       polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
 
       // Central median gore chevron / triangle (widens smoothly from width 0 at t=0 to ir at t=0.18)
-      const ir1 = r1 * 0.7;
-      const ir2 = r2 * 0.7;
-      const c1 = ir1 * pEase1;
-      const c2 = ir2 * pEase2;
       if (c2 > 0.5) {
         ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
         polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
@@ -1047,6 +1068,27 @@ export class RoadRenderer {
       const outerW2 = w2 * (1.2 + splitEase2 * 0.48);
       const gap1 = w1 * splitEase1 * FORK_PEAK_INNER_GAP;
       const gap2 = w2 * splitEase2 * FORK_PEAK_INNER_GAP;
+      const ir1 = r1 * 0.7;
+      const ir2 = r2 * 0.7;
+
+      if (useFastForkRect) {
+        const mx = (x1 + x2) * 0.5;
+        const ow = (outerW1 + outerW2) * 0.5;
+        const gap = (gap1 + gap2) * 0.5;
+        const mr = (r1 + r2) * 0.5;
+        const ir = (ir1 + ir2) * 0.5;
+        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillRect(mx - ow - mr, y2, mr, sliceH);
+        ctx.fillRect(mx + ow, y2, mr, sliceH);
+        ctx.fillStyle = palette.road[stripe];
+        ctx.fillRect(mx - ow, y2, Math.max(1, ow - gap), sliceH);
+        ctx.fillRect(mx + gap, y2, Math.max(1, ow - gap), sliceH);
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
+        ctx.fillRect(mx - gap - ir, y2, ir, sliceH);
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
+        ctx.fillRect(mx + gap, y2, ir, sliceH);
+        return;
+      }
 
       // Outer rumble strips (batched pair)
       ctx.fillStyle = palette.rumble[stripe];
@@ -1061,8 +1103,6 @@ export class RoadRenderer {
       polygon(ctx, x1 + gap1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + gap2, y2);
 
       // Inner median V-curbs
-      const ir1 = r1 * 0.7;
-      const ir2 = r2 * 0.7;
       ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
       polygon(ctx, x1 - gap1 - ir1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - gap2 - ir2, y2);
 
@@ -1096,6 +1136,34 @@ export class RoadRenderer {
       const cLeft2 = x2 + cCenter2 - cHalfW2;
       const cRight2 = x2 + cCenter2 + cHalfW2;
 
+      if (useFastForkRect) {
+        const cLeft = (cLeft1 + cLeft2) * 0.5;
+        const cRight = (cRight1 + cRight2) * 0.5;
+        const mr = (r1 + r2) * 0.5;
+        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillRect(cLeft - mr, y2, cRight - cLeft + mr * 2, sliceH);
+        ctx.fillStyle = palette.road[stripe];
+        ctx.fillRect(cLeft, y2, Math.max(1, cRight - cLeft), sliceH);
+
+        const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
+        const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
+        if (unchosenAlpha > 0.08) {
+          const prevAlpha = ctx.globalAlpha;
+          ctx.globalAlpha = prevAlpha * unchosenAlpha;
+          const uSign = choice === 'left' ? 1 : -1;
+          const eMid = smoothstep(Math.max(0, u2Unchosen));
+          const uCenter = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * eMid) * ((w1 + w2) * 0.5);
+          const uHalfW = 0.58 * (1 - 0.2 * eMid) * ((w1 + w2) * 0.5);
+          const uLeft = (x1 + x2) * 0.5 + uCenter - uHalfW;
+          ctx.fillStyle = palette.rumble[stripe];
+          ctx.fillRect(uLeft - mr, y2, uHalfW * 2 + mr * 2, sliceH);
+          ctx.fillStyle = palette.road[stripe];
+          ctx.fillRect(uLeft, y2, uHalfW * 2, sliceH);
+          ctx.globalAlpha = prevAlpha;
+        }
+        return;
+      }
+
       // Chosen branch outer rumble strips (batched pair)
       ctx.fillStyle = palette.rumble[stripe];
       drawRumblePairSplit(ctx, cLeft1, cRight1, y1, cLeft2, cRight2, y2, r1, r2);
@@ -1126,11 +1194,11 @@ export class RoadRenderer {
           const leftLine2 = x2 - (1 / 3) * w2;
           if (leftLine1 > cLeft1 + l1 * 2) {
             const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
-            ctx.save();
-            ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+            const prevAlpha = ctx.globalAlpha;
+            ctx.globalAlpha = prevAlpha * alpha;
             ctx.fillStyle = palette.lane;
             polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
-            ctx.restore();
+            ctx.globalAlpha = prevAlpha;
           }
         } else {
           // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
@@ -1144,11 +1212,11 @@ export class RoadRenderer {
           const rightLine2 = x2 + (1 / 3) * w2;
           if (rightLine1 < cRight1 - l1 * 2) {
             const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
-            ctx.save();
-            ctx.globalAlpha = (ctx.globalAlpha || 1) * alpha;
+            const prevAlpha = ctx.globalAlpha;
+            ctx.globalAlpha = prevAlpha * alpha;
             ctx.fillStyle = palette.lane;
             polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
-            ctx.restore();
+            ctx.globalAlpha = prevAlpha;
           }
         }
       }
@@ -1157,8 +1225,8 @@ export class RoadRenderer {
       const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
       const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
       if (unchosenAlpha > 0.02) {
-        ctx.save();
-        ctx.globalAlpha = unchosenAlpha;
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = prevAlpha * unchosenAlpha;
         const uSign = choice === 'left' ? 1 : -1;
         const u1Unchosen = Math.max(0, (t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
         const e1 = smoothstep(u1Unchosen);
@@ -1180,7 +1248,7 @@ export class RoadRenderer {
 
         ctx.fillStyle = palette.road[stripe];
         polygon(ctx, uLeft1, y1, uRight1, y1, uRight2, y2, uLeft2, y2);
-        ctx.restore();
+        ctx.globalAlpha = prevAlpha;
       }
     }
   }
