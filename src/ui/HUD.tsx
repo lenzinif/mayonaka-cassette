@@ -211,9 +211,9 @@ export function HUD({
     };
   }, [bridge]);
 
-  // Telemetry values
+  // Telemetry values (quantize high-frequency continuous floats to avoid 15 Hz React.memo churn)
   const speedKmh = snap?.speedKmh ?? 0;
-  const speedRatio = snap?.speedRatio ?? 0;
+  const speedRatio = Math.round((snap?.speedRatio ?? 0) * 100) / 100;
   const isDrifting = snap?.isDrifting ?? false;
   const driftTime = snap?.driftTime ?? 0;
   const isOffRoad = snap?.isOffRoad ?? false;
@@ -227,8 +227,8 @@ export function HUD({
   const beatInBar = snap?.beatInBar ?? 0;
   const beatPulse = snap?.beatPulse ?? 0;
   const sectionRole: SectionRole = snap?.sectionRole ?? 'intro';
-  const barEnergy = snap?.barEnergy ?? 0.5;
-  const filterCutoffHz = snap?.filterCutoffHz ?? 2400;
+  const barEnergy = Math.round((snap?.barEnergy ?? 0.5) * 50) / 50;
+  const filterCutoffHz = Math.round((snap?.filterCutoffHz ?? 2400) / 20) * 20;
   const trackTitle = snap?.trackTitle ?? 'Neon Horizon (Synth Fallback)';
   const trackArtist = snap?.trackArtist ?? 'OutRun FM 88.4';
   const audioUnlocked = snap?.audioUnlocked ?? false;
@@ -237,7 +237,7 @@ export function HUD({
 
   // M5 & M6 Telemetry
   const gear = snap?.gear ?? 1;
-  const rpm = snap?.rpm ?? 0;
+  const rpm = Math.round((snap?.rpm ?? 0) * 100) / 100;
   const isLugging = snap?.isLugging ?? false;
   const isRedlining = snap?.isRedlining ?? false;
   const isOverdrive = snap?.isOverdrive ?? false;

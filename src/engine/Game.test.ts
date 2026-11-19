@@ -817,4 +817,68 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
     expect(leftEvents).toContain('lapCompleted');
     expect(leftEvents).not.toContain('runCompleted');
   });
+
+  it('tracks full-song session benchmark report, section breakdown, seekToBar, and resetPerfBenchmark', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(60);
+    const game = new Game({ input, bridge });
+
+    const noop = () => {};
+    const mockCtx = {
+      canvas: { width: 640, height: 360 },
+      save: noop,
+      restore: noop,
+      fillRect: noop,
+      strokeRect: noop,
+      fillText: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      ellipse: noop,
+      rect: noop,
+      clip: noop,
+      fill: noop,
+      stroke: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      setTransform: noop,
+      setLineDash: noop,
+      createLinearGradient: () => ({ addColorStop: noop }),
+      createRadialGradient: () => ({ addColorStop: noop }),
+      drawImage: noop,
+    } as unknown as CanvasRenderingContext2D;
+
+    game.render(mockCtx, 1, 60);
+    game.update(1 / 120);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.seekToBar(8);
+    expect(game.roadBarIndex).toBe(8);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+    game.render(mockCtx, 1, 60);
+
+    const report = game.getBenchmarkReport();
+    expect(report.session.frames).toBeGreaterThanOrEqual(2);
+    expect(report.session.avgFps).toBeGreaterThan(0);
+    expect(report.session.pct60Fps).toBeGreaterThanOrEqual(0);
+    expect(report.sections.length).toBeGreaterThan(0);
+
+    const snap = bridge.getSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap!.sessionAvgFps).toBeGreaterThan(0);
+    expect(snap!.pct60Fps).toBeGreaterThanOrEqual(0);
+
+    game.resetPerfBenchmark();
+    const resetReport = game.getBenchmarkReport();
+    expect(resetReport.session.frames).toBe(0);
+    expect(resetReport.session.droppedFrames).toBe(0);
+    expect(resetReport.sections.length).toBe(0);
+  });
 });

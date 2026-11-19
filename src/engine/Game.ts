@@ -1,6 +1,14 @@
 import type { BeatJudgementTier } from '@src/audio/BeatClock';
-import type { BeatMap, SectionRole } from '@src/audio/BeatMap';
-import { FunkAudioEngine, type DrivingAudioParams } from '@src/audio/FunkAudioEngine';
+import {
+  barToTime,
+  sectionAtBar,
+  type BeatMap,
+  type SectionRole,
+} from '@src/audio/BeatMap';
+import {
+  FunkAudioEngine,
+  type DrivingAudioParams,
+} from '@src/audio/FunkAudioEngine';
 import { TrackLibrary, type RunGrade, type StageScoreSummary } from '@src/audio/TrackLibrary';
 import {
   DEFAULT_CROSSFADE_BARS,
@@ -141,11 +149,96 @@ export interface TelemetrySnapshot {
   maxFrameMs: number;
   minFps: number;
   droppedFrames: number;
+  sessionAvgFps: number;
+  sessionMinFps: number;
+  pct60Fps: number;
   fixedStepsLastFrame: number;
   drawnSegments: number;
   drawnProps: number;
   drawnTrucks: number;
+  drawnPylonSpans: number;
+  crestClips: number;
   memoryMb: number | null;
+}
+
+export interface BenchmarkSectionSummary {
+  role: SectionRole;
+  bars: number;
+  frames: number;
+  avgFps: number;
+  avgFrameMs: number;
+  maxFrameMs: number;
+  avgProps: number;
+}
+
+export interface BenchmarkBarSummary {
+  barIndex: number;
+  role: SectionRole;
+  frames: number;
+  avgFps: number;
+  avgFrameMs: number;
+  maxFrameMs: number;
+  avgProps: number;
+}
+
+export interface PerfBenchmarkReport {
+  timestamp: string;
+  trackTitle: string;
+  trackArtist: string;
+  bpm: number;
+  totalBars: number;
+  roadBarIndex: number;
+  stagePaletteName: string;
+  isolation: {
+    renderBg: boolean;
+    renderRoad: boolean;
+    renderProps: boolean;
+    renderPylonWires: boolean;
+    renderTraffic: boolean;
+    renderCar: boolean;
+    renderParticles: boolean;
+    syncGpuProbe: boolean;
+    legacyRaster?: boolean;
+  };
+  session: {
+    frames: number;
+    durationSec: number;
+    avgFps: number;
+    minFps: number;
+    avgFrameMs: number;
+    p95FrameMs: number;
+    maxFrameMs: number;
+    pct60Fps: number;
+    droppedFrames: number;
+    histogram: {
+      fps60: number;
+      fps45to59: number;
+      fps30to44: number;
+      fpsBelow30: number;
+    };
+  };
+  latestFrame: {
+    fps: number;
+    frameTimeMs: number;
+    simTimeMs: number;
+    renderTimeMs: number;
+    compositorGapMs: number;
+    bgRenderMs: number;
+    roadRenderMs: number;
+    roadSlicesMs: number;
+    roadPropsMs: number;
+    roadTrafficMs: number;
+    carOverlayMs: number;
+    drawnSegments: number;
+    drawnProps: number;
+    drawnTrucks: number;
+    drawnPylonSpans: number;
+    crestClips: number;
+    activeParticles: number;
+    heapMb: number | null;
+  };
+  sections: BenchmarkSectionSummary[];
+  heaviestBars: BenchmarkBarSummary[];
 }
 
 function queryMemoryUsageMb(): number | null {
@@ -157,6 +250,16 @@ function queryMemoryUsageMb(): number | null {
     return Math.round((process.memoryUsage().heapUsed / (1024 * 1024)) * 10) / 10;
   }
   return null;
+}
+
+function flushCanvasGpu(ctx: CanvasRenderingContext2D): void {
+  if (typeof ctx.getImageData === 'function') {
+    try {
+      ctx.getImageData(0, 0, 1, 1);
+    } catch {
+      // Ignore if canvas is tainted or context forbids pixel readback
+    }
+  }
 }
 
 export type GameEvent =
@@ -299,12 +402,19 @@ export class Game {
   renderBg = true;
   renderRoad = true;
   renderProps = true;
+  renderPylonWires = true;
+  renderTraffic = true;
+  renderCar = true;
+  renderParticles = true;
+  syncGpuProbe = false;
+  legacyRaster = false;
   onTimingReset?: () => void;
   private readonly input: InputSource;
   private readonly roadRenderer = new RoadRenderer();
   private readonly background = new Background();
 
-  // M8 Performance Profiler metrics (zero GC ring buffer)
+  // M8 Performance Profiler metrics (zero GC ring buffer & full-song accumulators)
+  private static readonly MAX_BENCH_BARS = 256;
   private simTimeMs = 0;
   private simTimeAccumMs = 0;
   private simStepsSinceLastFrame = 0;
@@ -316,6 +426,18 @@ export class Game {
   private frameTimeMs = 16.67;
   private lastRenderTimestamp = 0;
   private droppedFrames = 0;
+  private sessionFrames = 0;
+  private sessionElapsedMs = 0;
+  private sessionMaxFrameMs = 0;
+  private sessionMinWindowFps = 60;
+  private frames60 = 0;
+  private frames45to60 = 0;
+  private frames30to45 = 0;
+  private framesBelow30 = 0;
+  private readonly barFrameCounts = new Uint32Array(Game.MAX_BENCH_BARS);
+  private readonly barFrameMsSum = new Float32Array(Game.MAX_BENCH_BARS);
+  private readonly barMaxFrameMs = new Float32Array(Game.MAX_BENCH_BARS);
+  private readonly barPropsSum = new Uint32Array(Game.MAX_BENCH_BARS);
   private readonly frameDtHistory = new Float32Array(120);
   private readonly frameDtScratch = new Float32Array(120);
   private frameDtCursor = 0;
@@ -323,6 +445,7 @@ export class Game {
   private lastBridgeJointSegment = -1;
   private memoryMb: number | null = null;
   private memoryCheckFrames = 0;
+  private benchmarkWarmupFrames = 0;
 
   private readonly controls: DriveControls = {
     left: false,
@@ -344,7 +467,7 @@ export class Game {
       void this.audio.pause();
     } else {
       void this.audio.resume();
-      this.lastRenderTimestamp = performance.now();
+      this.lastRenderTimestamp = 0;
       this.onTimingReset?.();
     }
     this.bridge.publish?.(this.buildSnapshot);
@@ -353,6 +476,184 @@ export class Game {
 
   togglePause(): void {
     this.setPaused(!this.isPaused);
+  }
+
+  /**
+   * Resets full-song & rolling-window performance accumulators cleanly (zero GC).
+   */
+  resetPerfBenchmark(): void {
+    this.droppedFrames = 0;
+    this.sessionFrames = 0;
+    this.sessionElapsedMs = 0;
+    this.sessionMaxFrameMs = 0;
+    this.sessionMinWindowFps = 60;
+    this.frames60 = 0;
+    this.frames45to60 = 0;
+    this.frames30to45 = 0;
+    this.framesBelow30 = 0;
+    this.frameDtHistory.fill(0);
+    this.frameDtCursor = 0;
+    this.frameDtCount = 0;
+    this.barFrameCounts.fill(0);
+    this.barFrameMsSum.fill(0);
+    this.barMaxFrameMs.fill(0);
+    this.barPropsSum.fill(0);
+    this.lastRenderTimestamp = 0;
+    this.benchmarkWarmupFrames = 2;
+    this.onTimingReset?.();
+  }
+
+  /**
+   * Jumps car position and audio clock to `barIndex` so diagnostics can sample any song section directly.
+   */
+  seekToBar(barIndex: number): void {
+    const maxBars = isSongTrack(this.track)
+      ? Math.max(1, this.track.totalBars)
+      : Math.max(1, this.activeRoadBeatMap.barEnergy.length);
+    const clampedBar = Math.max(0, Math.min(maxBars - 1, Math.floor(barIndex)));
+    if (isSongTrack(this.track)) {
+      const targetZ = clampedBar * this.track.barLengthWorld;
+      this.position = targetZ % this.track.length;
+      this.prevPosition = this.position;
+    }
+    this.car.x = 0;
+    this.car.prevX = 0;
+    const targetSec = Math.max(0, barToTime(this.activeRoadBeatMap, clampedBar));
+    this.audio.seekTo(targetSec);
+    this.syncController.resetForTrack(true, this.car.speedRatio > 0.25, 2.0);
+    this.updateRoadProgressTelemetry();
+    this.benchmarkWarmupFrames = 2;
+    this.renderDirty = true;
+    this.bridge.publish(this.buildSnapshot);
+  }
+
+  /**
+   * Returns a complete JSON-serializable breakdown of full-song framerate, section timing, and active frame telemetry.
+   */
+  getBenchmarkReport(): PerfBenchmarkReport {
+    const stats = this.computeSessionStats();
+    const roleTotals = new Map<
+      SectionRole,
+      { bars: number; frames: number; msSum: number; maxMs: number; propsSum: number }
+    >();
+    const barSummaries: BenchmarkBarSummary[] = [];
+    const maxTrackedBars = Math.min(
+      Game.MAX_BENCH_BARS,
+      isSongTrack(this.track) ? this.track.totalBars : Game.MAX_BENCH_BARS,
+    );
+
+    for (let i = 0; i < maxTrackedBars; i++) {
+      const count = this.barFrameCounts[i] ?? 0;
+      if (count <= 0) continue;
+      const msSum = this.barFrameMsSum[i] ?? 0;
+      const maxMs = this.barMaxFrameMs[i] ?? 0;
+      const propsSum = this.barPropsSum[i] ?? 0;
+      const avgMs = msSum / count;
+      const avgFps = avgMs > 0 ? Math.round((1000 / avgMs) * 10) / 10 : 0;
+      const role: SectionRole = sectionAtBar(this.activeRoadBeatMap, i)?.role ?? 'drop';
+
+      barSummaries.push({
+        barIndex: i,
+        role,
+        frames: count,
+        avgFps,
+        avgFrameMs: Math.round(avgMs * 100) / 100,
+        maxFrameMs: Math.round(maxMs * 100) / 100,
+        avgProps: Math.round((propsSum / count) * 10) / 10,
+      });
+
+      const prev = roleTotals.get(role) ?? {
+        bars: 0,
+        frames: 0,
+        msSum: 0,
+        maxMs: 0,
+        propsSum: 0,
+      };
+      prev.bars++;
+      prev.frames += count;
+      prev.msSum += msSum;
+      if (maxMs > prev.maxMs) prev.maxMs = maxMs;
+      prev.propsSum += propsSum;
+      roleTotals.set(role, prev);
+    }
+
+    const sections: BenchmarkSectionSummary[] = [];
+    for (const [role, agg] of roleTotals.entries()) {
+      const avgMs = agg.frames > 0 ? agg.msSum / agg.frames : 0;
+      sections.push({
+        role,
+        bars: agg.bars,
+        frames: agg.frames,
+        avgFps: avgMs > 0 ? Math.round((1000 / avgMs) * 10) / 10 : 0,
+        avgFrameMs: Math.round(avgMs * 100) / 100,
+        maxFrameMs: Math.round(agg.maxMs * 100) / 100,
+        avgProps: agg.frames > 0 ? Math.round((agg.propsSum / agg.frames) * 10) / 10 : 0,
+      });
+    }
+
+    barSummaries.sort((a, b) => b.avgFrameMs - a.avgFrameMs);
+    const windowStats = this.computeFrameWindowStats();
+
+    return {
+      timestamp: new Date().toISOString(),
+      trackTitle: this.activeRoadBeatMap.title,
+      trackArtist: this.activeRoadBeatMap.artist,
+      bpm: this.activeRoadBeatMap.bpm,
+      totalBars: this.totalBars,
+      roadBarIndex: this.roadBarIndex,
+      stagePaletteName: this.palette.name,
+      isolation: {
+        renderBg: this.renderBg,
+        renderRoad: this.renderRoad,
+        renderProps: this.renderProps,
+        renderPylonWires: this.renderPylonWires,
+        renderTraffic: this.renderTraffic,
+        renderCar: this.renderCar,
+        renderParticles: this.renderParticles,
+        syncGpuProbe: this.syncGpuProbe,
+        legacyRaster: this.legacyRaster,
+      },
+      session: {
+        frames: this.sessionFrames,
+        durationSec: Math.round((this.sessionElapsedMs / 1000) * 10) / 10,
+        avgFps: stats.sessionAvgFps,
+        minFps: stats.sessionMinFps,
+        avgFrameMs: Math.round(stats.sessionAvgFrameMs * 100) / 100,
+        p95FrameMs: windowStats.p95FrameMs,
+        maxFrameMs: Math.round(this.sessionMaxFrameMs * 10) / 10,
+        pct60Fps: stats.pct60Fps,
+        droppedFrames: this.droppedFrames,
+        histogram: {
+          fps60: this.frames60,
+          fps45to59: this.frames45to60,
+          fps30to44: this.frames30to45,
+          fpsBelow30: this.framesBelow30,
+        },
+      },
+      latestFrame: {
+        fps: this.lastFps,
+        frameTimeMs: Math.round(this.frameTimeMs * 10) / 10,
+        simTimeMs: Math.round(this.simTimeMs * 100) / 100,
+        renderTimeMs: Math.round(this.renderTimeMs * 100) / 100,
+        compositorGapMs:
+          Math.round(Math.max(0, this.frameTimeMs - this.simTimeMs - this.renderTimeMs) * 10) / 10,
+        bgRenderMs: Math.round(this.bgRenderMs * 100) / 100,
+        roadRenderMs: Math.round(this.roadRenderMs * 100) / 100,
+        roadSlicesMs: Math.round(this.roadRenderer.stats.slicesMs * 100) / 100,
+        roadPropsMs: Math.round(this.roadRenderer.stats.propsMs * 100) / 100,
+        roadTrafficMs: Math.round(this.roadRenderer.stats.trafficMs * 100) / 100,
+        carOverlayMs: Math.round(this.carOverlayMs * 100) / 100,
+        drawnSegments: this.roadRenderer.stats.drawnSegments,
+        drawnProps: this.roadRenderer.stats.drawnProps,
+        drawnTrucks: this.roadRenderer.stats.drawnTrucks,
+        drawnPylonSpans: this.roadRenderer.stats.drawnPylonSpans,
+        crestClips: this.roadRenderer.stats.crestClips,
+        activeParticles: this.particles.activeCount,
+        heapMb: this.memoryMb,
+      },
+      sections,
+      heaviestBars: barSummaries.slice(0, 12),
+    };
   }
 
   private readonly drivingAudioParams: DrivingAudioParams = {
@@ -557,6 +858,7 @@ export class Game {
       this.lap = 1;
       this.lapTime = 0;
       this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
+      this.resetPerfBenchmark();
     } else if (prevLength > 0) {
       const ratio = this.position / prevLength;
       this.position = (ratio * songTrack.length) % songTrack.length;
@@ -623,6 +925,7 @@ export class Game {
     this.nextTrackCache = null;
     this.activeNextTrackLookahead = undefined;
     this.hasStartedDriving = false;
+    this.resetPerfBenchmark();
     const first = this.library.selectTrack(0);
     this.audio.loadTrack(first.beatMap, first.audioBuffer);
     this.loadBeatMapRoad(first.beatMap, true);
@@ -998,7 +1301,9 @@ export class Game {
       this.forkChoice === 'right' ? this.getNextLookaheadTrack() : undefined;
 
     this.background.update(dt, playerSeg.curve, this.car.speedRatio, triggerExtremeLightning);
-    this.bridge.offer(this.simTime, this.buildSnapshot);
+    if (this.lastRenderTimestamp === 0) {
+      this.bridge.offer(this.simTime, this.buildSnapshot);
+    }
 
     const elapsed = performance.now() - t0;
     this.simStepsSinceLastFrame++;
@@ -1007,17 +1312,48 @@ export class Game {
 
   render = (ctx: CanvasRenderingContext2D, alpha = 1, fps = 0): void => {
     const t0 = performance.now();
+    const isFirstRender = this.lastRenderTimestamp <= 0;
     this.lastFps = fps;
     if (!this.isPaused && this.lastRenderTimestamp > 0) {
-      const dt = Math.min(t0 - this.lastRenderTimestamp, 100);
-      this.frameTimeMs = this.frameTimeMs * 0.85 + dt * 0.15;
-      this.frameDtHistory[this.frameDtCursor] = dt;
-      this.frameDtCursor = (this.frameDtCursor + 1) % this.frameDtHistory.length;
-      if (this.frameDtCount < this.frameDtHistory.length) {
-        this.frameDtCount++;
-      }
-      if (dt > 18.5) {
-        this.droppedFrames++;
+      if (this.benchmarkWarmupFrames > 0) {
+        this.benchmarkWarmupFrames--;
+        this.frameTimeMs = 16.67;
+      } else {
+        const dt = Math.min(t0 - this.lastRenderTimestamp, 100);
+        this.frameTimeMs = this.frameTimeMs * 0.85 + dt * 0.15;
+        this.frameDtHistory[this.frameDtCursor] = dt;
+        this.frameDtCursor = (this.frameDtCursor + 1) % this.frameDtHistory.length;
+        if (this.frameDtCount < this.frameDtHistory.length) {
+          this.frameDtCount++;
+        }
+        if (dt > 18.5) {
+          this.droppedFrames++;
+        }
+        this.sessionFrames++;
+        this.sessionElapsedMs += dt;
+        if (dt > this.sessionMaxFrameMs) {
+          this.sessionMaxFrameMs = dt;
+        }
+        if (dt <= 18.5) {
+          this.frames60++;
+        } else if (dt <= 22.5) {
+          this.frames45to60++;
+        } else if (dt <= 34.0) {
+          this.frames30to45++;
+        } else {
+          this.framesBelow30++;
+        }
+        if (fps > 0 && this.sessionFrames > 30 && fps < this.sessionMinWindowFps) {
+          this.sessionMinWindowFps = fps;
+        }
+        const benchBar = Math.min(Game.MAX_BENCH_BARS - 1, Math.max(0, this.roadBarIndex));
+        this.barFrameCounts[benchBar] = (this.barFrameCounts[benchBar] ?? 0) + 1;
+        this.barFrameMsSum[benchBar] = (this.barFrameMsSum[benchBar] ?? 0) + dt;
+        if (dt > (this.barMaxFrameMs[benchBar] ?? 0)) {
+          this.barMaxFrameMs[benchBar] = dt;
+        }
+        this.barPropsSum[benchBar] =
+          (this.barPropsSum[benchBar] ?? 0) + this.roadRenderer.stats.drawnProps;
       }
     } else if (fps > 0 && this.lastRenderTimestamp <= 0) {
       this.frameTimeMs = 1000 / fps;
@@ -1110,8 +1446,13 @@ export class Game {
       ctx.fillStyle = this.renderPalette.skyTop;
       ctx.fillRect(0, 0, width, height);
     }
+    if (this.syncGpuProbe) flushCanvasGpu(ctx);
     const tRoad0 = performance.now();
     this.view.skipProps = !this.renderProps;
+    this.view.skipPylonWires = !this.renderPylonWires;
+    this.view.skipTraffic = !this.renderTraffic;
+    this.view.syncGpuProbe = this.syncGpuProbe;
+    this.view.legacyRaster = this.legacyRaster;
     if (this.renderRoad) {
       this.roadRenderer.render(
         ctx,
@@ -1122,19 +1463,27 @@ export class Game {
         this.beatPulse,
       );
     }
+    if (this.syncGpuProbe) flushCanvasGpu(ctx);
     const tCar0 = performance.now();
-    drawPlayerCar(ctx, this.car, width, height, alpha);
+    if (this.renderCar) {
+      drawPlayerCar(ctx, this.car, width, height, alpha);
+    }
     const tFgWeather0 = performance.now();
     if (this.renderBg) {
       this.background.renderForegroundWeather(ctx, width, height);
     }
     const tParts0 = performance.now();
-    this.particles.render(ctx, alpha);
-    drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
+    if (this.renderParticles) {
+      this.particles.render(ctx, alpha);
+    }
+    if (this.renderCar) {
+      drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
+    }
 
     if (this.isPaused && this.hasStartedDriving) {
       drawPauseOverlay(ctx, width, height);
     }
+    if (this.syncGpuProbe) flushCanvasGpu(ctx);
 
     const tEnd = performance.now();
     const bgElapsed = tRoad0 - tBg0 + (tParts0 - tFgWeather0);
@@ -1146,6 +1495,12 @@ export class Game {
     this.roadRenderMs = this.roadRenderMs * 0.85 + roadElapsed * 0.15;
     this.carOverlayMs = this.carOverlayMs * 0.85 + carOverlayElapsed * 0.15;
     this.renderTimeMs = this.renderTimeMs * 0.85 + renderElapsed * 0.15;
+
+    if (isFirstRender) {
+      this.bridge.publish(this.buildSnapshot);
+    } else {
+      this.bridge.offer(this.simTime, this.buildSnapshot);
+    }
   };
 
   getForkZoneStartZ(): number | undefined {
@@ -1371,6 +1726,7 @@ export class Game {
   private readonly buildSnapshot = (): TelemetrySnapshot => {
     const activeHash = this.activeRoadBeatMap.contentHash;
     const curBest = this.library.getBestScore(activeHash);
+    const sessionStats = this.computeSessionStats();
     let forkLeftOption: ForkOptionInfo | null = null;
     let forkRightOption: ForkOptionInfo | null = null;
     if (this.forkActive) {
@@ -1491,13 +1847,42 @@ export class Game {
       frameTimeMs: Math.round(this.frameTimeMs * 10) / 10,
       ...this.computeFrameWindowStats(),
       droppedFrames: this.droppedFrames,
+      sessionAvgFps: sessionStats.sessionAvgFps,
+      sessionMinFps: sessionStats.sessionMinFps,
+      pct60Fps: sessionStats.pct60Fps,
       fixedStepsLastFrame: this.fixedStepsLastFrame,
       drawnSegments: this.roadRenderer.stats.drawnSegments,
       drawnProps: this.roadRenderer.stats.drawnProps,
       drawnTrucks: this.roadRenderer.stats.drawnTrucks,
+      drawnPylonSpans: this.roadRenderer.stats.drawnPylonSpans,
+      crestClips: this.roadRenderer.stats.crestClips,
       memoryMb: this.memoryMb,
     };
   };
+
+  private computeSessionStats(): {
+    sessionAvgFps: number;
+    sessionMinFps: number;
+    sessionAvgFrameMs: number;
+    pct60Fps: number;
+  } {
+    if (this.sessionFrames > 0 && this.sessionElapsedMs > 0) {
+      const avgMs = this.sessionElapsedMs / this.sessionFrames;
+      return {
+        sessionAvgFps: Math.round((1000 / avgMs) * 10) / 10,
+        sessionMinFps:
+          this.sessionFrames > 30 ? Math.round(this.sessionMinWindowFps) : this.lastFps || 60,
+        sessionAvgFrameMs: avgMs,
+        pct60Fps: Math.round((this.frames60 / this.sessionFrames) * 1000) / 10,
+      };
+    }
+    return {
+      sessionAvgFps: this.lastFps,
+      sessionMinFps: this.lastFps,
+      sessionAvgFrameMs: this.frameTimeMs,
+      pct60Fps: this.frameTimeMs <= 18.5 ? 100 : 0,
+    };
+  }
 
   private computeFrameWindowStats(): {
     p95FrameMs: number;

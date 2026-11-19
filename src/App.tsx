@@ -5,7 +5,12 @@ import { TELEMETRY_HZ } from '@src/config/constants';
 import { AssetPreloader, type PreloadProgress } from '@src/core/AssetPreloader';
 import type { AutopilotMode } from '@src/core/AutopilotDriver';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
-import type { Game, GameEvent, TelemetrySnapshot } from '@src/engine/Game';
+import type {
+  Game,
+  GameEvent,
+  PerfBenchmarkReport,
+  TelemetrySnapshot,
+} from '@src/engine/Game';
 import type { SodaSkin } from '@src/entities/MelonSoda';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BeatMapInspector } from './ui/BeatMapInspector';
@@ -16,6 +21,34 @@ import { HUD } from './ui/HUD';
 import { MainMenu } from './ui/MainMenu';
 import { RadioSelector } from './ui/RadioSelector';
 import { TrackLoader } from './ui/TrackLoader';
+
+export interface MayonakaDiagIsolation {
+  renderBg?: boolean;
+  renderRoad?: boolean;
+  renderProps?: boolean;
+  renderPylonWires?: boolean;
+  renderTraffic?: boolean;
+  renderCar?: boolean;
+  renderParticles?: boolean;
+  syncGpuProbe?: boolean;
+  legacyRaster?: boolean;
+}
+
+export interface MayonakaDiagApi {
+  getSnapshot: () => TelemetrySnapshot | null;
+  getFullReport: () => PerfBenchmarkReport;
+  resetBenchmark: () => void;
+  setIsolation: (opts: MayonakaDiagIsolation) => void;
+  seekToBar: (barIndex: number) => void;
+  loadTestTrack: (query: string) => Promise<boolean>;
+  game: Game;
+}
+
+declare global {
+  interface Window {
+    __MAYONAKA_DIAG__?: MayonakaDiagApi;
+  }
+}
 
 export function App() {
   const [bridge] = useState(() => new TelemetryBridge<TelemetrySnapshot, GameEvent>(TELEMETRY_HZ));
@@ -49,7 +82,7 @@ export function App() {
 
   const [debugOpen, setDebugOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
-    const hasDebugParam = params.has('debug');
+    const hasDebugParam = params.has('debug') || params.has('profiler');
     if (hasDebugParam) loadSavedTuning();
     return hasDebugParam;
   });
@@ -144,21 +177,62 @@ export function App() {
     }
   }, [trackLoaderOpen, inspectorOpen, preloadReady, gameStarted, isInitialSelect]);
 
+  const loadTestTrack = useCallback(
+    async (query: string): Promise<boolean> => {
+      try {
+        const gtRes = await fetch('/test-tracks/ground-truth.json');
+        if (!gtRes.ok) return false;
+        const gtData = (await gtRes.json()) as {
+          tracks?: Array<{ file?: string; notes?: string }>;
+        };
+        const norm = query.trim().toLowerCase();
+        const entry = gtData.tracks?.find(
+          (t) =>
+            (t.file && t.file.toLowerCase().includes(norm)) ||
+            (t.notes && t.notes.toLowerCase().includes(norm)),
+        );
+        if (!entry?.file) return false;
+
+        const audioRes = await fetch(`/test-tracks/${encodeURIComponent(entry.file)}`);
+        if (!audioRes.ok) return false;
+        const blob = await audioRes.blob();
+        const mime = entry.file.toLowerCase().endsWith('.wav') ? 'audio/wav' : 'audio/mpeg';
+        const file = new File([blob], entry.file, { type: mime });
+        const imported = await library.importFiles([file]);
+        const item = imported[0];
+        if (!item) return false;
+
+        audio.loadTrack(item.beatMap, item.audioBuffer);
+        gameRef.current?.loadBeatMapRoad(item.beatMap, true);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [audio, library],
+  );
+
   useEffect(() => {
     void preloader
       .preloadAll((p) => {
         setPreloadProgress({ ...p });
       })
-      .then(() => {
-        void library.loadBundledDefaults();
+      .then(async () => {
+        await library.loadBundledDefaults();
         setPreloadReady(true);
+        const params = new URLSearchParams(window.location.search);
+        const trackQuery = params.get('track') ?? params.get('testTrack');
+        if (trackQuery && trackQuery.trim().length > 0) {
+          await loadTestTrack(trackQuery);
+        }
       });
-  }, [preloader, library]);
+  }, [preloader, library, loadTestTrack]);
 
   useEffect(() => {
     return () => {
       audio.dispose();
       library.dispose();
+      delete window.__MAYONAKA_DIAG__;
     };
   }, [audio, library]);
 
@@ -243,6 +317,43 @@ export function App() {
             if (params.has('nobg')) game.renderBg = false;
             if (params.has('noroad')) game.renderRoad = false;
             if (params.has('noprops')) game.renderProps = false;
+            if (params.has('nowires')) game.renderPylonWires = false;
+            if (params.has('notraffic')) game.renderTraffic = false;
+            if (params.has('nocar')) game.renderCar = false;
+            if (params.has('legacy')) game.legacyRaster = true;
+            if (params.has('autopilot')) {
+              const apVal = params.get('autopilot')?.trim().toLowerCase();
+              const mode: AutopilotMode =
+                apVal === 'aggressive' || apVal === 'relaxed' ? apVal : 'perfect';
+              game.setAutopilotMode(mode);
+              if (!game.isAutopilotActive) {
+                game.toggleAutopilot();
+              }
+            }
+            window.__MAYONAKA_DIAG__ = {
+              getSnapshot: () => bridge.getSnapshot(),
+              getFullReport: () => game.getBenchmarkReport(),
+              resetBenchmark: () => game.resetPerfBenchmark(),
+              setIsolation: (opts) => {
+                if (opts.renderBg !== undefined) game.renderBg = opts.renderBg;
+                if (opts.renderRoad !== undefined) game.renderRoad = opts.renderRoad;
+                if (opts.renderProps !== undefined) game.renderProps = opts.renderProps;
+                if (opts.renderPylonWires !== undefined) {
+                  game.renderPylonWires = opts.renderPylonWires;
+                }
+                if (opts.renderTraffic !== undefined) game.renderTraffic = opts.renderTraffic;
+                if (opts.renderCar !== undefined) game.renderCar = opts.renderCar;
+                if (opts.renderParticles !== undefined) {
+                  game.renderParticles = opts.renderParticles;
+                }
+                if (opts.syncGpuProbe !== undefined) game.syncGpuProbe = opts.syncGpuProbe;
+                if (opts.legacyRaster !== undefined) game.legacyRaster = opts.legacyRaster;
+                game.resetPerfBenchmark();
+              },
+              seekToBar: (barIndex: number) => game.seekToBar(barIndex),
+              loadTestTrack,
+              game,
+            };
             if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {
               game.setPaused(true);
             }

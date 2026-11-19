@@ -151,14 +151,37 @@ function drawPalm(
   const topX = x + lean;
   const topY = y - h;
 
-  // Ground shadow pixel pad
-  if (trunkW >= 2) {
+  // Ground shadow pixel pad (skip on distant props)
+  if (ppu >= 0.016 && trunkW >= 2) {
     ctx.fillStyle = 'rgba(8, 2, 20, 0.55)';
     ctx.fillRect(Math.round(x - trunkW * 1.4), Math.round(y - 1), Math.round(trunkW * 2.8), Math.max(2, Math.round(trunkW * 0.45)));
   }
 
+  const leaf = 1320 * ppu;
+  const leafColor = PALM_LEAVES[variant % PALM_LEAVES.length]!;
+  const shadeColor = PALM_LEAF_SHADE[variant % PALM_LEAF_SHADE.length]!;
+
+  // Distant Low LOD: rect-only trunk & compact crown (eliminates per-ring beginPath/fill and 48 frond rects)
+  if (leaf < 14) {
+    const midY = Math.round(y - h * 0.5);
+    const midX = Math.round(x + lean * 0.25);
+    ctx.fillStyle = PALM_TRUNK;
+    ctx.fillRect(Math.round(x - trunkW * 0.5), midY, Math.max(1, Math.round(trunkW)), Math.max(2, Math.round(h * 0.5)));
+    ctx.fillRect(Math.round(midX - trunkW * 0.4), Math.round(topY), Math.max(1, Math.round(trunkW * 0.85)), Math.max(2, Math.round(midY - topY)));
+    const cw = Math.max(4, Math.round(leaf * 1.5));
+    const ch = Math.max(3, Math.round(leaf * 0.8));
+    const cx = Math.round(topX - cw * 0.5);
+    const cy = Math.round(topY - ch * 0.4);
+    ctx.fillStyle = shadeColor;
+    ctx.fillRect(cx, cy + 1, cw, ch);
+    ctx.fillStyle = leafColor;
+    ctx.fillRect(cx, cy, cw, Math.max(1, ch - 1));
+    return;
+  }
+
   // Continuous tapered curved trunk with alternating bark rings
-  const rings = trunkW >= 5 ? 8 : trunkW >= 2.5 ? 5 : trunkW >= 1.2 ? 3 : 1;
+  const isNearPalm = leaf >= 32;
+  const rings = isNearPalm ? (trunkW >= 5 ? 6 : 4) : 2;
   for (let r = 0; r < rings; r++) {
     const t0 = r / rings;
     const t1 = (r + 1) / rings;
@@ -180,8 +203,8 @@ function drawPalm(
     ctx.closePath();
     ctx.fill();
 
-    // Highlight ridge along inner or outer curve
-    if (w0 >= 3.5 || w1 >= 3.5) {
+    // Highlight ridge along inner or outer curve (near LOD only)
+    if (isNearPalm && (w0 >= 3.5 || w1 >= 3.5)) {
       ctx.fillStyle = PALM_TRUNK_LIGHT;
       const hiW0 = Math.max(1, w0 * 0.32);
       const hiW1 = Math.max(1, w1 * 0.32);
@@ -198,31 +221,16 @@ function drawPalm(
   }
 
   // Pixel-art palm crown & fronds
-  const leaf = 1320 * ppu;
-  const leafColor = PALM_LEAVES[variant % PALM_LEAVES.length]!;
-  const shadeColor = PALM_LEAF_SHADE[variant % PALM_LEAF_SHADE.length]!;
-
-  if (leaf < 6) {
-    const cw = Math.max(3, Math.round(leaf * 1.6));
-    const ch = Math.max(2, Math.round(leaf * 0.85));
-    const cx = Math.round(topX - cw * 0.5);
-    const cy = Math.round(topY - ch * 0.4);
-    ctx.fillStyle = shadeColor;
-    ctx.fillRect(cx, cy + 1, cw, ch);
-    ctx.fillStyle = leafColor;
-    ctx.fillRect(cx, cy, cw, Math.max(1, ch - 1));
-    return;
-  }
-
-  if (trunkW >= 3) {
+  if (isNearPalm && trunkW >= 3) {
     const cocoR = Math.max(2, Math.round(trunkW * 0.55));
     ctx.fillStyle = '#240b36';
     ctx.fillRect(Math.round(topX - cocoR), Math.round(topY - cocoR * 0.4), cocoR * 2, cocoR);
   }
 
-  const steps = leaf >= 18 ? 4 : 2;
-  for (let i = 0; i < 6; i++) {
-    const a = -Math.PI + (i / 5) * Math.PI;
+  const fronds = isNearPalm ? 6 : 4;
+  const steps = isNearPalm ? 3 : 2;
+  for (let i = 0; i < fronds; i++) {
+    const a = -Math.PI + (i / Math.max(1, fronds - 1)) * Math.PI;
     const cosA = Math.cos(a);
     const sinA = Math.sin(a);
     const tipX = topX + cosA * leaf;
@@ -269,11 +277,11 @@ export function drawStreetTree(
   const crownShade = STREET_TREE_CROWN_SHADE[v]!;
   const crownRim = STREET_TREE_CROWN_RIM[v]!;
 
-  // Distant Low LOD: compact 2-rect silhouette for distant city verge
-  if (h < 12) {
+  // Distant Low LOD: compact 3-rect silhouette for distant city verge
+  if (h < 28) {
     const trunkW = 1;
-    const crownW = Math.max(2, Math.round(h * 0.7));
-    const crownH = Math.max(2, Math.round(h * 0.65));
+    const crownW = Math.max(3, Math.round(h * 0.7));
+    const crownH = Math.max(3, Math.round(h * 0.65));
     ctx.fillStyle = STREET_TREE_TRUNK;
     ctx.fillRect(rx, Math.round(y - h * 0.45), trunkW, Math.round(h * 0.45));
     ctx.fillStyle = crownShade;
@@ -283,19 +291,39 @@ export function drawStreetTree(
     return;
   }
 
+  // Mid LOD: trunk + layered dome without planter glow or branch forks
+  if (h < 56) {
+    const trunkW = Math.max(2, Math.round(110 * ppu));
+    const trunkH = Math.max(4, Math.round(h * 0.42));
+    ctx.fillStyle = STREET_TREE_TRUNK;
+    ctx.fillRect(Math.round(x - trunkW * 0.5), ry - trunkH, trunkW, trunkH);
+    const crownW = Math.max(6, Math.round(2200 * ppu));
+    const crownH = Math.max(5, Math.round(1800 * ppu));
+    const crownLeft = Math.round(x - crownW * 0.5);
+    ctx.fillStyle = crownShade;
+    ctx.fillRect(crownLeft, Math.round(topY + crownH * 0.35), crownW, Math.round(crownH * 0.65));
+    ctx.fillStyle = crownBody;
+    ctx.fillRect(crownLeft + 1, topY, Math.max(1, crownW - 2), Math.round(crownH * 0.65));
+    ctx.fillStyle = crownRim;
+    ctx.fillRect(Math.round(x - crownW * 0.25), topY, Math.round(crownW * 0.5), 1);
+    return;
+  }
+
   // 1. Sidewalk Planter Curb & Ground Light Ring (cast by street lamps / car lights)
   const planterW = Math.max(4, Math.round(540 * ppu));
   const planterH = Math.max(2, Math.round(70 * ppu));
   const glowW = Math.round(planterW * 1.7);
 
-  // Street ambient glow pool under tree
-  ctx.fillStyle = STREET_TREE_GROUND_GLOW;
-  ctx.fillRect(
-    Math.round(x - glowW * 0.5),
-    ry - 1,
-    glowW,
-    Math.max(2, Math.round(planterH * 0.8)),
-  );
+  // Street ambient glow pool under tree (skip translucent glow below 0.016 ppu)
+  if (ppu >= 0.016) {
+    ctx.fillStyle = STREET_TREE_GROUND_GLOW;
+    ctx.fillRect(
+      Math.round(x - glowW * 0.5),
+      ry - 1,
+      glowW,
+      Math.max(2, Math.round(planterH * 0.8)),
+    );
+  }
 
   // Planter concrete box
   const planterLeft = Math.round(x - planterW * 0.5);
@@ -458,7 +486,7 @@ export function drawPine(
   const pineRim = PINE_CROWN_RIM[v]!;
 
   // Distant Low LOD: stepped pagoda/triangle silhouette for far touge hillside
-  if (h < 12) {
+  if (h < 28) {
     const trunkW = 1;
     ctx.fillStyle = PINE_TRUNK;
     ctx.fillRect(rx, topY + Math.round(h * 0.5), trunkW, Math.round(h * 0.5));
@@ -477,15 +505,38 @@ export function drawPine(
     return;
   }
 
-  // 1. Root flare base & rocky ground shadow
-  const rootW = Math.max(3, Math.round(280 * ppu));
-  ctx.fillStyle = 'rgba(8, 3, 18, 0.55)';
-  ctx.fillRect(
-    Math.round(x - rootW * 0.7),
-    ry - 1,
-    Math.round(rootW * 1.4),
-    Math.max(1, Math.round(rootW * 0.22)),
-  );
+  // Mid LOD: rect trunk & 3 cloud tiers without beginPath/fill or ground shadow
+  if (h < 56) {
+    const trunkW = Math.max(1, Math.round(110 * ppu));
+    ctx.fillStyle = PINE_TRUNK;
+    ctx.fillRect(Math.round(x - trunkW * 0.5), topY + Math.round(h * 0.35), trunkW, Math.round(h * 0.65));
+    for (let i = 0; i < 3; i++) {
+      const tier = PINE_TIERS[i]!;
+      const padW = Math.max(4, Math.round(tier[1] * ppu));
+      const padH = Math.max(2, Math.round(tier[2] * ppu));
+      const padY = Math.round(ry - h * tier[0]);
+      const padLeft = Math.round(x - padW * 0.5);
+      ctx.fillStyle = pineShade;
+      ctx.fillRect(padLeft, Math.round(padY - padH * 0.35), padW, Math.round(padH * 0.65));
+      ctx.fillStyle = pineBody;
+      ctx.fillRect(padLeft + 1, Math.round(padY - padH * 0.85), Math.max(2, padW - 2), Math.round(padH * 0.65));
+      ctx.fillStyle = pineRim;
+      ctx.fillRect(Math.round(x - padW * 0.3), Math.round(padY - padH * 0.85), Math.max(2, Math.round(padW * 0.6)), 1);
+    }
+    return;
+  }
+
+  // 1. Root flare base & rocky ground shadow (near LOD only)
+  if (ppu >= 0.016) {
+    const rootW = Math.max(3, Math.round(280 * ppu));
+    ctx.fillStyle = 'rgba(8, 3, 18, 0.55)';
+    ctx.fillRect(
+      Math.round(x - rootW * 0.7),
+      ry - 1,
+      Math.round(rootW * 1.4),
+      Math.max(1, Math.round(rootW * 0.22)),
+    );
+  }
 
   // 2. Gnarled / Curving Pine Trunk (windswept towards road or mountain slope)
   const leanDir = variant % 2 === 0 ? (side < 0 ? 1 : -1) : (side < 0 ? -1 : 1);
@@ -594,12 +645,25 @@ function drawLamp(
   const ry = Math.round(y);
   const topY = Math.round(y - h);
 
-  // Distant Low LOD: compact 2-rect silhouette for horizon lamps (< 10px tall)
-  if (h < 10) {
+  // Distant Low LOD: compact 2-rect silhouette for horizon lamps
+  if (h < 24) {
     ctx.fillStyle = LAMP_POLE;
     ctx.fillRect(rx, topY, 1, Math.max(2, Math.round(h)));
     ctx.fillStyle = LAMP_LIGHT;
-    ctx.fillRect(Math.round(rx + arm), topY, 2, 1);
+    ctx.fillRect(Math.round(rx + arm - 1), topY, 3, 1);
+    return;
+  }
+
+  // Mid LOD: pole + cantilever arm + crisp light head (skips plinth, strut & translucent halos)
+  if (h < 52) {
+    ctx.fillStyle = LAMP_POLE;
+    ctx.fillRect(Math.round(rx - w * 0.5), topY, w, Math.round(h));
+    const armStartX = Math.round(Math.min(rx, rx + arm));
+    const armW = Math.max(2, Math.round(Math.abs(arm)));
+    ctx.fillRect(armStartX, topY, armW, w);
+    const lwMid = Math.max(2, Math.round(280 * ppu));
+    ctx.fillStyle = LAMP_LIGHT;
+    ctx.fillRect(Math.round(rx + arm - lwMid * 0.5), topY + w, lwMid, Math.max(1, Math.round(75 * ppu)));
     return;
   }
 
@@ -639,7 +703,7 @@ function drawLamp(
   const lampX = Math.round(rx + arm - lw * 0.5);
   const lampY = topY + w;
 
-  if (lw >= 6) {
+  if (ppu >= 0.016 && lw >= 6) {
     ctx.fillStyle = 'rgba(255, 243, 176, 0.22)';
     ctx.fillRect(lampX - Math.round(lw * 0.45), lampY - lh, Math.round(lw * 1.9), lh * 4);
     ctx.fillStyle = 'rgba(5, 217, 232, 0.25)';
@@ -674,7 +738,7 @@ function drawBillboard(
   ctx.fillStyle = BILLBOARD_FRAME;
   ctx.fillRect(leftLegX, ry - legH, legW, legH);
   ctx.fillRect(rightLegX, ry - legH, legW, legH);
-  if (legH >= 6) {
+  if (w >= 32 && legH >= 6) {
     ctx.fillStyle = '#3d3358';
     ctx.fillRect(leftLegX, Math.round(ry - legH * 0.55), rightLegX - leftLegX + legW, Math.max(1, Math.round(legW * 0.45)));
   }
@@ -682,7 +746,7 @@ function drawBillboard(
   ctx.fillStyle = BILLBOARD_FRAME;
   ctx.fillRect(left, top, w, h);
 
-  if (w >= 16) {
+  if (w >= 32) {
     ctx.fillStyle = '#fff3b0';
     ctx.fillRect(Math.round(rx - w * 0.28), top - Math.max(1, Math.round(legW * 0.5)), Math.max(2, legW), Math.max(1, Math.round(legW * 0.5)));
     ctx.fillRect(Math.round(rx + w * 0.22), top - Math.max(1, Math.round(legW * 0.5)), Math.max(2, legW), Math.max(1, Math.round(legW * 0.5)));
@@ -699,6 +763,9 @@ function drawBillboard(
   const v = variant % BILLBOARD_FACE.length;
   ctx.fillStyle = BILLBOARD_FACE[v]!;
   ctx.fillRect(innerX, innerY, innerW, innerH);
+
+  // Distant Low LOD: 2 legs + frame + inner face only
+  if (w < 32) return;
 
   if (innerW >= 12 && innerH >= 6) {
     if (v === 0) {
@@ -796,12 +863,39 @@ function drawBuilding(
     const usableW = Math.max(4, w - trimW);
     const facadeLeft = side < 0 ? left : left + trimW;
 
-    // Distant Low LOD: simple warm storefront glow strip
-    if (w < 16 || h < 30) {
+    // Distant Low LOD: compact facade silhouette (5 rects)
+    if (w < 28 || h < 48) {
       ctx.fillStyle = BUILDING_SIGN_BG[v]!;
-      ctx.fillRect(left, topY, w, Math.max(1, Math.round(roofH * 0.5)));
+      ctx.fillRect(left, topY + Math.round(h * 0.2), Math.max(2, Math.round(w * 0.16)), Math.max(4, Math.round(h * 0.38)));
       ctx.fillStyle = '#fff4cc';
-      ctx.fillRect(facadeLeft + 1, ry - Math.max(2, Math.round(h * 0.15)), usableW - 2, Math.max(1, Math.round(h * 0.1)));
+      ctx.fillRect(facadeLeft + 1, ry - Math.max(2, Math.round(h * 0.16)), usableW - 2, Math.max(2, Math.round(h * 0.12)));
+      return;
+    }
+
+    // Mid LOD: awning, shopfront, 3 continuous window ribbons, blade sign (zero 15-window/kanji grids)
+    if (w < 54 || h < 90) {
+      const shopH = Math.max(5, Math.round(h * 0.22));
+      const shopY = ry - shopH;
+      const awnH = Math.max(2, Math.round(shopH * 0.28));
+      ctx.fillStyle = BUILDING_AWNING[v]!;
+      ctx.fillRect(left, shopY, w, awnH);
+      ctx.fillStyle = '#fff4cc';
+      ctx.fillRect(facadeLeft + 2, shopY + awnH + 1, Math.max(3, usableW - 4), Math.max(2, shopH - awnH - 2));
+
+      const upperH = shopY - (topY + roofH);
+      for (let f = 0; f < 3; f++) {
+        const wy = Math.round(topY + roofH + f * (upperH / 3) + upperH * 0.1);
+        ctx.fillStyle = f % 2 === 0 ? '#ffeaa7' : '#00f5d4';
+        ctx.fillRect(facadeLeft + 2, wy, Math.max(2, usableW - 4), Math.max(2, Math.round(upperH * 0.12)));
+      }
+      const signW = Math.max(3, Math.round(w * 0.18));
+      const signH = Math.max(8, Math.round(h * 0.44));
+      const signY = topY + Math.round(h * 0.16);
+      const signX = side < 0 ? left + w - signW + 1 : left - 1;
+      ctx.fillStyle = BUILDING_SIGN_BG[v]!;
+      ctx.fillRect(signX, signY, signW, signH);
+      ctx.fillStyle = '#ff0055';
+      ctx.fillRect(left + Math.round(w * 0.5) - 1, topY - 3, 2, 2);
       return;
     }
 
@@ -897,6 +991,13 @@ function drawBuilding(
     ctx.fillRect(left, topY + crownH, w, h - crownH); // Lower main tower body
     ctx.fillRect(crownLeft, topY, crownW, crownH);    // Upper setback crown
 
+    // Distant Low LOD: sleek tower silhouette + crown accent (4 rects total)
+    if (w < 28 || h < 48) {
+      ctx.fillStyle = '#00f5d4';
+      ctx.fillRect(crownLeft + Math.round(crownW * 0.2), topY + Math.round(crownH * 0.4), Math.max(2, Math.round(crownW * 0.6)), 2);
+      return;
+    }
+
     // Skyscraper Structural Edge Trim (Cobalt Neon)
     ctx.fillStyle = '#19284e';
     const trimW = Math.max(1, Math.round(w * 0.05));
@@ -909,8 +1010,23 @@ function drawBuilding(
     // Crown setback ledge horizontal trim
     ctx.fillRect(side < 0 ? left : left + crownW, topY + crownH, setbackW, Math.max(1, Math.round(trimW * 0.6)));
 
-    // Continuous Horizontal Illuminated Ribbon Windows (Cyan & Ice Blue Bands: fixed 6 bands)
-    if (w >= 14 && h >= 30) {
+    // Mid LOD: 3 continuous ribbon bands & beacons (zero 18-rect vertical mullions)
+    if (w < 54 || h < 90) {
+      const availH = h - crownH - Math.round(h * 0.09);
+      const bandLeft = left + Math.max(2, Math.round(w * 0.08));
+      const bandW = Math.max(2, w - Math.max(4, Math.round(w * 0.16)));
+      for (let b = 0; b < 3; b++) {
+        const by = Math.round(topY + crownH + Math.round(h * 0.04) + b * (availH / 3));
+        ctx.fillStyle = b % 2 === 0 ? '#00f5d4' : '#3a86ff';
+        ctx.fillRect(bandLeft, by, bandW, Math.max(2, Math.round(availH * 0.14)));
+      }
+      ctx.fillStyle = '#ff0055';
+      ctx.fillRect(crownLeft + 1, topY - 2, 2, 2);
+      return;
+    }
+
+    // Full LOD: 6 Continuous Horizontal Illuminated Ribbon Windows + Mullions + Logo
+    {
       const bands = 6;
       const padTop = Math.round(h * 0.04);
       const padBottom = Math.round(h * 0.05);
@@ -971,6 +1087,36 @@ function drawBuilding(
     ctx.fillStyle = '#181024';
     ctx.fillRect(left, topY, w, h);
 
+    // Distant Low LOD: brick mass + magenta billboard block (3 rects)
+    if (w < 28 || h < 48) {
+      const boardW = Math.max(6, Math.round(w * 0.72));
+      const boardH = Math.max(4, Math.round(h * 0.25));
+      ctx.fillStyle = '#ff007f';
+      ctx.fillRect(left + Math.round((w - boardW) * 0.5), topY - boardH - 1, boardW, boardH);
+      ctx.fillStyle = '#ffbe0b';
+      ctx.fillRect(left + 2, ry - Math.max(3, Math.round(h * 0.2)), Math.max(2, w - 4), Math.max(2, Math.round(h * 0.12)));
+      return;
+    }
+
+    // Mid LOD: horizontal floor sills, 2 amber window strips & billboard face (zero 12-window/AC/fire-escape loops)
+    if (w < 54 || h < 90) {
+      ctx.fillStyle = '#2c1e40';
+      ctx.fillRect(left, topY + Math.round(h * 0.35), w, Math.max(1, Math.round(h * 0.03)));
+      ctx.fillRect(left, topY + Math.round(h * 0.7), w, Math.max(1, Math.round(h * 0.03)));
+      ctx.fillStyle = '#ffbe0b';
+      ctx.fillRect(left + 3, topY + Math.round(h * 0.14), Math.max(2, w - 6), Math.max(2, Math.round(h * 0.09)));
+      ctx.fillRect(left + 3, topY + Math.round(h * 0.48), Math.max(2, w - 6), Math.max(2, Math.round(h * 0.09)));
+      const boardW = Math.max(8, Math.round(w * 0.75));
+      const boardH = Math.max(5, Math.round(h * 0.26));
+      const boardX = left + Math.round((w - boardW) * 0.5);
+      const boardY = topY - boardH - 2;
+      ctx.fillStyle = '#ff007f';
+      ctx.fillRect(boardX, boardY, boardW, boardH);
+      ctx.fillStyle = '#ffe600';
+      ctx.fillRect(boardX + 2, boardY + Math.round(boardH * 0.25), Math.max(2, boardW - 4), Math.max(2, Math.round(boardH * 0.5)));
+      return;
+    }
+
     // Weathered horizontal floor dividing sills
     ctx.fillStyle = '#2c1e40';
     for (let f = 1; f <= 4; f++) {
@@ -981,8 +1127,8 @@ function drawBuilding(
     const escapeW = Math.max(3, Math.round(w * 0.18));
     const escapeX = side < 0 ? left + 2 : left + w - escapeW - 2;
 
-    // Windows with protruding air-conditioner units (strictly within window zone)
-    if (w >= 16 && h >= 25) {
+    // Full LOD: Windows, AC boxes, fire escape stairs & kanji billboard
+    {
       const rows = 4;
       const cols = 3;
       const winZoneW = w - escapeW - 8;
@@ -1219,6 +1365,22 @@ function drawGantry(
   ctx.fillRect(leftLegX, topY, legW, h);
   ctx.fillRect(rightLegX, topY, legW, h);
 
+  const beamH = Math.max(3, Math.round(520 * ppu));
+  const signH = Math.max(4, Math.round(1350 * ppu));
+  const signW = Math.max(8, Math.round(spanW * 0.38));
+  const signY = topY + beamH + Math.max(1, Math.round(120 * ppu));
+  const leftSignX = Math.round(x - signW - spanW * 0.04);
+  const rightSignX = Math.round(x + spanW * 0.04);
+
+  // Distant Low LOD: 2 legs + beam + 2 green sign rects (skips plinths, borders, and glyphs)
+  if (spanW < 85) {
+    ctx.fillRect(leftLegX, topY, spanW, beamH);
+    ctx.fillStyle = GANTRY_SIGN_GREEN;
+    ctx.fillRect(leftSignX, signY, signW, signH);
+    ctx.fillRect(rightSignX, signY, signW, signH);
+    return;
+  }
+
   // Concrete foundation plinths at ground
   const plinthH = Math.max(2, Math.round(h * 0.08));
   ctx.fillStyle = '#120d22';
@@ -1226,26 +1388,18 @@ function drawGantry(
   ctx.fillRect(rightLegX - 1, y - plinthH, legW + 2, plinthH);
 
   // Overhead Horizontal Steel Truss Beam
-  const beamH = Math.max(3, Math.round(520 * ppu));
   ctx.fillStyle = GANTRY_STEEL;
   ctx.fillRect(leftLegX, topY, spanW, beamH);
   ctx.fillStyle = GANTRY_STEEL_LIGHT;
   ctx.fillRect(leftLegX, topY, spanW, Math.max(1, Math.round(beamH * 0.25)));
 
-  // Suspended Highway Overhead Directional Signs (Shuto Expressway Emerald Green)
-  const signH = Math.max(4, Math.round(1350 * ppu));
-  const signW = Math.max(8, Math.round(spanW * 0.38));
-  const signY = topY + beamH + Math.max(1, Math.round(120 * ppu));
-
   // Left Sign: Destination / Expressway Route
-  const leftSignX = Math.round(x - signW - spanW * 0.04);
   ctx.fillStyle = GANTRY_SIGN_BORDER;
   ctx.fillRect(leftSignX - 1, signY - 1, signW + 2, signH + 2);
   ctx.fillStyle = GANTRY_SIGN_GREEN;
   ctx.fillRect(leftSignX, signY, signW, signH);
 
   // Right Sign: Route Fork / Destination
-  const rightSignX = Math.round(x + spanW * 0.04);
   ctx.fillStyle = GANTRY_SIGN_BORDER;
   ctx.fillRect(rightSignX - 1, signY - 1, signW + 2, signH + 2);
   ctx.fillStyle = GANTRY_SIGN_GREEN;
@@ -1287,6 +1441,21 @@ function drawOverpass(
   const deckBottomY = Math.round(y - clearanceH);
   const leftPillarX = Math.round(x - spanW * 0.5);
   const rightPillarX = Math.round(x + spanW * 0.5 - pillarW);
+  const deckSpanW = spanW + Math.max(4, Math.round(400 * ppu));
+  const deckX = Math.round(x - deckSpanW * 0.5);
+  const railingH = Math.max(2, Math.round(450 * ppu));
+
+  // Distant Low LOD: 2 pillars + deck fascia + parapet top rail (skips shadow, hazard plinths, soffit, and truss loop)
+  if (spanW < 95) {
+    ctx.fillStyle = OVERPASS_CONCRETE_DARK;
+    ctx.fillRect(leftPillarX, deckBottomY, pillarW, clearanceH);
+    ctx.fillRect(rightPillarX, deckBottomY, pillarW, clearanceH);
+    ctx.fillStyle = variant === 1 ? OVERPASS_STEEL_BLUE : OVERPASS_CONCRETE;
+    ctx.fillRect(deckX, topY, deckSpanW, deckH);
+    ctx.fillStyle = OVERPASS_RAILING;
+    ctx.fillRect(deckX, topY - railingH, deckSpanW, railingH);
+    return;
+  }
 
   // 1. Asphalt Roadway Shadow underneath the overpass
   const shadowW = Math.max(16, Math.round(5200 * ppu));
@@ -1331,8 +1500,6 @@ function drawOverpass(
   }
 
   // 3. Underside (Soffit) of the horizontal bridge span
-  const deckSpanW = spanW + Math.max(4, Math.round(400 * ppu));
-  const deckX = Math.round(x - deckSpanW * 0.5);
   const soffitH = Math.max(1, Math.round(deckH * 0.22));
 
   ctx.fillStyle = OVERPASS_CONCRETE_DARK;
@@ -1374,7 +1541,6 @@ function drawOverpass(
   }
 
   // 5. Parapet / Guardrail on top of the bridge deck
-  const railingH = Math.max(2, Math.round(450 * ppu));
   const railingY = topY - railingH;
   ctx.fillStyle = OVERPASS_RAILING;
   ctx.fillRect(deckX, railingY, deckSpanW, railingH);
@@ -1867,6 +2033,18 @@ function drawPylon(
   const rx = Math.round(x);
   const topY = Math.round(y - h);
 
+  // Distant Low LOD: compact 3-rect tower silhouette
+  if (h < 38) {
+    ctx.fillStyle = PYLON_STEEL;
+    ctx.fillRect(rx - 1, topY + Math.round(h * 0.2), 2, Math.round(h * 0.8));
+    ctx.fillStyle = PYLON_STEEL_LIGHT;
+    const armW = Math.max(6, Math.round(baseW * 1.6));
+    ctx.fillRect(Math.round(rx - armW * 0.5), topY + Math.round(h * 0.2), armW, 2);
+    ctx.fillStyle = PYLON_BEACON;
+    ctx.fillRect(rx - 1, topY, 2, 2);
+    return;
+  }
+
   // Ground concrete footings (heavier for terminal anchor)
   ctx.fillStyle = '#140d24';
   const footH = isTerminal ? 3 : 2;
@@ -1895,8 +2073,8 @@ function drawPylon(
   // Horizontal waist strut
   ctx.fillRect(Math.round(rx - waistW * 0.5), waistY, waistW, Math.max(1, Math.round(h * 0.015)));
 
-  // Lower leg X-bracing
-  if (baseW >= 12) {
+  // Lower leg X-bracing (near/mid LOD only)
+  if (h >= 96 && baseW >= 12) {
     ctx.strokeStyle = PYLON_STEEL;
     ctx.lineWidth = 1;
     const midLegY = Math.round((y + waistY) * 0.5);
@@ -1931,7 +2109,7 @@ function drawPylon(
   ctx.fill();
 
   // Internal V lattice cross-ties (leaving the center hollow like the photo!)
-  if (baseW >= 14) {
+  if (h >= 96 && baseW >= 14) {
     ctx.strokeStyle = PYLON_STEEL;
     ctx.lineWidth = 1;
     const vMidY = Math.round((waistY + vTopY) * 0.5);
@@ -2129,6 +2307,16 @@ function drawSign(
   // Galvanized steel post
   ctx.fillStyle = '#4a3e6b';
   ctx.fillRect(Math.round(rx - postW * 0.5), groundY - postH, postW, postH);
+
+  // Distant Low LOD: 1 post + 1 colored sign rect (skips footing, ctx.arc circles, diamonds & digits)
+  if (postH < 24) {
+    const sw = v === 1 ? Math.max(5, Math.round(1800 * ppu)) : Math.max(4, Math.round(1200 * ppu));
+    const sh = v === 1 ? Math.max(3, Math.round(1200 * ppu)) : sw;
+    ctx.fillStyle = v === 0 ? '#e63946' : v === 1 ? '#006b47' : '#ffcc00';
+    ctx.fillRect(Math.round(rx - sw * 0.5), groundY - postH - sh, sw, sh);
+    return;
+  }
+
   // Post footing / guardrail clamp
   ctx.fillStyle = '#26203a';
   ctx.fillRect(Math.round(rx - postW * 1.2), groundY - 2, Math.max(3, Math.round(postW * 2.4)), 2);
