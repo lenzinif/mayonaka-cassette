@@ -363,12 +363,14 @@ export class Background {
   public scroll3 = 0; // Layer 3 Transizione (~0.85x)
   public sunOffset = 0;
   public skyTime = 0;
+  public pitchOffset = 0;
 
   public prevScroll1 = 0;
   public prevScroll2 = 0;
   public prevScroll3 = 0;
   public prevSunOffset = 0;
   public prevSkyTime = 0;
+  public prevPitchOffset = 0;
 
   // Cached gradients to guarantee ZERO per-frame garbage collection allocations
   private cachedSkyCtx: CanvasRenderingContext2D | null = null;
@@ -594,12 +596,21 @@ export class Background {
     segmentCurve: number,
     speedRatio: number,
     extremeSpectralEventOrDownbeat: boolean | number = false,
+    roadSlope = 0,
   ): void {
     this.prevSkyTime = this.skyTime;
     this.prevScroll1 = this.scroll1;
     this.prevScroll2 = this.scroll2;
     this.prevScroll3 = this.scroll3;
     this.prevSunOffset = this.sunOffset;
+    this.prevPitchOffset = this.pitchOffset;
+
+    const maxPitch = Math.max(0, tuning.bgPitchMaxPx);
+    const rawPitchTarget = Math.max(
+      -maxPitch,
+      Math.min(maxPitch, roadSlope * 28 * tuning.bgPitchStrength),
+    );
+    this.pitchOffset += (rawPitchTarget - this.pitchOffset) * Math.min(1, dt * 4.5);
 
     this.skyTime += dt;
 
@@ -756,6 +767,12 @@ export class Background {
     const renderScroll3 = alpha >= 0.999 ? this.scroll3 : lerpWrapped(this.prevScroll3, this.scroll3, CITY_SPAN, alpha);
     const renderSunOffset = this.prevSunOffset + (this.sunOffset - this.prevSunOffset) * alpha;
     const renderSkyTime = this.prevSkyTime + (this.skyTime - this.prevSkyTime) * alpha;
+    const renderPitchOffset = this.prevPitchOffset + (this.pitchOffset - this.prevPitchOffset) * alpha;
+    const starPitch = Math.round(renderPitchOffset);
+    const sunPitch = Math.round(renderPitchOffset * 0.75);
+    const mountainPitch = Math.round(renderPitchOffset * 0.45);
+    const skylinePitch = Math.round(renderPitchOffset * 0.3);
+    const glowPitch = Math.round(renderPitchOffset * 0.35);
 
     const lTheme = LIGHTNING_THEMES[this.lightningThemeIdx] ?? LIGHTNING_THEMES[0]!;
 
@@ -828,7 +845,10 @@ export class Background {
         const twinkle = Math.sin(renderSkyTime * 3.2 + this.starPhase[i]!);
         if (twinkle > -0.25) {
           const sx = Math.round((this.starX[i]! * width - starScroll + width * 3) % width);
-          const sy = Math.round(this.starY[i]! * (horizonY - 44)) + 4;
+          const sy = Math.max(
+            2,
+            Math.min(horizonY - 4, Math.round(this.starY[i]! * (horizonY - 44)) + 4 + starPitch),
+          );
           const size = twinkle > 0.65 || pulse > 0.6 ? 2 : 1;
           ctx.fillRect(sx, sy, size, size);
         }
@@ -839,7 +859,10 @@ export class Background {
         const twinkle = Math.sin(renderSkyTime * 3.2 + this.starPhase[i]!);
         if (twinkle > -0.25) {
           const sx = Math.round((this.starX[i]! * width - starScroll + width * 3) % width);
-          const sy = Math.round(this.starY[i]! * (horizonY - 44)) + 4;
+          const sy = Math.max(
+            2,
+            Math.min(horizonY - 4, Math.round(this.starY[i]! * (horizonY - 44)) + 4 + starPitch),
+          );
           const size = twinkle > 0.65 || pulse > 0.6 ? 2 : 1;
           ctx.fillRect(sx, sy, size, size);
         }
@@ -849,7 +872,7 @@ export class Background {
       for (let s = 0; s < SHOOTING_STAR_COUNT; s++) {
         if (this.shootingStarActive[s] === 1) {
           const sx = this.shootingStarX[s]!;
-          const sy = this.shootingStarY[s]!;
+          const sy = this.shootingStarY[s]! + starPitch;
           const lifeAlpha = Math.min(1, this.shootingStarLife[s]! * 2.6);
           ctx.strokeStyle = COLOR_WHITE;
           ctx.lineWidth = 1.5;
@@ -871,10 +894,18 @@ export class Background {
     const isMayonakaBay = palette.id === 'night' || (!isSunsetBoulevard && !isAkibaNight);
 
     const sunX = width * 0.5 - renderSunOffset;
-    const sunY = isMayonakaBay ? horizonY - 30 : horizonY - 22;
+    const baseSunY = isMayonakaBay ? horizonY - 30 : horizonY - 22;
+    const canTranslateSun = sunPitch !== 0 && typeof ctx.translate === 'function';
+    const sunY = canTranslateSun ? baseSunY : baseSunY + sunPitch;
+    const sunClipHorizonY = canTranslateSun ? horizonY - sunPitch : horizonY;
     const sunR = isMayonakaBay
       ? 48 + pulse * 4.0 + downPulse * 2.0
       : 54 + pulse * 4.5 + downPulse * 2.5;
+
+    if (canTranslateSun) {
+      ctx.save();
+      ctx.translate(0, sunPitch);
+    }
 
     // Atmospheric Lunar Corona / Halo for Mayonaka Bay (cached to avoid per-frame gradient allocation)
     if (isMayonakaBay && typeof ctx.createRadialGradient === 'function') {
@@ -884,11 +915,11 @@ export class Background {
         this.cachedCoronaSunBottom !== palette.sunBottom ||
         this.cachedCoronaRim !== palette.mountainRim ||
         Math.abs(this.cachedCoronaSunX - sunX) > 3.5 ||
-        Math.abs(this.cachedCoronaSunY - sunY) > 3.5 ||
+        Math.abs(this.cachedCoronaSunY - baseSunY) > 3.5 ||
         Math.abs(this.cachedCoronaSunR - sunR) > 3.5 ||
         !this.cachedCoronaGrad
       ) {
-        const glowGrad = ctx.createRadialGradient(sunX, sunY, sunR * 0.5, sunX, sunY, haloR);
+        const glowGrad = ctx.createRadialGradient(sunX, baseSunY, sunR * 0.5, sunX, baseSunY, haloR);
         glowGrad.addColorStop(0, hexToRgba(palette.sunBottom, 0.28));
         glowGrad.addColorStop(0.5, hexToRgba(palette.mountainRim, 0.10));
         glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
@@ -896,7 +927,7 @@ export class Background {
         this.cachedCoronaSunBottom = palette.sunBottom;
         this.cachedCoronaRim = palette.mountainRim;
         this.cachedCoronaSunX = sunX;
-        this.cachedCoronaSunY = sunY;
+        this.cachedCoronaSunY = baseSunY;
         this.cachedCoronaSunR = sunR;
         this.cachedCoronaGrad = glowGrad;
       }
@@ -934,14 +965,18 @@ export class Background {
     const sunRSq = sunR * sunR;
     for (let i = 0; i < 6; i++) {
       const bandY = sunY + 4 + i * 9;
-      if (bandY >= horizonY) break;
-      const bandH = Math.min(1.5 + i * 0.9, horizonY - bandY);
+      if (bandY >= sunClipHorizonY) break;
+      const bandH = Math.min(1.5 + i * 0.9, sunClipHorizonY - bandY);
       const dy = bandY + bandH * 0.5 - sunY;
       const dySq = dy * dy;
       if (dySq < sunRSq) {
         const halfChord = Math.sqrt(sunRSq - dySq);
         ctx.fillRect(sunX - halfChord - 0.5, bandY, halfChord * 2 + 1, bandH);
       }
+    }
+
+    if (canTranslateSun) {
+      ctx.restore();
     }
 
     // -------------------------------------------------------------------------
@@ -955,7 +990,7 @@ export class Background {
     // 4. 16-BIT RETRO PIXEL-ART CUMULUS CLOUDS (Organic domes + flat bottom shelf)
     // -------------------------------------------------------------------------
     if (tuning.bgClouds === 1) {
-      this.renderPixelArtClouds(ctx, width, palette, lTheme);
+      this.renderPixelArtClouds(ctx, width, palette, lTheme, starPitch);
     }
 
     // -------------------------------------------------------------------------
@@ -996,10 +1031,14 @@ export class Background {
     // 6. LAYER 1: LONTANISSIMO (Scroll ~0.10x)
     // -------------------------------------------------------------------------
     const seaDeep = palette.water?.[0] ?? palette.grass[0];
+    const canTranslateMountain = mountainPitch !== 0 && typeof ctx.translate === 'function';
+    const mountainBaseY = Math.max(horizonY + 2, horizonY + mountainPitch + 2);
     if (isSunsetBoulevard) {
       // Sunset Boulevard: Calm deep sea horizon
-      const seaTopY = horizonY - 26;
-      const seaH = horizonY - seaTopY;
+      const baseSeaTopY = horizonY - 26;
+      const seaH = horizonY - baseSeaTopY;
+      const seaTopY = canTranslateMountain ? baseSeaTopY : baseSeaTopY + mountainPitch;
+      const seaRefSunY = canTranslateMountain ? baseSunY : sunY;
 
       if (
         this.cachedWaterCtx !== ctx ||
@@ -1011,7 +1050,7 @@ export class Background {
         this.cachedWaterDeep !== seaDeep ||
         !this.cachedWaterGrad
       ) {
-        const wGrad = ctx.createLinearGradient(0, seaTopY, 0, horizonY);
+        const wGrad = ctx.createLinearGradient(0, baseSeaTopY, 0, horizonY);
         wGrad.addColorStop(0, hexToRgba(palette.skyMid, 0.65));
         wGrad.addColorStop(0.35, hexToRgba(palette.skyHorizon, 0.45));
         wGrad.addColorStop(0.75, hexToRgba(palette.fog, 0.78));
@@ -1025,6 +1064,12 @@ export class Background {
         this.cachedWaterDeep = seaDeep;
         this.cachedWaterGrad = wGrad;
       }
+
+      if (canTranslateMountain) {
+        ctx.save();
+        ctx.translate(0, mountainPitch);
+      }
+
       ctx.fillStyle = this.cachedWaterGrad;
       ctx.fillRect(0, seaTopY, width, seaH + 2);
 
@@ -1058,10 +1103,21 @@ export class Background {
         ctx.fillRect(sx, sy, sw, 1);
       }
       ctx.globalAlpha = 1;
+
+      if (canTranslateMountain) {
+        ctx.restore();
+      }
+      if (mountainPitch < 0) {
+        ctx.fillStyle = seaDeep;
+        ctx.fillRect(0, horizonY + mountainPitch, width, -mountainPitch + 2);
+      }
+      void seaRefSunY;
     } else if (isMayonakaBay) {
       // Mayonaka Bay: Central calm sea opening with moonlight reflection, framed by coastal hills at the margins
-      const seaTopY = horizonY - 26;
-      const seaH = horizonY - seaTopY;
+      const baseSeaTopY = horizonY - 26;
+      const seaH = horizonY - baseSeaTopY;
+      const seaTopY = canTranslateMountain ? baseSeaTopY : baseSeaTopY + mountainPitch;
+      const seaRefSunY = canTranslateMountain ? baseSunY : sunY;
 
       if (
         this.cachedWaterCtx !== ctx ||
@@ -1072,7 +1128,7 @@ export class Background {
         this.cachedWaterDeep !== seaDeep ||
         !this.cachedWaterGrad
       ) {
-        const wGrad = ctx.createLinearGradient(0, seaTopY, 0, horizonY);
+        const wGrad = ctx.createLinearGradient(0, baseSeaTopY, 0, horizonY);
         wGrad.addColorStop(0, hexToRgba(palette.fog, 0.85));
         wGrad.addColorStop(0.55, hexToRgba(palette.skyHorizon, 0.42));
         wGrad.addColorStop(1, seaDeep);
@@ -1084,6 +1140,12 @@ export class Background {
         this.cachedWaterDeep = seaDeep;
         this.cachedWaterGrad = wGrad;
       }
+
+      if (canTranslateMountain) {
+        ctx.save();
+        ctx.translate(0, mountainPitch);
+      }
+
       ctx.fillStyle = this.cachedWaterGrad;
       ctx.fillRect(0, seaTopY, width, seaH + 2);
 
@@ -1097,7 +1159,7 @@ export class Background {
       // Traced as the mirrored circular chord of the moon disc (matching the exact shape and width of the moon,
       // never a flat box or narrow vertical column) with aquatic ripples and silver core.
       const sunRSq = sunR * sunR;
-      const waterDy = seaTopY - sunY;
+      const waterDy = seaTopY - seaRefSunY;
       const outerCol = this.lightningAlpha > 0.2 ? lTheme.boltMid : palette.sunBottom;
       const innerCol = this.lightningAlpha > 0.2 ? lTheme.boltCore : palette.sunTop;
 
@@ -1160,6 +1222,14 @@ export class Background {
       }
       ctx.globalAlpha = 1;
 
+      if (canTranslateMountain) {
+        ctx.restore();
+      }
+      if (mountainPitch < 0) {
+        ctx.fillStyle = seaDeep;
+        ctx.fillRect(0, horizonY + mountainPitch, width, -mountainPitch + 2);
+      }
+
       // Rolling coastal hills at the margins framing the bay
       const step = MOUNTAIN_SPAN / MOUNTAIN_POINTS;
       const startIdx = Math.floor(renderScroll1 / step);
@@ -1167,14 +1237,14 @@ export class Background {
       const pointsNeeded = Math.ceil(width / step) + 2;
 
       ctx.beginPath();
-      ctx.moveTo(0, horizonY + 2);
+      ctx.moveTo(0, mountainBaseY);
       for (let i = 0; i <= pointsNeeded; i++) {
         const idx = (startIdx + i) % MOUNTAIN_POINTS;
         const x = (i - frac) * step;
-        const y = horizonY - this.hillHeights[idx]!;
+        const y = horizonY + mountainPitch - this.hillHeights[idx]!;
         ctx.lineTo(x, y);
       }
-      ctx.lineTo(width, horizonY + 2);
+      ctx.lineTo(width, mountainBaseY);
       ctx.closePath();
       ctx.fillStyle = palette.mountain;
       ctx.fill();
@@ -1186,7 +1256,7 @@ export class Background {
         const idx = (startIdx + i) % MOUNTAIN_POINTS;
         const h = this.hillHeights[idx]!;
         const x = (i - frac) * step;
-        const y = horizonY - h;
+        const y = horizonY + mountainPitch - h;
         if (h > 1) {
           if (!rimDrawing) {
             ctx.moveTo(x, y);
@@ -1213,14 +1283,14 @@ export class Background {
       const pointsNeeded = Math.ceil(width / step) + 2;
 
       ctx.beginPath();
-      ctx.moveTo(0, horizonY + 2);
+      ctx.moveTo(0, mountainBaseY);
       for (let i = 0; i <= pointsNeeded; i++) {
         const idx = (startIdx + i) % MOUNTAIN_POINTS;
         const x = (i - frac) * step;
-        const y = horizonY - this.ridgeHeights[idx]!;
+        const y = horizonY + mountainPitch - this.ridgeHeights[idx]!;
         ctx.lineTo(x, y);
       }
-      ctx.lineTo(width, horizonY + 2);
+      ctx.lineTo(width, mountainBaseY);
       ctx.closePath();
       ctx.fillStyle = palette.mountain;
       ctx.fill();
@@ -1230,7 +1300,7 @@ export class Background {
       for (let i = 0; i <= pointsNeeded; i++) {
         const idx = (startIdx + i) % MOUNTAIN_POINTS;
         const x = (i - frac) * step;
-        const y = horizonY - this.ridgeHeights[idx]!;
+        const y = horizonY + mountainPitch - this.ridgeHeights[idx]!;
         if (i === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
@@ -1250,12 +1320,12 @@ export class Background {
     const winPrimary = palette.starColors ? palette.starColors[0] : palette.mountainRim;
     const winAccent = palette.starColors && palette.starColors.length > 1 ? palette.starColors[1] : palette.mountainRim;
 
-    const skylineBaseY = isSunsetBoulevard ? horizonY - 10 : horizonY - 4;
+    const skylineBaseY = (isSunsetBoulevard ? horizonY - 10 : horizonY - 4) + skylinePitch;
 
     // 7a. Shimmering Sea Reflections (Sunset Boulevard) — rendered BEHIND the skyline buildings
     if (isSunsetBoulevard) {
       const waterTopY = skylineBaseY;
-      const waterH = horizonY - waterTopY;
+      const waterH = Math.max(0, horizonY + skylinePitch - waterTopY);
 
       for (let pass = 0; pass <= Math.ceil(width / CITY_SPAN); pass++) {
         const baseOffset = pass * CITY_SPAN - renderScroll3;
@@ -1287,11 +1357,17 @@ export class Background {
     const skylineStrip = this.ensureSkylineStrip(palette);
     const repeatCount = Math.ceil(width / CITY_SPAN);
     if (skylineStrip) {
-      const stripTopY = horizonY - Background.SKYLINE_STRIP_H;
+      const stripTopY = horizonY - Background.SKYLINE_STRIP_H + skylinePitch;
+      const drawH = Background.SKYLINE_STRIP_H - Math.max(0, skylinePitch);
       for (let pass = 0; pass <= repeatCount; pass++) {
-        ctx.drawImage(skylineStrip, Math.round(pass * CITY_SPAN - renderScroll2), stripTopY);
+        const dx = Math.round(pass * CITY_SPAN - renderScroll2);
+        if (skylinePitch > 0 && drawH > 0) {
+          ctx.drawImage(skylineStrip, 0, 0, CITY_SPAN, drawH, dx, stripTopY, CITY_SPAN, drawH);
+        } else {
+          ctx.drawImage(skylineStrip, dx, stripTopY);
+        }
       }
-      // Dynamic per-frame antenna beacons and lightning rooftop flashes only
+      // Dynamic per-frame antenna beacons, lightning rooftop flashes, and downhill base skirts
       for (let pass = 0; pass <= repeatCount; pass++) {
         const baseOffset = pass * CITY_SPAN - renderScroll2;
         for (let t = 0; t < CITY_TOWERS; t++) {
@@ -1302,6 +1378,11 @@ export class Background {
           const isPierBeacon = !isSunsetBoulevard && !isAkibaNight && (t === 11 || t === 20);
           const th = isAkibaNight ? 18 + ((t * 13 + 7) % 32) : computeCoastalTowerHeight(t);
           if (th <= 0) continue;
+
+          if (skylinePitch < 0) {
+            ctx.fillStyle = isSunsetBoulevard ? COLOR_SUNSET_SKYLINE : COLOR_NIGHT_SKYLINE;
+            ctx.fillRect(tx, horizonY + skylinePitch, tw, -skylinePitch + 1);
+          }
 
           const ty = skylineBaseY - th;
           const style = this.towerStyle[t]!;
@@ -1331,13 +1412,14 @@ export class Background {
         }
       }
     } else {
+      const skylineHorizonY = Math.max(horizonY, horizonY + skylinePitch);
       for (let pass = 0; pass <= repeatCount; pass++) {
         const baseOffset = pass * CITY_SPAN - renderScroll2;
         this.drawSkylineStaticPass(
           ctx,
           baseOffset,
           width,
-          horizonY,
+          skylineHorizonY,
           skylineBaseY,
           palette,
           towerSpacing,
@@ -1382,10 +1464,18 @@ export class Background {
         downPulse * 0.18 +
         this.lightningAlpha * 0.28,
     );
+    const canTranslateGlow = glowPitch !== 0 && typeof ctx.translate === 'function';
+    if (canTranslateGlow) {
+      ctx.save();
+      ctx.translate(0, glowPitch);
+    }
     ctx.globalAlpha = washAlpha;
     ctx.fillStyle = this.cachedGlowGrad;
     ctx.fillRect(0, horizonY - glowH, width, glowH + glowBelowH);
     ctx.globalAlpha = 1;
+    if (canTranslateGlow) {
+      ctx.restore();
+    }
 
     // -------------------------------------------------------------------------
     // 9. RONDINI & GABBIANI (3-frame flap animation)
@@ -1846,6 +1936,7 @@ export class Background {
     width: number,
     palette: StagePalette,
     lTheme: LightningTheme,
+    yOffset = 0,
   ): void {
     const isFlashing = this.lightningAlpha > 0.1;
     this.ensureCloudCanvases(palette);
@@ -1858,7 +1949,7 @@ export class Background {
 
     for (let i = 0; i < CLOUD_COUNT; i++) {
       const cx = Math.round(this.cloudX[i]!);
-      const cy = Math.round(this.cloudY[i]!);
+      const cy = Math.round(this.cloudY[i]!) + yOffset;
       const cw = Math.round(this.cloudWidth[i]!);
       const ch = Math.round(this.cloudHeight[i]!);
       const isNear = this.cloudLayer[i] === 1;
