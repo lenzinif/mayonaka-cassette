@@ -10,8 +10,10 @@ import {
   TrackLibrary,
   type StageScoreSummary,
 } from '@src/audio/TrackLibrary';
+import { tuning } from '@src/config/tuning';
 import type { Action, InputPressEvent, InputSource } from '@src/core/InputManager';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
+import { cameraDepthFromFov } from '@src/road/RoadProjection';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { Game, type GameEvent, type TelemetrySnapshot } from './Game';
 
@@ -952,5 +954,152 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
     expect(events).toContain('stageTransition');
     expect(game.traffic.trucks.length).toBeGreaterThan(0);
     game.render(mockCtx, 1, 60);
+  });
+
+  describe('Fase 6 — Micro-FOV Dinamico', () => {
+    function createSimpleMockCtx(): CanvasRenderingContext2D {
+      const noop = () => {};
+      return {
+        canvas: { width: 640, height: 360 },
+        save: noop,
+        restore: noop,
+        fillRect: noop,
+        strokeRect: noop,
+        fillText: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        ellipse: noop,
+        rect: noop,
+        clip: noop,
+        fill: noop,
+        stroke: noop,
+        translate: noop,
+        rotate: noop,
+        scale: noop,
+        setTransform: noop,
+        setLineDash: noop,
+        createLinearGradient: () => ({ addColorStop: noop }),
+        createRadialGradient: () => ({ addColorStop: noop }),
+        drawImage: noop,
+      } as unknown as CanvasRenderingContext2D;
+    }
+
+    it('keeps rendered FOV equal to tuning.fieldOfView at rest (speed = 0, LOW groove)', () => {
+      tuning.fieldOfView = 100;
+      tuning.dynamicFovSpeedBonus = 4.0;
+      tuning.dynamicFovOverdriveBonus = 3.5;
+      tuning.dynamicFovBoostKick = 3.0;
+
+      const game = new Game({ input: new FakeInput() });
+      const ctx = createSimpleMockCtx();
+      for (let i = 0; i < 30; i++) game.update(1 / 60);
+      game.render(ctx, 1, 60);
+
+      expect(game.currentFov).toBeCloseTo(100, 4);
+      expect(game.currentCameraDepth).toBeCloseTo(cameraDepthFromFov(100), 6);
+    });
+
+    it('widens FOV and lowers cameraDepth at high speed + OVERDRIVE within the 122 deg safety cap', () => {
+      tuning.fieldOfView = 100;
+      tuning.dynamicFovSpeedBonus = 4.0;
+      tuning.dynamicFovOverdriveBonus = 3.5;
+      tuning.dynamicFovBoostKick = 3.0;
+
+      const input = new FakeInput();
+      input.setDown('accelerate', true);
+      const game = new Game({ input });
+      const ctx = createSimpleMockCtx();
+
+      game.car.speed = tuning.maxSpeed;
+      game.car.groove = 95;
+      game.car.addGroove(0, false);
+
+      for (let i = 0; i < 120; i++) {
+        game.car.speed = tuning.maxSpeed;
+        game.car.groove = 95;
+        game.update(1 / 60);
+      }
+      game.render(ctx, 1, 60);
+
+      expect(game.car.grooveTier).toBe('OVERDRIVE');
+      expect(game.currentFov).toBeGreaterThan(106.5);
+      expect(game.currentFov).toBeLessThanOrEqual(122);
+      expect(game.currentCameraDepth).toBeLessThan(cameraDepthFromFov(100));
+
+      // Verify 122 degree safety cap even with extreme bonuses
+      tuning.fieldOfView = 118;
+      tuning.dynamicFovSpeedBonus = 10;
+      for (let i = 0; i < 120; i++) {
+        game.car.speed = tuning.maxSpeed;
+        game.car.groove = 95;
+        game.update(1 / 60);
+      }
+      game.render(ctx, 1, 60);
+      expect(game.currentFov).toBeLessThanOrEqual(122);
+
+      // Restore defaults
+      tuning.fieldOfView = 100;
+      tuning.dynamicFovSpeedBonus = 4.0;
+    });
+
+    it('spikes FOV temporarily on PERFECT beat-shift and smoothly decays back', () => {
+      tuning.fieldOfView = 100;
+      tuning.dynamicFovSpeedBonus = 0;
+      tuning.dynamicFovOverdriveBonus = 0;
+      tuning.dynamicFovBoostKick = 3.0;
+
+      const input = new FakeInput();
+      const game = new Game({ input });
+      game.car.speed = tuning.maxSpeed * tuning.gear1MaxRatio * 0.85;
+      game.audio.judgeInputTimestamp = () => ({
+        tier: 'PERFECT',
+        deltaMs: 0,
+        beatIndex: 0,
+        isDownbeat: true,
+      });
+
+      input.press('shiftUp', 100);
+      for (let i = 0; i < 15; i++) game.update(1 / 60);
+      const peakFov = game.currentFov;
+      expect(peakFov).toBeGreaterThan(100.5);
+
+      for (let i = 0; i < 120; i++) game.update(1 / 60);
+      expect(game.currentFov).toBeLessThan(peakFov);
+      expect(game.currentFov).toBeCloseTo(100, 1);
+
+      tuning.dynamicFovSpeedBonus = 4.0;
+      tuning.dynamicFovOverdriveBonus = 3.5;
+    });
+
+    it('locks rendered FOV to tuning.fieldOfView when all 3 dynamic FOV bonuses are 0', () => {
+      tuning.fieldOfView = 100;
+      tuning.dynamicFovSpeedBonus = 0;
+      tuning.dynamicFovOverdriveBonus = 0;
+      tuning.dynamicFovBoostKick = 0;
+
+      const game = new Game({ input: new FakeInput() });
+      const ctx = createSimpleMockCtx();
+      game.car.speed = tuning.maxSpeed;
+      game.car.groove = 95;
+      game.car.addGroove(0, false);
+
+      for (let i = 0; i < 60; i++) {
+        game.car.speed = tuning.maxSpeed;
+        game.car.groove = 95;
+        game.update(1 / 60);
+      }
+      game.render(ctx, 1, 60);
+
+      expect(game.currentFov).toBe(100);
+      expect(game.currentCameraDepth).toBeCloseTo(cameraDepthFromFov(100), 6);
+
+      tuning.dynamicFovSpeedBonus = 4.0;
+      tuning.dynamicFovOverdriveBonus = 3.5;
+      tuning.dynamicFovBoostKick = 3.0;
+    });
   });
 });

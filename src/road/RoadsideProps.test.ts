@@ -6,6 +6,7 @@ import {
   drawStreetTree,
   getPropTheme,
   getPropWorldHeight,
+  setPropAtmosphere,
   setPropTheme,
 } from './RoadsideProps';
 
@@ -392,6 +393,66 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
       // Peeking above hill crest (clipY > palmTopY) -> renders normally
       drawProp(mock.ctx, 'palm', 320, y, ppu, 1, 0, 0, 0, palmTopY + 20);
       expect(mock.rectCalls + mock.fillCalls).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Fase 2 & Fase 5 — Atmospheric Silhouettes & Progressive Cascading LOD', () => {
+    it('renders distant building, billboard, and palm in atmospheric silhouette colors when fogFactor >= 0.55', () => {
+      setPropAtmosphere('#0a102b', '#112233', '#224455');
+
+      const mockBldg = createMockCanvas();
+      drawProp(mockBldg.ctx, 'building', 200, 240, 0.006, -1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(mockBldg.fills).toContain('#112233');
+      expect(mockBldg.fills).toContain('#224455');
+      expect(mockBldg.fills).not.toContain('#ff0055');
+
+      const mockBoard = createMockCanvas();
+      drawProp(mockBoard.ctx, 'billboard', 200, 240, 0.008, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(mockBoard.fills).toContain('#112233');
+      expect(mockBoard.fills).toContain('#224455');
+      expect(mockBoard.fills).not.toContain('#ff2a6d');
+
+      const mockPalm = createMockCanvas();
+      drawProp(mockPalm.ctx, 'palm', 200, 240, 0.008, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(mockPalm.fills).toContain('#112233');
+      expect(mockPalm.fills).toContain('#224455');
+      expect(mockPalm.fills).not.toContain('#14f1d9');
+    });
+
+    it('increases fillRect detail monotonically across LOD tiers and stays compact at ppu = 0.006', () => {
+      const ppus = [0.005, 0.01, 0.018, 0.035];
+      const kinds: readonly PropKind[] = ['building', 'lamp', 'billboard', 'gantry'];
+
+      for (const kind of kinds) {
+        const counts: number[] = [];
+        for (const ppu of ppus) {
+          const mock = createMockCanvas();
+          drawProp(mock.ctx, kind, 320, 240, ppu, 1, 0, 0);
+          counts.push(mock.rectCalls);
+        }
+        for (let i = 0; i < counts.length - 1; i++) {
+          expect(counts[i + 1]!).toBeGreaterThanOrEqual(counts[i]!);
+        }
+        expect(counts[counts.length - 1]!).toBeGreaterThan(counts[0]!);
+      }
+
+      // Compact far LOD budget at ppu = 0.006
+      for (let variant = 0; variant < 3; variant++) {
+        const mockBldg = createMockCanvas();
+        drawProp(mockBldg.ctx, 'building', 320, 240, 0.006, 1, variant, 0);
+        expect(mockBldg.rectCalls).toBeLessThanOrEqual(8);
+      }
+
+      const mockLamp = createMockCanvas();
+      drawProp(mockLamp.ctx, 'lamp', 320, 240, 0.006, 1, 0, 0);
+      expect(mockLamp.rectCalls).toBeLessThanOrEqual(4);
+
+      // Extreme tiny & huge ppu never throw
+      const edgeMock = createMockCanvas();
+      for (const kind of kinds) {
+        expect(() => drawProp(edgeMock.ctx, kind, 320, 240, 0.0001, 1, 0)).not.toThrow();
+        expect(() => drawProp(edgeMock.ctx, kind, 320, 240, 0.25, 1, 0)).not.toThrow();
+      }
     });
   });
 });

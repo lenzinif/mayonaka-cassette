@@ -14,6 +14,37 @@ export function getPropTheme(): SceneryTheme | null {
   return activePropTheme;
 }
 
+// ---------------------------------------------------------------------------
+// Atmospheric Silhouette State (Depth & Atmosphere Overhaul Phase 2, zero GC)
+// ---------------------------------------------------------------------------
+export interface PropAtmosphere {
+  fogColor: string;
+  silhouetteColor: string;
+  accentColor: string;
+}
+
+let activeAtmosphereFog = '#0a102b';
+let activeAtmosphereSilhouette = '#070b20';
+let activeAtmosphereAccent = '#056e68';
+
+export function setPropAtmosphere(
+  fogColor: string,
+  silhouetteColor: string,
+  accentColor: string,
+): void {
+  activeAtmosphereFog = fogColor;
+  activeAtmosphereSilhouette = silhouetteColor;
+  activeAtmosphereAccent = accentColor;
+}
+
+export function getPropAtmosphere(): PropAtmosphere {
+  return {
+    fogColor: activeAtmosphereFog,
+    silhouetteColor: activeAtmosphereSilhouette,
+    accentColor: activeAtmosphereAccent,
+  };
+}
+
 // Conservative upper-bound world heights (`pixels / ppu`) for O(1) crest culling (zero GC)
 const PROP_WORLD_HEIGHTS: Readonly<Record<PropKind, number>> = {
   bench: 1000,
@@ -144,28 +175,31 @@ function drawPalm(
   ppu: number,
   side: number,
   variant: number,
+  fogFactor = 0,
 ): void {
   const h = 3400 * ppu;
   const lean = 420 * ppu * -side; // lean towards the road
   const trunkW = Math.max(1, 115 * ppu);
   const topX = x + lean;
   const topY = y - h;
+  const isAtmospheric = fogFactor >= 0.55;
 
-  // Ground shadow pixel pad (skip on distant props)
-  if (ppu >= 0.016 && trunkW >= 2) {
+  // Ground shadow pixel pad (near foreground only)
+  if (ppu >= 0.018 && trunkW >= 2) {
     ctx.fillStyle = 'rgba(8, 2, 20, 0.55)';
     ctx.fillRect(Math.round(x - trunkW * 1.4), Math.round(y - 1), Math.round(trunkW * 2.8), Math.max(2, Math.round(trunkW * 0.45)));
   }
 
   const leaf = 1320 * ppu;
-  const leafColor = PALM_LEAVES[variant % PALM_LEAVES.length]!;
-  const shadeColor = PALM_LEAF_SHADE[variant % PALM_LEAF_SHADE.length]!;
+  const trunkColor = isAtmospheric ? activeAtmosphereSilhouette : PALM_TRUNK;
+  const leafColor = isAtmospheric ? activeAtmosphereAccent : PALM_LEAVES[variant % PALM_LEAVES.length]!;
+  const shadeColor = isAtmospheric ? activeAtmosphereSilhouette : PALM_LEAF_SHADE[variant % PALM_LEAF_SHADE.length]!;
 
-  // Distant Low LOD: rect-only trunk & compact crown (eliminates per-ring beginPath/fill and 48 frond rects)
+  // Tier 0 (Distant Low LOD): rect-only trunk & compact crown
   if (leaf < 14) {
     const midY = Math.round(y - h * 0.5);
     const midX = Math.round(x + lean * 0.25);
-    ctx.fillStyle = PALM_TRUNK;
+    ctx.fillStyle = trunkColor;
     ctx.fillRect(Math.round(x - trunkW * 0.5), midY, Math.max(1, Math.round(trunkW)), Math.max(2, Math.round(h * 0.5)));
     ctx.fillRect(Math.round(midX - trunkW * 0.4), Math.round(topY), Math.max(1, Math.round(trunkW * 0.85)), Math.max(2, Math.round(midY - topY)));
     const cw = Math.max(4, Math.round(leaf * 1.5));
@@ -179,9 +213,10 @@ function drawPalm(
     return;
   }
 
-  // Continuous tapered curved trunk with alternating bark rings
+  // Continuous tapered curved trunk with progressive ring/frond tiers
   const isNearPalm = leaf >= 32;
-  const rings = isNearPalm ? (trunkW >= 5 ? 6 : 4) : 2;
+  const isMidNearPalm = leaf >= 22;
+  const rings = isNearPalm ? (trunkW >= 5 ? 6 : 4) : isMidNearPalm ? 3 : 2;
   for (let r = 0; r < rings; r++) {
     const t0 = r / rings;
     const t1 = (r + 1) / rings;
@@ -194,7 +229,7 @@ function drawPalm(
     const w1 = Math.max(1, trunkW * (1.15 - t1 * 0.42));
 
     // Outer trunk segment
-    ctx.fillStyle = r % 2 === 0 ? PALM_TRUNK : '#2c1447';
+    ctx.fillStyle = isAtmospheric ? trunkColor : r % 2 === 0 ? PALM_TRUNK : '#2c1447';
     ctx.beginPath();
     ctx.moveTo(x0 - w0 * 0.5, y0);
     ctx.lineTo(x1 - w1 * 0.5, y1);
@@ -204,7 +239,7 @@ function drawPalm(
     ctx.fill();
 
     // Highlight ridge along inner or outer curve (near LOD only)
-    if (isNearPalm && (w0 >= 3.5 || w1 >= 3.5)) {
+    if (isNearPalm && !isAtmospheric && (w0 >= 3.5 || w1 >= 3.5)) {
       ctx.fillStyle = PALM_TRUNK_LIGHT;
       const hiW0 = Math.max(1, w0 * 0.32);
       const hiW1 = Math.max(1, w1 * 0.32);
@@ -223,11 +258,11 @@ function drawPalm(
   // Pixel-art palm crown & fronds
   if (isNearPalm && trunkW >= 3) {
     const cocoR = Math.max(2, Math.round(trunkW * 0.55));
-    ctx.fillStyle = '#240b36';
+    ctx.fillStyle = isAtmospheric ? trunkColor : '#240b36';
     ctx.fillRect(Math.round(topX - cocoR), Math.round(topY - cocoR * 0.4), cocoR * 2, cocoR);
   }
 
-  const fronds = isNearPalm ? 6 : 4;
+  const fronds = isNearPalm ? 6 : isMidNearPalm ? 5 : 4;
   const steps = isNearPalm ? 3 : 2;
   for (let i = 0; i < fronds; i++) {
     const a = -Math.PI + (i / Math.max(1, fronds - 1)) * Math.PI;
@@ -264,6 +299,7 @@ export function drawStreetTree(
   ppu: number,
   side: number,
   variant: number,
+  fogFactor = 0,
 ): void {
   if (ppu <= 0 || !Number.isFinite(ppu)) return;
 
@@ -271,18 +307,20 @@ export function drawStreetTree(
   const rx = Math.round(x);
   const ry = Math.round(y);
   const topY = Math.round(y - h);
+  const isAtmospheric = fogFactor >= 0.55;
 
   const v = Math.abs(Math.floor(variant)) % STREET_TREE_CROWN_BODY.length;
-  const crownBody = STREET_TREE_CROWN_BODY[v]!;
-  const crownShade = STREET_TREE_CROWN_SHADE[v]!;
-  const crownRim = STREET_TREE_CROWN_RIM[v]!;
+  const trunkCol = isAtmospheric ? activeAtmosphereSilhouette : STREET_TREE_TRUNK;
+  const crownBody = isAtmospheric ? activeAtmosphereAccent : STREET_TREE_CROWN_BODY[v]!;
+  const crownShade = isAtmospheric ? activeAtmosphereSilhouette : STREET_TREE_CROWN_SHADE[v]!;
+  const crownRim = isAtmospheric ? activeAtmosphereAccent : STREET_TREE_CROWN_RIM[v]!;
 
-  // Distant Low LOD: compact 3-rect silhouette for distant city verge
+  // Tier 0 (Distant Low LOD): compact 3-rect silhouette for distant city verge
   if (h < 28) {
     const trunkW = 1;
     const crownW = Math.max(3, Math.round(h * 0.7));
     const crownH = Math.max(3, Math.round(h * 0.65));
-    ctx.fillStyle = STREET_TREE_TRUNK;
+    ctx.fillStyle = trunkCol;
     ctx.fillRect(rx, Math.round(y - h * 0.45), trunkW, Math.round(h * 0.45));
     ctx.fillStyle = crownShade;
     ctx.fillRect(Math.round(x - crownW * 0.5), topY + 1, crownW, crownH);
@@ -291,12 +329,36 @@ export function drawStreetTree(
     return;
   }
 
-  // Mid LOD: trunk + layered dome without planter glow or branch forks
-  if (h < 56) {
+  // Tier 1 (Mid-Far LOD): trunk + layered dome (no rim highlight or planter box yet)
+  if (h < 48) {
     const trunkW = Math.max(2, Math.round(110 * ppu));
     const trunkH = Math.max(4, Math.round(h * 0.42));
-    ctx.fillStyle = STREET_TREE_TRUNK;
+    ctx.fillStyle = trunkCol;
     ctx.fillRect(Math.round(x - trunkW * 0.5), ry - trunkH, trunkW, trunkH);
+    const crownW = Math.max(6, Math.round(2200 * ppu));
+    const crownH = Math.max(5, Math.round(1800 * ppu));
+    const crownLeft = Math.round(x - crownW * 0.5);
+    ctx.fillStyle = crownShade;
+    ctx.fillRect(crownLeft, Math.round(topY + crownH * 0.35), crownW, Math.round(crownH * 0.65));
+    ctx.fillStyle = crownBody;
+    ctx.fillRect(crownLeft + 1, topY, Math.max(1, crownW - 2), Math.round(crownH * 0.65));
+    return;
+  }
+
+  // Tier 2 (Mid-Near LOD): adds top canopy moonlight rim & sidewalk planter box
+  if (h < 68) {
+    const planterW = Math.max(4, Math.round(540 * ppu));
+    const planterH = Math.max(2, Math.round(70 * ppu));
+    const planterLeft = Math.round(x - planterW * 0.5);
+    const planterTop = ry - planterH;
+    ctx.fillStyle = STREET_TREE_PLANTER;
+    ctx.fillRect(planterLeft, planterTop, planterW, planterH);
+    ctx.fillStyle = STREET_TREE_PLANTER_RIM;
+    ctx.fillRect(planterLeft, planterTop, planterW, 1);
+    const trunkW = Math.max(2, Math.round(110 * ppu));
+    const trunkH = Math.max(4, Math.round(h * 0.42));
+    ctx.fillStyle = trunkCol;
+    ctx.fillRect(Math.round(x - trunkW * 0.5), planterTop - trunkH, trunkW, trunkH);
     const crownW = Math.max(6, Math.round(2200 * ppu));
     const crownH = Math.max(5, Math.round(1800 * ppu));
     const crownLeft = Math.round(x - crownW * 0.5);
@@ -314,8 +376,8 @@ export function drawStreetTree(
   const planterH = Math.max(2, Math.round(70 * ppu));
   const glowW = Math.round(planterW * 1.7);
 
-  // Street ambient glow pool under tree (skip translucent glow below 0.016 ppu)
-  if (ppu >= 0.016) {
+  // Street ambient glow pool under tree (only in foreground ppu >= 0.018)
+  if (ppu >= 0.018) {
     ctx.fillStyle = STREET_TREE_GROUND_GLOW;
     ctx.fillRect(
       Math.round(x - glowW * 0.5),
@@ -472,6 +534,7 @@ export function drawPine(
   ppu: number,
   side: number,
   variant: number,
+  fogFactor = 0,
 ): void {
   if (ppu <= 0 || !Number.isFinite(ppu)) return;
 
@@ -479,16 +542,18 @@ export function drawPine(
   const rx = Math.round(x);
   const ry = Math.round(y);
   const topY = Math.round(y - h);
+  const isAtmospheric = fogFactor >= 0.55;
 
   const v = Math.abs(Math.floor(variant)) % PINE_CROWN_BODY.length;
-  const pineBody = PINE_CROWN_BODY[v]!;
-  const pineShade = PINE_CROWN_SHADE[v]!;
-  const pineRim = PINE_CROWN_RIM[v]!;
+  const trunkCol = isAtmospheric ? activeAtmosphereSilhouette : PINE_TRUNK;
+  const pineBody = isAtmospheric ? activeAtmosphereAccent : PINE_CROWN_BODY[v]!;
+  const pineShade = isAtmospheric ? activeAtmosphereSilhouette : PINE_CROWN_SHADE[v]!;
+  const pineRim = isAtmospheric ? activeAtmosphereAccent : PINE_CROWN_RIM[v]!;
 
-  // Distant Low LOD: stepped pagoda/triangle silhouette for far touge hillside
+  // Tier 0 (Distant Low LOD): stepped pagoda/triangle silhouette for far touge hillside
   if (h < 28) {
     const trunkW = 1;
-    ctx.fillStyle = PINE_TRUNK;
+    ctx.fillStyle = trunkCol;
     ctx.fillRect(rx, topY + Math.round(h * 0.5), trunkW, Math.round(h * 0.5));
     // Tier 1
     const w1 = Math.max(2, Math.round(h * 0.7));
@@ -505,12 +570,31 @@ export function drawPine(
     return;
   }
 
-  // Mid LOD: rect trunk & 3 cloud tiers without beginPath/fill or ground shadow
-  if (h < 56) {
+  // Tier 1 (Mid-Far LOD): rect trunk & 3 cloud tiers (no moonlight rim yet)
+  if (h < 48) {
     const trunkW = Math.max(1, Math.round(110 * ppu));
-    ctx.fillStyle = PINE_TRUNK;
+    ctx.fillStyle = trunkCol;
     ctx.fillRect(Math.round(x - trunkW * 0.5), topY + Math.round(h * 0.35), trunkW, Math.round(h * 0.65));
     for (let i = 0; i < 3; i++) {
+      const tier = PINE_TIERS[i]!;
+      const padW = Math.max(4, Math.round(tier[1] * ppu));
+      const padH = Math.max(2, Math.round(tier[2] * ppu));
+      const padY = Math.round(ry - h * tier[0]);
+      const padLeft = Math.round(x - padW * 0.5);
+      ctx.fillStyle = pineShade;
+      ctx.fillRect(padLeft, Math.round(padY - padH * 0.35), padW, Math.round(padH * 0.65));
+      ctx.fillStyle = pineBody;
+      ctx.fillRect(padLeft + 1, Math.round(padY - padH * 0.85), Math.max(2, padW - 2), Math.round(padH * 0.65));
+    }
+    return;
+  }
+
+  // Tier 2 (Mid-Near LOD): adds 4th cloud tier & moonlight rim highlight
+  if (h < 68) {
+    const trunkW = Math.max(1, Math.round(110 * ppu));
+    ctx.fillStyle = trunkCol;
+    ctx.fillRect(Math.round(x - trunkW * 0.5), topY + Math.round(h * 0.35), trunkW, Math.round(h * 0.65));
+    for (let i = 0; i < PINE_TIERS.length; i++) {
       const tier = PINE_TIERS[i]!;
       const padW = Math.max(4, Math.round(tier[1] * ppu));
       const padH = Math.max(2, Math.round(tier[2] * ppu));
@@ -526,8 +610,8 @@ export function drawPine(
     return;
   }
 
-  // 1. Root flare base & rocky ground shadow (near LOD only)
-  if (ppu >= 0.016) {
+  // 1. Root flare base & rocky ground shadow (near foreground only)
+  if (ppu >= 0.018) {
     const rootW = Math.max(3, Math.round(280 * ppu));
     ctx.fillStyle = 'rgba(8, 3, 18, 0.55)';
     ctx.fillRect(
@@ -637,6 +721,7 @@ function drawLamp(
   y: number,
   ppu: number,
   side: number,
+  fogFactor = 0,
 ): void {
   const h = 2800 * ppu;
   const arm = 720 * ppu * -side;
@@ -644,73 +729,78 @@ function drawLamp(
   const rx = Math.round(x);
   const ry = Math.round(y);
   const topY = Math.round(y - h);
+  const isAtmospheric = fogFactor >= 0.55;
+  const poleCol = isAtmospheric ? activeAtmosphereSilhouette : LAMP_POLE;
+  const lightCol = isAtmospheric ? activeAtmosphereAccent : LAMP_LIGHT;
 
-  // Distant Low LOD: compact 2-rect silhouette for horizon lamps
-  if (h < 24) {
-    ctx.fillStyle = LAMP_POLE;
+  // Tier 0 (h < 22): 1px pole + 3x1 light point
+  if (h < 22) {
+    ctx.fillStyle = poleCol;
     ctx.fillRect(rx, topY, 1, Math.max(2, Math.round(h)));
-    ctx.fillStyle = LAMP_LIGHT;
+    ctx.fillStyle = lightCol;
     ctx.fillRect(Math.round(rx + arm - 1), topY, 3, 1);
     return;
   }
 
-  // Mid LOD: pole + cantilever arm + crisp light head (skips plinth, strut & translucent halos)
-  if (h < 52) {
-    ctx.fillStyle = LAMP_POLE;
+  // Tier 1 (22 <= h < 42): scaled pole + cantilever arm + lamp head
+  if (h < 42) {
+    ctx.fillStyle = poleCol;
     ctx.fillRect(Math.round(rx - w * 0.5), topY, w, Math.round(h));
     const armStartX = Math.round(Math.min(rx, rx + arm));
     const armW = Math.max(2, Math.round(Math.abs(arm)));
     ctx.fillRect(armStartX, topY, armW, w);
     const lwMid = Math.max(2, Math.round(280 * ppu));
-    ctx.fillStyle = LAMP_LIGHT;
+    ctx.fillStyle = lightCol;
     ctx.fillRect(Math.round(rx + arm - lwMid * 0.5), topY + w, lwMid, Math.max(1, Math.round(75 * ppu)));
     return;
   }
 
-  // Stepped steel plinth at base
+  // Base steel plinth (Tier 2+)
   if (w >= 2) {
     const baseW = w * 2.2;
     const baseH = Math.max(2, Math.round(h * 0.1));
-    ctx.fillStyle = '#241138';
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : '#241138';
     ctx.fillRect(Math.round(rx - baseW * 0.5), ry - baseH, Math.round(baseW), baseH);
   }
 
-  // Vertical pole + neon rim highlight
-  ctx.fillStyle = LAMP_POLE;
+  // Vertical pole + neon rim highlight (Tier 2+)
+  ctx.fillStyle = poleCol;
   ctx.fillRect(Math.round(rx - w * 0.5), topY, w, Math.round(h));
-  if (w >= 3) {
-    ctx.fillStyle = LAMP_POLE_EDGE;
+  if (w >= 2) {
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : LAMP_POLE_EDGE;
     ctx.fillRect(side < 0 ? rx : Math.round(rx - w * 0.5), topY, 1, Math.round(h));
   }
 
-  // Horizontal cantilever arm + diagonal support strut
+  // Horizontal cantilever arm
   const armStartX = Math.round(Math.min(rx, rx + arm));
   const armW = Math.max(2, Math.round(Math.abs(arm)));
-  ctx.fillStyle = LAMP_POLE;
+  ctx.fillStyle = poleCol;
   ctx.fillRect(armStartX, topY, armW, w);
-  if (w >= 2) {
-    ctx.fillRect(
-      Math.round(rx + arm * 0.28),
-      topY + w,
-      Math.max(1, Math.round(Math.abs(arm) * 0.25)),
-      w,
-    );
-  }
 
-  // Lamp head fixture & pixel-stepped neon glow halo (LOD: only draw semi-transparent halos on near lamps)
   const lw = Math.max(2, Math.round(280 * ppu));
   const lh = Math.max(1, Math.round(75 * ppu));
   const lampX = Math.round(rx + arm - lw * 0.5);
   const lampY = topY + w;
 
-  if (ppu >= 0.016 && lw >= 6) {
-    ctx.fillStyle = 'rgba(255, 243, 176, 0.22)';
-    ctx.fillRect(lampX - Math.round(lw * 0.45), lampY - lh, Math.round(lw * 1.9), lh * 4);
-    ctx.fillStyle = 'rgba(5, 217, 232, 0.25)';
-    ctx.fillRect(lampX - Math.round(lw * 0.2), lampY, Math.round(lw * 1.4), lh * 2);
+  // Tier 3 (h >= 64 and ppu >= 0.016): diagonal support strut & soft neon glow halos
+  if (h >= 64 && ppu >= 0.016) {
+    if (w >= 2) {
+      ctx.fillRect(
+        Math.round(rx + arm * 0.28),
+        topY + w,
+        Math.max(1, Math.round(Math.abs(arm) * 0.25)),
+        w,
+      );
+    }
+    if (lw >= 5) {
+      ctx.fillStyle = 'rgba(255, 243, 176, 0.22)';
+      ctx.fillRect(lampX - Math.round(lw * 0.45), lampY - lh, Math.round(lw * 1.9), lh * 4);
+      ctx.fillStyle = 'rgba(5, 217, 232, 0.25)';
+      ctx.fillRect(lampX - Math.round(lw * 0.2), lampY, Math.round(lw * 1.4), lh * 2);
+    }
   }
 
-  ctx.fillStyle = LAMP_LIGHT;
+  ctx.fillStyle = lightCol;
   ctx.fillRect(lampX, lampY, lw, lh);
 }
 
@@ -723,6 +813,7 @@ function drawBillboard(
   y: number,
   ppu: number,
   variant: number,
+  fogFactor = 0,
 ): void {
   const w = Math.max(4, Math.round(2600 * ppu));
   const h = Math.max(3, Math.round(1300 * ppu));
@@ -732,27 +823,25 @@ function drawBillboard(
   const ry = Math.round(y);
   const top = ry - legH - h;
   const left = Math.round(rx - w * 0.5);
+  const isAtmospheric = fogFactor >= 0.55;
+  const frameCol = isAtmospheric ? activeAtmosphereSilhouette : BILLBOARD_FRAME;
+  const v = variant % BILLBOARD_FACE.length;
+  const faceCol = isAtmospheric ? activeAtmosphereAccent : BILLBOARD_FACE[v]!;
 
   const leftLegX = Math.round(rx - w * 0.3 - legW * 0.5);
   const rightLegX = Math.round(rx + w * 0.3 - legW * 0.5);
-  ctx.fillStyle = BILLBOARD_FRAME;
+  ctx.fillStyle = frameCol;
   ctx.fillRect(leftLegX, ry - legH, legW, legH);
   ctx.fillRect(rightLegX, ry - legH, legW, legH);
-  if (w >= 32 && legH >= 6) {
-    ctx.fillStyle = '#3d3358';
+
+  // Tier 1+ (w >= 18): leg horizontal cross-brace
+  if (w >= 18 && legH >= 4) {
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : '#3d3358';
     ctx.fillRect(leftLegX, Math.round(ry - legH * 0.55), rightLegX - leftLegX + legW, Math.max(1, Math.round(legW * 0.45)));
   }
 
-  ctx.fillStyle = BILLBOARD_FRAME;
+  ctx.fillStyle = frameCol;
   ctx.fillRect(left, top, w, h);
-
-  if (w >= 32) {
-    ctx.fillStyle = '#fff3b0';
-    ctx.fillRect(Math.round(rx - w * 0.28), top - Math.max(1, Math.round(legW * 0.5)), Math.max(2, legW), Math.max(1, Math.round(legW * 0.5)));
-    ctx.fillRect(Math.round(rx + w * 0.22), top - Math.max(1, Math.round(legW * 0.5)), Math.max(2, legW), Math.max(1, Math.round(legW * 0.5)));
-    ctx.fillStyle = '#3a1d5c';
-    ctx.fillRect(left - 1, top + h, w + 2, Math.max(1, Math.round(legW * 0.5)));
-  }
 
   const pad = Math.max(1, Math.round(80 * ppu));
   const innerX = left + pad;
@@ -760,12 +849,27 @@ function drawBillboard(
   const innerW = Math.max(2, w - pad * 2);
   const innerH = Math.max(2, h - pad * 2);
 
-  const v = variant % BILLBOARD_FACE.length;
-  ctx.fillStyle = BILLBOARD_FACE[v]!;
+  ctx.fillStyle = faceCol;
   ctx.fillRect(innerX, innerY, innerW, innerH);
 
-  // Distant Low LOD: 2 legs + frame + inner face only
-  if (w < 32) return;
+  // Tier 0 (w < 18): legs + frame + atmospheric/base face panel
+  if (w < 18) return;
+
+  // Tier 1 (18 <= w < 34) or atmospheric haze: simple inner accent bands (no bright full artwork)
+  if (w < 34 || isAtmospheric) {
+    ctx.fillStyle = frameCol;
+    const bandH = Math.max(1, Math.round(innerH * 0.14));
+    ctx.fillRect(innerX + 2, innerY + Math.round(innerH * 0.3), Math.max(2, Math.round(innerW * 0.6)), bandH);
+    ctx.fillRect(innerX + 2, innerY + Math.round(innerH * 0.62), Math.max(2, Math.round(innerW * 0.4)), bandH);
+    return;
+  }
+
+  // Tier 2 (w >= 34): top floodlights, bottom catwalk & full billboard artwork
+  ctx.fillStyle = '#fff3b0';
+  ctx.fillRect(Math.round(rx - w * 0.28), top - Math.max(1, Math.round(legW * 0.5)), Math.max(2, legW), Math.max(1, Math.round(legW * 0.5)));
+  ctx.fillRect(Math.round(rx + w * 0.22), top - Math.max(1, Math.round(legW * 0.5)), Math.max(2, legW), Math.max(1, Math.round(legW * 0.5)));
+  ctx.fillStyle = '#3a1d5c';
+  ctx.fillRect(left - 1, top + h, w + 2, Math.max(1, Math.round(legW * 0.5)));
 
   if (innerW >= 12 && innerH >= 6) {
     if (v === 0) {
@@ -831,10 +935,12 @@ function drawBuilding(
   ppu: number,
   side: number,
   variant: number,
+  fogFactor = 0,
 ): void {
   const rx = Math.round(x);
   const ry = Math.round(y);
   const archVariant = variant % 3;
+  const isAtmospheric = fogFactor >= 0.55;
 
   if (archVariant === 0) {
     // =========================================================================
@@ -847,11 +953,11 @@ function drawBuilding(
     const v = variant % BUILDING_BODY.length;
 
     // Main Facade Tower
-    ctx.fillStyle = BUILDING_BODY[v]!;
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : BUILDING_BODY[v]!;
     ctx.fillRect(left, topY, w, h);
 
     // Structural edge / pillar on road side
-    ctx.fillStyle = BUILDING_TRIM[v]!;
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : BUILDING_TRIM[v]!;
     const trimW = Math.max(1, Math.round(w * 0.08));
     ctx.fillRect(side < 0 ? left + w - trimW : left, topY, trimW, h);
 
@@ -863,38 +969,49 @@ function drawBuilding(
     const usableW = Math.max(4, w - trimW);
     const facadeLeft = side < 0 ? left : left + trimW;
 
-    // Distant Low LOD: compact facade silhouette (5 rects)
-    if (w < 28 || h < 48) {
-      ctx.fillStyle = BUILDING_SIGN_BG[v]!;
+    // Tier 0 (Far / Atmospheric): compact facade silhouette + single blade accent
+    if (h < 48 || w < 26) {
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : BUILDING_SIGN_BG[v]!;
       ctx.fillRect(left, topY + Math.round(h * 0.2), Math.max(2, Math.round(w * 0.16)), Math.max(4, Math.round(h * 0.38)));
-      ctx.fillStyle = '#fff4cc';
-      ctx.fillRect(facadeLeft + 1, ry - Math.max(2, Math.round(h * 0.16)), usableW - 2, Math.max(2, Math.round(h * 0.12)));
       return;
     }
 
-    // Mid LOD: awning, shopfront, 3 continuous window ribbons, blade sign (zero 15-window/kanji grids)
-    if (w < 54 || h < 90) {
+    // Tier 1 (Mid-Far): 2 horizontal window ribbons + main sign block
+    if (h < 88 || w < 42) {
+      const upperH = h - roofH - Math.round(h * 0.2);
+      for (let f = 0; f < 2; f++) {
+        const wy = Math.round(topY + roofH + f * (upperH / 2) + upperH * 0.15);
+        ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : f === 0 ? '#ffeaa7' : '#00f5d4';
+        ctx.fillRect(facadeLeft + 2, wy, Math.max(2, usableW - 4), Math.max(2, Math.round(upperH * 0.14)));
+      }
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : BUILDING_SIGN_BG[v]!;
+      ctx.fillRect(left, topY + Math.round(h * 0.2), Math.max(2, Math.round(w * 0.16)), Math.max(4, Math.round(h * 0.38)));
+      return;
+    }
+
+    // Tier 2 (Mid-Near): ground awning, shopfront, 3 continuous window ribbons, blade sign, rooftop beacon
+    if (h < 145 || w < 64 || isAtmospheric) {
       const shopH = Math.max(5, Math.round(h * 0.22));
       const shopY = ry - shopH;
       const awnH = Math.max(2, Math.round(shopH * 0.28));
-      ctx.fillStyle = BUILDING_AWNING[v]!;
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : BUILDING_AWNING[v]!;
       ctx.fillRect(left, shopY, w, awnH);
-      ctx.fillStyle = '#fff4cc';
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#fff4cc';
       ctx.fillRect(facadeLeft + 2, shopY + awnH + 1, Math.max(3, usableW - 4), Math.max(2, shopH - awnH - 2));
 
       const upperH = shopY - (topY + roofH);
       for (let f = 0; f < 3; f++) {
         const wy = Math.round(topY + roofH + f * (upperH / 3) + upperH * 0.1);
-        ctx.fillStyle = f % 2 === 0 ? '#ffeaa7' : '#00f5d4';
+        ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : f % 2 === 0 ? '#ffeaa7' : '#00f5d4';
         ctx.fillRect(facadeLeft + 2, wy, Math.max(2, usableW - 4), Math.max(2, Math.round(upperH * 0.12)));
       }
       const signW = Math.max(3, Math.round(w * 0.18));
       const signH = Math.max(8, Math.round(h * 0.44));
       const signY = topY + Math.round(h * 0.16);
       const signX = side < 0 ? left + w - signW + 1 : left - 1;
-      ctx.fillStyle = BUILDING_SIGN_BG[v]!;
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : BUILDING_SIGN_BG[v]!;
       ctx.fillRect(signX, signY, signW, signH);
-      ctx.fillStyle = '#ff0055';
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#ff0055';
       ctx.fillRect(left + Math.round(w * 0.5) - 1, topY - 3, 2, 2);
       return;
     }
@@ -987,19 +1104,19 @@ function drawBuilding(
     const crownW = w - setbackW;
 
     // Dark sleek high-tech corporate body (constructed additively with zero sky-erasing hack)
-    ctx.fillStyle = '#070a18';
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : '#070a18';
     ctx.fillRect(left, topY + crownH, w, h - crownH); // Lower main tower body
     ctx.fillRect(crownLeft, topY, crownW, crownH);    // Upper setback crown
 
-    // Distant Low LOD: sleek tower silhouette + crown accent (4 rects total)
-    if (w < 28 || h < 48) {
-      ctx.fillStyle = '#00f5d4';
+    // Tier 0 (Far / Atmospheric): sleek tower silhouette + crown accent (3 rects total)
+    if (h < 60 || w < 24) {
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#00f5d4';
       ctx.fillRect(crownLeft + Math.round(crownW * 0.2), topY + Math.round(crownH * 0.4), Math.max(2, Math.round(crownW * 0.6)), 2);
       return;
     }
 
     // Skyscraper Structural Edge Trim (Cobalt Neon)
-    ctx.fillStyle = '#19284e';
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : '#19284e';
     const trimW = Math.max(1, Math.round(w * 0.05));
     // Full-height trim on straight side
     const straightTrimX = side < 0 ? left + w - trimW : left;
@@ -1010,17 +1127,30 @@ function drawBuilding(
     // Crown setback ledge horizontal trim
     ctx.fillRect(side < 0 ? left : left + crownW, topY + crownH, setbackW, Math.max(1, Math.round(trimW * 0.6)));
 
-    // Mid LOD: 3 continuous ribbon bands & beacons (zero 18-rect vertical mullions)
-    if (w < 54 || h < 90) {
+    // Tier 1 (Mid-Far): 2 continuous ribbon bands + crown bar
+    if (h < 105 || w < 38) {
+      const availH = h - crownH - Math.round(h * 0.1);
+      const bandLeft = left + Math.max(2, Math.round(w * 0.08));
+      const bandW = Math.max(2, w - Math.max(4, Math.round(w * 0.16)));
+      for (let b = 0; b < 2; b++) {
+        const by = Math.round(topY + crownH + Math.round(h * 0.06) + b * (availH / 2));
+        ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : b === 0 ? '#00f5d4' : '#3a86ff';
+        ctx.fillRect(bandLeft, by, bandW, Math.max(2, Math.round(availH * 0.14)));
+      }
+      return;
+    }
+
+    // Tier 2 (Mid-Near): 4 continuous ribbon bands & crown beacons (zero 18-rect vertical mullions)
+    if (h < 180 || w < 60 || isAtmospheric) {
       const availH = h - crownH - Math.round(h * 0.09);
       const bandLeft = left + Math.max(2, Math.round(w * 0.08));
       const bandW = Math.max(2, w - Math.max(4, Math.round(w * 0.16)));
-      for (let b = 0; b < 3; b++) {
-        const by = Math.round(topY + crownH + Math.round(h * 0.04) + b * (availH / 3));
-        ctx.fillStyle = b % 2 === 0 ? '#00f5d4' : '#3a86ff';
-        ctx.fillRect(bandLeft, by, bandW, Math.max(2, Math.round(availH * 0.14)));
+      for (let b = 0; b < 4; b++) {
+        const by = Math.round(topY + crownH + Math.round(h * 0.04) + b * (availH / 4));
+        ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : b % 2 === 0 ? '#00f5d4' : '#3a86ff';
+        ctx.fillRect(bandLeft, by, bandW, Math.max(2, Math.round(availH * 0.12)));
       }
-      ctx.fillStyle = '#ff0055';
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#ff0055';
       ctx.fillRect(crownLeft + 1, topY - 2, 2, 2);
       return;
     }
@@ -1084,35 +1214,48 @@ function drawBuilding(
     const left = side < 0 ? rx - w : rx;
 
     // Dark brick / concrete Showa building body
-    ctx.fillStyle = '#181024';
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : '#181024';
     ctx.fillRect(left, topY, w, h);
 
-    // Distant Low LOD: brick mass + magenta billboard block (3 rects)
-    if (w < 28 || h < 48) {
+    // Tier 0 (Far / Atmospheric): brick mass + rooftop billboard block (2-3 rects)
+    if (h < 44 || w < 26) {
       const boardW = Math.max(6, Math.round(w * 0.72));
       const boardH = Math.max(4, Math.round(h * 0.25));
-      ctx.fillStyle = '#ff007f';
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#ff007f';
       ctx.fillRect(left + Math.round((w - boardW) * 0.5), topY - boardH - 1, boardW, boardH);
-      ctx.fillStyle = '#ffbe0b';
-      ctx.fillRect(left + 2, ry - Math.max(3, Math.round(h * 0.2)), Math.max(2, w - 4), Math.max(2, Math.round(h * 0.12)));
       return;
     }
 
-    // Mid LOD: horizontal floor sills, 2 amber window strips & billboard face (zero 12-window/AC/fire-escape loops)
-    if (w < 54 || h < 90) {
-      ctx.fillStyle = '#2c1e40';
+    // Tier 1 (Mid-Far): 2 horizontal window ribbons + billboard block
+    if (h < 80 || w < 46) {
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#ffbe0b';
+      ctx.fillRect(left + 3, topY + Math.round(h * 0.22), Math.max(2, w - 6), Math.max(2, Math.round(h * 0.1)));
+      ctx.fillRect(left + 3, topY + Math.round(h * 0.54), Math.max(2, w - 6), Math.max(2, Math.round(h * 0.1)));
+      const boardW = Math.max(8, Math.round(w * 0.74));
+      const boardH = Math.max(5, Math.round(h * 0.25));
+      const boardX = left + Math.round((w - boardW) * 0.5);
+      const boardY = topY - boardH - 2;
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#ff007f';
+      ctx.fillRect(boardX, boardY, boardW, boardH);
+      return;
+    }
+
+    // Tier 2 (Mid-Near): horizontal floor sills, 2 amber window strips, shopfront & inner billboard face
+    if (h < 130 || w < 78 || isAtmospheric) {
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : '#2c1e40';
       ctx.fillRect(left, topY + Math.round(h * 0.35), w, Math.max(1, Math.round(h * 0.03)));
       ctx.fillRect(left, topY + Math.round(h * 0.7), w, Math.max(1, Math.round(h * 0.03)));
-      ctx.fillStyle = '#ffbe0b';
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#ffbe0b';
       ctx.fillRect(left + 3, topY + Math.round(h * 0.14), Math.max(2, w - 6), Math.max(2, Math.round(h * 0.09)));
       ctx.fillRect(left + 3, topY + Math.round(h * 0.48), Math.max(2, w - 6), Math.max(2, Math.round(h * 0.09)));
+      ctx.fillRect(left + 2, ry - Math.max(3, Math.round(h * 0.16)), Math.max(2, w - 4), Math.max(2, Math.round(h * 0.12)));
       const boardW = Math.max(8, Math.round(w * 0.75));
       const boardH = Math.max(5, Math.round(h * 0.26));
       const boardX = left + Math.round((w - boardW) * 0.5);
       const boardY = topY - boardH - 2;
-      ctx.fillStyle = '#ff007f';
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : '#ff007f';
       ctx.fillRect(boardX, boardY, boardW, boardH);
-      ctx.fillStyle = '#ffe600';
+      ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : '#ffe600';
       ctx.fillRect(boardX + 2, boardY + Math.round(boardH * 0.25), Math.max(2, boardW - 4), Math.max(2, Math.round(boardH * 0.5)));
       return;
     }
@@ -1351,6 +1494,7 @@ function drawGantry(
   x: number,
   y: number,
   ppu: number,
+  fogFactor = 0,
 ): void {
   // Spans across the entire roadway
   const spanW = Math.max(20, Math.round(6800 * ppu));
@@ -1359,9 +1503,12 @@ function drawGantry(
   const leftLegX = Math.round(x - spanW * 0.5);
   const rightLegX = Math.round(x + spanW * 0.5 - legW);
   const topY = Math.round(y - h);
+  const isAtmospheric = fogFactor >= 0.55;
+  const steelCol = isAtmospheric ? activeAtmosphereSilhouette : GANTRY_STEEL;
+  const signCol = isAtmospheric ? activeAtmosphereAccent : GANTRY_SIGN_GREEN;
 
   // Dual Vertical Steel Lattice Towers
-  ctx.fillStyle = GANTRY_STEEL;
+  ctx.fillStyle = steelCol;
   ctx.fillRect(leftLegX, topY, legW, h);
   ctx.fillRect(rightLegX, topY, legW, h);
 
@@ -1372,53 +1519,48 @@ function drawGantry(
   const leftSignX = Math.round(x - signW - spanW * 0.04);
   const rightSignX = Math.round(x + spanW * 0.04);
 
-  // Distant Low LOD: 2 legs + beam + 2 green sign rects (skips plinths, borders, and glyphs)
-  if (spanW < 85) {
+  // Tier 0 (spanW < 55): 2 legs + beam + 2 green sign rects
+  if (spanW < 55) {
     ctx.fillRect(leftLegX, topY, spanW, beamH);
-    ctx.fillStyle = GANTRY_SIGN_GREEN;
+    ctx.fillStyle = signCol;
     ctx.fillRect(leftSignX, signY, signW, signH);
     ctx.fillRect(rightSignX, signY, signW, signH);
     return;
   }
 
-  // Concrete foundation plinths at ground
+  // Overhead Horizontal Steel Truss Beam + top light highlight (Tier 1+)
+  ctx.fillStyle = steelCol;
+  ctx.fillRect(leftLegX, topY, spanW, beamH);
+  ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : GANTRY_STEEL_LIGHT;
+  ctx.fillRect(leftLegX, topY, spanW, Math.max(1, Math.round(beamH * 0.25)));
+
+  // Left & Right Sign white borders + green faces (Tier 1+)
+  const borderCol = isAtmospheric ? activeAtmosphereAccent : GANTRY_SIGN_BORDER;
+  ctx.fillStyle = borderCol;
+  ctx.fillRect(leftSignX - 1, signY - 1, signW + 2, signH + 2);
+  ctx.fillRect(rightSignX - 1, signY - 1, signW + 2, signH + 2);
+  ctx.fillStyle = signCol;
+  ctx.fillRect(leftSignX, signY, signW, signH);
+  ctx.fillRect(rightSignX, signY, signW, signH);
+
+  // Tier 1 (55 <= spanW < 95): skip ground plinths & internal directional glyphs
+  if (spanW < 95) return;
+
+  // Tier 2 (spanW >= 95): concrete foundation plinths + white directional arrows & kanji glyphs
   const plinthH = Math.max(2, Math.round(h * 0.08));
   ctx.fillStyle = '#120d22';
   ctx.fillRect(leftLegX - 1, y - plinthH, legW + 2, plinthH);
   ctx.fillRect(rightLegX - 1, y - plinthH, legW + 2, plinthH);
 
-  // Overhead Horizontal Steel Truss Beam
-  ctx.fillStyle = GANTRY_STEEL;
-  ctx.fillRect(leftLegX, topY, spanW, beamH);
-  ctx.fillStyle = GANTRY_STEEL_LIGHT;
-  ctx.fillRect(leftLegX, topY, spanW, Math.max(1, Math.round(beamH * 0.25)));
-
-  // Left Sign: Destination / Expressway Route
-  ctx.fillStyle = GANTRY_SIGN_BORDER;
-  ctx.fillRect(leftSignX - 1, signY - 1, signW + 2, signH + 2);
-  ctx.fillStyle = GANTRY_SIGN_GREEN;
-  ctx.fillRect(leftSignX, signY, signW, signH);
-
-  // Right Sign: Route Fork / Destination
-  ctx.fillStyle = GANTRY_SIGN_BORDER;
-  ctx.fillRect(rightSignX - 1, signY - 1, signW + 2, signH + 2);
-  ctx.fillStyle = GANTRY_SIGN_GREEN;
-  ctx.fillRect(rightSignX, signY, signW, signH);
-
-  // White directional arrows and stylized kanji glyphs
   if (signW >= 16 && signH >= 8) {
     ctx.fillStyle = '#ffffff';
-    // Left Sign glyphs: ⬆ 湾岸 WANGAN
     ctx.fillRect(leftSignX + 2, signY + Math.round(signH * 0.25), Math.max(1, Math.round(signW * 0.1)), Math.max(2, Math.round(signH * 0.5)));
     ctx.fillRect(leftSignX + Math.round(signW * 0.2), signY + Math.round(signH * 0.3), Math.max(2, Math.round(signW * 0.45)), Math.max(2, Math.round(signH * 0.4)));
-
-    // Right Sign glyphs: ⬆ 秋葉原 AKIBA
     ctx.fillRect(rightSignX + 2, signY + Math.round(signH * 0.25), Math.max(1, Math.round(signW * 0.1)), Math.max(2, Math.round(signH * 0.5)));
     ctx.fillRect(rightSignX + Math.round(signW * 0.2), signY + Math.round(signH * 0.3), Math.max(2, Math.round(signW * 0.45)), Math.max(2, Math.round(signH * 0.4)));
   }
 }
 
-// ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 // 7b. HIGHWAY OVERPASS / SCROLLING CAVALCAVIA (Ponte A)
 // ---------------------------------------------------------------------------
@@ -1429,6 +1571,7 @@ function drawOverpass(
   ppu: number,
   variant: number,
   beatPulse: number,
+  fogFactor = 0,
 ): void {
   // Spans across the entire roadway and clearance shoulders
   const spanW = Math.max(24, Math.round(7400 * ppu));
@@ -1436,6 +1579,7 @@ function drawOverpass(
   const deckH = Math.max(6, Math.round(1600 * ppu));
   const pillarW = Math.max(3, Math.round(360 * ppu));
   const totalH = clearanceH + deckH;
+  const isAtmospheric = fogFactor >= 0.55;
 
   const topY = Math.round(y - totalH);
   const deckBottomY = Math.round(y - clearanceH);
@@ -1447,12 +1591,16 @@ function drawOverpass(
 
   // Distant Low LOD: 2 pillars + deck fascia + parapet top rail (skips shadow, hazard plinths, soffit, and truss loop)
   if (spanW < 95) {
-    ctx.fillStyle = OVERPASS_CONCRETE_DARK;
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : OVERPASS_CONCRETE_DARK;
     ctx.fillRect(leftPillarX, deckBottomY, pillarW, clearanceH);
     ctx.fillRect(rightPillarX, deckBottomY, pillarW, clearanceH);
-    ctx.fillStyle = variant === 1 ? OVERPASS_STEEL_BLUE : OVERPASS_CONCRETE;
+    ctx.fillStyle = isAtmospheric
+      ? activeAtmosphereSilhouette
+      : variant === 1
+        ? OVERPASS_STEEL_BLUE
+        : OVERPASS_CONCRETE;
     ctx.fillRect(deckX, topY, deckSpanW, deckH);
-    ctx.fillStyle = OVERPASS_RAILING;
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : OVERPASS_RAILING;
     ctx.fillRect(deckX, topY - railingH, deckSpanW, railingH);
     return;
   }
@@ -1628,22 +1776,42 @@ function drawSuspensionTower(
   ppu: number,
   variant: number,
   beatPulse: number,
+  fogFactor = 0,
 ): void {
   const spanW = Math.max(24, Math.round(7800 * ppu));
   const towerH = Math.max(22, Math.round(9200 * ppu));
   const legW = Math.max(3, Math.round(440 * ppu));
   const topY = Math.round(y - towerH);
+  const isAtmospheric = fogFactor >= 0.55;
 
   const leftX = Math.round(x - spanW * 0.5);
   const rightX = Math.round(x + spanW * 0.5 - legW);
 
-  // Colors per variant
+  // Colors per variant (softened in distant fog)
   const isOrangeWhite = variant === 0;
   const isCyberTitanium = variant === 1;
 
-  const colPrimary = isOrangeWhite ? '#ff4800' : isCyberTitanium ? '#1e1935' : '#7b2cbf';
-  const colSecondary = isOrangeWhite ? '#f8f9fa' : isCyberTitanium ? '#00f5d4' : '#ff007f';
-  const colTruss = isOrangeWhite ? '#cc3700' : isCyberTitanium ? '#2c254d' : '#4a1572';
+  const colPrimary = isAtmospheric
+    ? activeAtmosphereSilhouette
+    : isOrangeWhite
+      ? '#ff4800'
+      : isCyberTitanium
+        ? '#1e1935'
+        : '#7b2cbf';
+  const colSecondary = isAtmospheric
+    ? activeAtmosphereAccent
+    : isOrangeWhite
+      ? '#f8f9fa'
+      : isCyberTitanium
+        ? '#00f5d4'
+        : '#ff007f';
+  const colTruss = isAtmospheric
+    ? activeAtmosphereSilhouette
+    : isOrangeWhite
+      ? '#cc3700'
+      : isCyberTitanium
+        ? '#2c254d'
+        : '#4a1572';
 
   // 1. Dual Vertical Tapered Towers (Left & Right legs)
   // Drawn with 5 alternating horizontal safety/aviation bands
@@ -2026,21 +2194,23 @@ function drawPylon(
   y: number,
   ppu: number,
   variant = 0,
+  fogFactor = 0,
 ): void {
   const isTerminal = variant === 1;
   const h = Math.max(20, Math.round(10200 * ppu));
   const baseW = Math.max(6, Math.round((isTerminal ? 3800 : 3400) * ppu));
   const rx = Math.round(x);
   const topY = Math.round(y - h);
+  const isAtmospheric = fogFactor >= 0.55;
 
   // Distant Low LOD: compact 3-rect tower silhouette
   if (h < 38) {
-    ctx.fillStyle = PYLON_STEEL;
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : PYLON_STEEL;
     ctx.fillRect(rx - 1, topY + Math.round(h * 0.2), 2, Math.round(h * 0.8));
-    ctx.fillStyle = PYLON_STEEL_LIGHT;
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : PYLON_STEEL_LIGHT;
     const armW = Math.max(6, Math.round(baseW * 1.6));
     ctx.fillRect(Math.round(rx - armW * 0.5), topY + Math.round(h * 0.2), armW, 2);
-    ctx.fillStyle = PYLON_BEACON;
+    ctx.fillStyle = isAtmospheric ? activeAtmosphereAccent : PYLON_BEACON;
     ctx.fillRect(rx - 1, topY, 2, 2);
     return;
   }
@@ -2854,6 +3024,7 @@ export function drawProp(
   beatPulse = 0,
   beatIndex = 0,
   clipY = Number.POSITIVE_INFINITY,
+  fogFactor = 0,
 ): void {
   // Abstract kinds fallback resolution if called directly without upstream resolution
   if (kind === 'tree') {
@@ -2864,22 +3035,22 @@ export function drawProp(
 
   switch (kind) {
     case 'palm':
-      drawPalm(ctx, x, y, ppu, side, variant);
+      drawPalm(ctx, x, y, ppu, side, variant, fogFactor);
       break;
     case 'street-tree':
-      drawStreetTree(ctx, x, y, ppu, side, variant);
+      drawStreetTree(ctx, x, y, ppu, side, variant, fogFactor);
       break;
     case 'pine':
-      drawPine(ctx, x, y, ppu, side, variant);
+      drawPine(ctx, x, y, ppu, side, variant, fogFactor);
       break;
     case 'lamp':
-      drawLamp(ctx, x, y, ppu, side);
+      drawLamp(ctx, x, y, ppu, side, fogFactor);
       break;
     case 'billboard':
-      drawBillboard(ctx, x, y, ppu, variant);
+      drawBillboard(ctx, x, y, ppu, variant, fogFactor);
       break;
     case 'building':
-      drawBuilding(ctx, x, y, ppu, side, variant);
+      drawBuilding(ctx, x, y, ppu, side, variant, fogFactor);
       break;
     case 'jihanki':
       drawJihanki(ctx, x, y, ppu, variant);
@@ -2888,13 +3059,13 @@ export function drawProp(
       drawPhonebooth(ctx, x, y, ppu);
       break;
     case 'gantry':
-      drawGantry(ctx, x, y, ppu);
+      drawGantry(ctx, x, y, ppu, fogFactor);
       break;
     case 'overpass':
-      drawOverpass(ctx, x, y, ppu, variant, beatPulse);
+      drawOverpass(ctx, x, y, ppu, variant, beatPulse, fogFactor);
       break;
     case 'suspension-tower':
-      drawSuspensionTower(ctx, x, y, ppu, variant, beatPulse);
+      drawSuspensionTower(ctx, x, y, ppu, variant, beatPulse, fogFactor);
       break;
     case 'vms':
       drawVMS(ctx, x, y, ppu, variant, beatPulse);
@@ -2903,7 +3074,7 @@ export function drawProp(
       drawChevron(ctx, x, y, ppu, side, variant, beatPulse, beatIndex);
       break;
     case 'pylon':
-      drawPylon(ctx, x, y, ppu, variant);
+      drawPylon(ctx, x, y, ppu, variant, fogFactor);
       break;
     case 'shrub':
       drawShrub(ctx, x, y, ppu, variant);

@@ -17,7 +17,7 @@ import {
   RENDER_WIDTH,
   TELEMETRY_HZ,
 } from '@src/config/constants';
-import { tuning } from '@src/config/tuning';
+import { DEFAULT_TUNING, tuning } from '@src/config/tuning';
 import {
   AutopilotDriver,
   type AutopilotForkPerception,
@@ -443,6 +443,9 @@ export class Game {
   private frameDtCursor = 0;
   private frameDtCount = 0;
   private lastBridgeJointSegment = -1;
+  private dynamicFov = DEFAULT_TUNING.fieldOfView;
+  private prevDynamicFov = DEFAULT_TUNING.fieldOfView;
+  private fovBoostPulse = 0;
   private memoryMb: number | null = null;
   private memoryCheckFrames = 0;
   private benchmarkWarmupFrames = 0;
@@ -457,6 +460,14 @@ export class Game {
 
   get paused(): boolean {
     return this.isPaused;
+  }
+
+  get currentFov(): number {
+    return this.dynamicFov;
+  }
+
+  get currentCameraDepth(): number {
+    return this.view.cameraDepth;
   }
 
   setPaused(paused: boolean): void {
@@ -924,6 +935,9 @@ export class Game {
       this.car.prevX = 0;
       this.lap = 1;
       this.lapTime = 0;
+      this.dynamicFov = tuning.fieldOfView;
+      this.prevDynamicFov = tuning.fieldOfView;
+      this.fovBoostPulse = 0;
       this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
       this.resetPerfBenchmark();
     } else if (prevLength > 0) {
@@ -994,6 +1008,9 @@ export class Game {
     this.nextTrackCache = null;
     this.activeNextTrackLookahead = undefined;
     this.hasStartedDriving = false;
+    this.dynamicFov = tuning.fieldOfView;
+    this.prevDynamicFov = tuning.fieldOfView;
+    this.fovBoostPulse = 0;
     this.resetPerfBenchmark();
     const first = this.library.selectTrack(0);
     this.audio.loadTrack(first.beatMap, first.audioBuffer);
@@ -1065,6 +1082,9 @@ export class Game {
           if (shiftRes) {
             this.melonSoda.applyImpulse(shiftRes.shiftJerk);
             this.runManager.recordShift(shiftRes.rewardTier, judgement.isDownbeat);
+            if (shiftRes.rewardTier === 'PERFECT') {
+              this.fovBoostPulse = 1.0;
+            }
           }
         } else if (p.action === 'tofuMode') {
           this.toggleTofuMode();
@@ -1369,7 +1389,21 @@ export class Game {
     const lookahead = this.getNextLookaheadTrack();
     this.activeNextTrackLookahead = this.forkChoice === 'right' ? lookahead : undefined;
 
-    this.background.update(dt, playerSeg.curve, this.car.speedRatio, triggerExtremeLightning);
+    this.prevDynamicFov = this.dynamicFov;
+    this.fovBoostPulse = Math.max(0, this.fovBoostPulse - dt * 2.8);
+    const fovSpeedRatio = Math.max(0, Math.min(1, this.car.speed / Math.max(1, tuning.maxSpeed)));
+    const overdriveFactor = this.car.grooveTier === 'OVERDRIVE' ? 1 : 0;
+    const targetFov = Math.min(
+      122,
+      tuning.fieldOfView +
+        fovSpeedRatio * fovSpeedRatio * tuning.dynamicFovSpeedBonus +
+        overdriveFactor * tuning.dynamicFovOverdriveBonus +
+        this.fovBoostPulse * tuning.dynamicFovBoostKick,
+    );
+    const fovRate = targetFov > this.dynamicFov ? 6.5 : 3.2;
+    this.dynamicFov += (targetFov - this.dynamicFov) * Math.min(1, dt * fovRate);
+
+    this.background.update(dt, playerSeg.curve, this.car.speedRatio, triggerExtremeLightning, slope);
     if (this.lastRenderTimestamp === 0) {
       this.bridge.offer(this.simTime, this.buildSnapshot);
     }
@@ -1469,7 +1503,14 @@ export class Game {
     this.view.position = renderPos;
     this.view.playerX = renderX;
     this.view.cameraHeight = tuning.cameraHeight + shakeOffset;
-    this.view.cameraDepth = cameraDepthFromFov(tuning.fieldOfView);
+    const hasDynamicFov =
+      tuning.dynamicFovSpeedBonus > 0 ||
+      tuning.dynamicFovOverdriveBonus > 0 ||
+      tuning.dynamicFovBoostKick > 0;
+    const renderFov = hasDynamicFov
+      ? interpolate(this.prevDynamicFov, this.dynamicFov, alpha)
+      : tuning.fieldOfView;
+    this.view.cameraDepth = cameraDepthFromFov(renderFov);
     this.view.roadWidth = tuning.roadWidth;
     this.view.drawDistance = tuning.drawDistance;
     this.view.fogDensity = tuning.fogDensity;
@@ -1747,6 +1788,9 @@ export class Game {
     if (event.type === 'driftEnd' && event.duration >= 0.4) {
       this.audio.triggerFilterBlip(0.65);
       this.particles.emitBoostOrShiftBurst(this.car, RENDER_WIDTH, RENDER_HEIGHT, 'DRIFT_EXIT');
+      if (event.duration >= tuning.driftBoostMinTime) {
+        this.fovBoostPulse = 1.0;
+      }
     }
     this.bridge.emit(event);
   };

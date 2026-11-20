@@ -77,6 +77,30 @@ export interface RoadSprite {
   chainId?: number;
 }
 
+export function isOverheadProp(kind: PropKind): boolean {
+  return kind === 'gantry' || kind === 'overpass' || kind === 'suspension-tower';
+}
+
+/**
+ * Deterministically orders each segment's sprites by descending `|offset|` (Band D -> C -> B -> A)
+ * so closer-to-road roadside props render over farther ones, with overhead portals always last.
+ */
+export function sortSegmentSprites(segments: readonly RoadSegment[]): void {
+  for (let i = 0; i < segments.length; i++) {
+    const sprites = segments[i]!.sprites;
+    if (sprites.length > 1) {
+      sprites.sort((a, b) => {
+        const aOver = isOverheadProp(a.kind) ? 1 : 0;
+        const bOver = isOverheadProp(b.kind) ? 1 : 0;
+        if (aOver !== bOver) return aOver - bOver;
+        const diff = Math.abs(b.offset) - Math.abs(a.offset);
+        if (Math.abs(diff) > 1e-6) return diff;
+        return a.offset - b.offset;
+      });
+    }
+  }
+}
+
 export interface RoadSegment {
   index: number;
   /** Near edge of the segment. */

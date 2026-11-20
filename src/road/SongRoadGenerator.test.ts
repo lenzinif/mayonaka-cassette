@@ -7,6 +7,7 @@ import {
 import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { describe, expect, it } from 'vitest';
 import { defineChunk, getChunksForRole, ROAD_CHUNKS, type RoadChunk, validateRoadChunk } from './RoadChunks';
+import { isOverheadProp } from './RoadSegment';
 import { CURVE } from './TrackBuilder';
 import {
   barToWorldZ,
@@ -744,6 +745,37 @@ describe('SongRoadGenerator', () => {
       const r = generateSongRoad(map);
       const peakY = Math.max(...r.segments.map((s) => Math.abs(s.p2.worldY)));
       expect(peakY).toBeLessThan(20000);
+    }
+  });
+
+  it('sorts segment sprites statically by descending |offset| with overhead portals last and preserves canonical order (Phase 4)', () => {
+    for (const map of [DEFAULT_SYNTH_BEATMAP, BUNDLED_WANGAN_BEATMAP, BUNDLED_COASTAL_BEATMAP]) {
+      const roadA = generateSongRoad(map, { seed: 'phase4-order-seed' });
+      const roadB = generateSongRoad(map, { seed: 'phase4-order-seed' });
+
+      let checkedMultiSpriteSegs = 0;
+      for (let i = 0; i < roadA.segments.length; i++) {
+        const sprites = roadA.segments[i]!.sprites;
+        expect(sprites).toEqual(roadB.segments[i]!.sprites);
+        expect(sprites).toEqual(roadA.canonical.sprites[i]);
+
+        if (sprites.length > 1) {
+          checkedMultiSpriteSegs++;
+          for (let k = 0; k < sprites.length - 1; k++) {
+            const curr = sprites[k]!;
+            const next = sprites[k + 1]!;
+            const currOver = isOverheadProp(curr.kind);
+            const nextOver = isOverheadProp(next.kind);
+            if (!currOver && !nextOver) {
+              expect(Math.abs(curr.offset)).toBeGreaterThanOrEqual(Math.abs(next.offset) - 1e-6);
+            }
+            if (currOver) {
+              expect(nextOver).toBe(true);
+            }
+          }
+        }
+      }
+      expect(checkedMultiSpriteSegs).toBeGreaterThan(0);
     }
   });
 });

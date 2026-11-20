@@ -1,6 +1,12 @@
 import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { easeIn, easeInOut } from './RoadProjection';
-import { createPoint, type PropKind, type RoadSegment, type Track } from './RoadSegment';
+import {
+  createPoint,
+  sortSegmentSprites,
+  type PropKind,
+  type RoadSegment,
+  type Track,
+} from './RoadSegment';
 
 /** Section lengths, in segments. */
 export const LENGTH = { SHORT: 25, MEDIUM: 50, LONG: 100 } as const;
@@ -113,6 +119,7 @@ export class TrackBuilder {
   }
 
   build(): Track {
+    sortSegmentSprites(this.segments);
     return {
       segments: this.segments,
       segmentLength: this.segmentLength,
