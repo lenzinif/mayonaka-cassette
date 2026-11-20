@@ -1,5 +1,17 @@
 @import 'tailwindcss';
 
+:root {
+  --ff-ink: #0b0e1e;
+  --ff-panel: #12172e;
+  --ff-panel-hi: #1a2140;
+  --ff-cream: #fff5e4;
+  --ff-muted: #94a0c4;
+  --ff-pink: #ff3b7f;
+  --ff-mint: #2ee8c4;
+  --ff-gold: #ffd166;
+  --ff-border: rgba(255, 245, 228, 0.16);
+}
+
 html,
 body,
 #root {
@@ -7,7 +19,15 @@ body,
   height: 100%;
   margin: 0;
   padding: 0;
-  background-color: #060112;
+  background-color: var(--ff-ink);
+  color: var(--ff-cream);
+  font-family:
+    'Space Grotesk',
+    'Noto Sans JP',
+    'Hiragino Kaku Gothic ProN',
+    'Yu Gothic',
+    system-ui,
+    sans-serif;
   overflow: hidden;
 }
 
@@ -18,6 +38,66 @@ dialog:modal {
 dialog::backdrop {
   overflow: hidden;
   overscroll-behavior: contain;
-  background-color: rgba(5, 1, 13, 0.82);
-  backdrop-filter: blur(4px);
+  background-color: rgba(11, 14, 30, 0.8);
+}
+
+.ff-display {
+  font-family:
+    'Archivo Black',
+    'Noto Sans JP',
+    'Hiragino Kaku Gothic StdN',
+    'Yu Gothic',
+    sans-serif;
+}
+
+.ff-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.ff-obi-v {
+  background: linear-gradient(
+    180deg,
+    var(--ff-pink) 0% 33.3%,
+    var(--ff-gold) 33.3% 66.6%,
+    var(--ff-mint) 66.6% 100%
+  );
+}
+
+.ff-obi-h {
+  background: linear-gradient(
+    90deg,
+    var(--ff-pink) 0% 33.3%,
+    var(--ff-gold) 33.3% 66.6%,
+    var(--ff-mint) 66.6% 100%
+  );
+}
+
+.ff-shadow-ink {
+  box-shadow: 4px 4px 0 #0b0e1e;
+}
+
+.ff-shadow-pink {
+  box-shadow: 4px 4px 0 #ff3b7f;
+}
+
+.ff-skew {
+  transform: skewX(-10deg);
+}
+
+.ff-unskew {
+  transform: skewX(10deg);
+}
+
+@keyframes ffSpinReel {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ff-spin-slow {
+  animation: ffSpinReel 5.5s linear infinite;
 }

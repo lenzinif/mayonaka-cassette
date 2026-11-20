@@ -1,6 +1,6 @@
 import { resetTuning, tuning } from '@src/config/tuning';
-import { beforeEach, describe, expect, it } from 'vitest';
-import { MelonSoda } from './MelonSoda';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { drawMelonSodaInset, MelonSoda } from './MelonSoda';
 
 describe('MelonSoda & Tofu Mode (M5)', () => {
   beforeEach(() => {
@@ -150,5 +150,43 @@ describe('MelonSoda & Tofu Mode (M5)', () => {
 
     expect(spills).toBe(0);
     expect(soda.effectivePeakAngle).toBeLessThan(tuning.sodaSpillThreshold);
+  });
+
+  it('draws static skin header instead of SPILL! -GROOVE / CREST! / SLOSH popup text', () => {
+    const soda = new MelonSoda();
+    soda.setActive(true);
+    soda.sloshState = 'SPILLING';
+    soda.spillFlash = 0.5;
+
+    const fillTextCalls: string[] = [];
+    const noop = vi.fn();
+    const mockCtx = {
+      save: noop,
+      restore: noop,
+      translate: noop,
+      rotate: noop,
+      fillRect: noop,
+      strokeRect: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      clip: noop,
+      fill: noop,
+      stroke: noop,
+      fillText: vi.fn((text: string) => {
+        fillTextCalls.push(text);
+      }),
+    } as unknown as CanvasRenderingContext2D;
+
+    drawMelonSodaInset(mockCtx, soda, 360, 1);
+
+    expect(fillTextCalls).toEqual(['SODA // x2']);
+    expect(fillTextCalls.join(' ')).not.toContain('SPILL!');
+    expect(fillTextCalls.join(' ')).not.toContain('GROOVE');
+    expect(fillTextCalls.join(' ')).not.toContain('CREST!');
+    expect(fillTextCalls.join(' ')).not.toContain('SLOSH');
   });
 });

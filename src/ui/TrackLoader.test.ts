@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { TrackLoader } from './TrackLoader';
 
-describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () => {
+describe('TrackLoader (UI Layer — Cassette Deck & Playlist)', () => {
   it('renders null when open is false', () => {
     const library = new TrackLibrary();
     const html = renderToString(
@@ -19,7 +19,7 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
     expect(html).toBe('');
   });
 
-  it('renders stage playlist with remove buttons for each track and restore defaults button', () => {
+  it('renders stage playlist with English remove buttons and restore defaults button', () => {
     const library = new TrackLibrary();
     const html = renderToString(
       createElement(TrackLoader, {
@@ -30,19 +30,21 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
 
     expect(text).toContain('STAGE PLAYLIST (3 TRACKS)');
     expect(text).toContain('RESTORE DEFAULTS');
-    expect(text).toContain('Neon Horizon (Synth Fallback)');
-    expect(text).toContain('Midnight Wangan 88 (Synth VIP)');
-    expect(text).toContain('Melon Soda Sunset (Synth Mix)');
+    expect(text).toContain('Neon Horizon');
+    expect(text).toContain("Midnight Wangan '88");
+    expect(text).toContain('Melon Soda Sunset');
+    expect(text).not.toContain('(Synth Fallback)');
+    expect(text).not.toContain('(Synth VIP)');
+    expect(text).not.toContain('(Synth Mix)');
 
-    // Remove buttons should be present with aria-labels and ✕ glyph
-    expect(html).toContain('aria-label="Rimuovi Neon Horizon (Synth Fallback) dalla playlist"');
-    expect(html).toContain('aria-label="Rimuovi Midnight Wangan 88 (Synth VIP) dalla playlist"');
-    expect(html).toContain('aria-label="Rimuovi Melon Soda Sunset (Synth Mix) dalla playlist"');
-    expect(html).toContain('title="Rimuovi &quot;Neon Horizon (Synth Fallback)&quot; dalla playlist"');
+    expect(html).toContain('aria-label="Remove Neon Horizon from playlist"');
+    expect(html).toContain('aria-label="Remove Midnight Wangan &#x27;88 from playlist"');
+    expect(html).toContain('aria-label="Remove Melon Soda Sunset from playlist"');
+    expect(html).toContain('title="Remove &quot;Neon Horizon&quot; from playlist"');
     expect(text).toContain('✕');
   });
 
@@ -61,11 +63,11 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
 
     expect(text).toContain('STAGE PLAYLIST (1 TRACK)');
     expect(html).toContain('disabled=""');
-    expect(html).toContain("Impossibile rimuovere l&#x27;unica traccia rimasta");
+    expect(html).toContain('Cannot remove the last remaining track');
   });
 
   it('renders initial soundtrack selection mode without bottom slop footer', () => {
@@ -82,13 +84,12 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
 
     expect(text).toContain('CASSETTE DECK');
-    expect(text).toContain('SELECT OR IMPORT AUDIO (MP3 / WAV / OGG / FLAC)');
+    expect(text).toContain('Your music generates the road');
     expect(text).toContain('BACK [ESC]');
-    expect(text).not.toContain('START DRIVE [ENTER] ▷');
-    expect(text).not.toContain('INSERT TAPE & DRIVE [ENTER] ▷');
+    expect(text).not.toContain('START DRIVE [ENTER]');
     expect(text).not.toContain('Selected Tape:');
   });
 
@@ -104,16 +105,16 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
 
     expect(text).toContain('CASSETTE DECK');
     expect(text).toContain('BACK [ESC]');
-    expect(text).not.toContain('RESUME DRIVE [ENTER] ▷');
+    expect(text).not.toContain('RESUME DRIVE [ENTER]');
     expect(text).not.toContain('CLOSE [ESC]');
     expect(text).not.toContain('Selected Tape:');
   });
 
-  it('renders centered SCEGLI FILE button and "Nessun file selezionato" text underneath', () => {
+  it('renders clean English ADD TRACKS button and "No file selected" status', () => {
     const library = new TrackLibrary();
     const html = renderToString(
       createElement(TrackLoader, {
@@ -124,10 +125,14 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
 
-    expect(text).toContain('SCEGLI FILE');
-    expect(text).toContain('Nessun file selezionato');
+    expect(text).toContain('ADD TRACKS');
+    expect(text).toContain('No file selected');
+    expect(text).not.toContain('SCEGLI FILE');
+    expect(text).not.toContain('Nessun file');
+    expect(text).not.toContain('Rimuovi');
+    expect(text).not.toContain('IDB CACHE HIT');
     expect(html).toContain('type="file"');
     expect(html).toContain('class="sr-only"');
   });
@@ -143,16 +148,16 @@ describe('TrackLoader (UI Layer — Playlist Management & Track Removal)', () =>
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&');
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
 
     expect(text).toContain('PLAY PREVIEW');
     expect(text).toContain('SKIP TO DROP');
     expect(text).toContain('BEAT CLICK: OFF');
-    expect(text).toContain('SYNTH PREVIEW');
+    expect(text).toContain('SYNTH');
     expect(html).toContain('aria-label="4-beat bar indicator"');
     expect(html).toContain('aria-label="Track preview position"');
-    expect(html).toContain('aria-label="Preview Neon Horizon (Synth Fallback)"');
-    expect(html).toContain('aria-label="Preview Midnight Wangan 88 (Synth VIP)"');
+    expect(html).toContain('aria-label="Preview Neon Horizon"');
+    expect(html).toContain('aria-label="Preview Midnight Wangan &#x27;88"');
     expect(html).toContain('title="Explain what BPM, Tap Tempo, and Beat -1 / +1 do"');
   });
 });

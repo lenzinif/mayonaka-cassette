@@ -95,10 +95,19 @@ function createMockSnapshot(overrides: Partial<TelemetrySnapshot> = {}): Telemet
   };
 }
 
-describe('HUD (Overhauled Cockpit Overlay)', () => {
-  it('renders cassette groove deck, tofu strip, and JDM digidash modules', () => {
+describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
+  it('renders harmonized cassette widget, tofu strip, and VFD digidash without FPS clutter or alert popups', () => {
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
-    const snap = createMockSnapshot();
+    const snap = createMockSnapshot({
+      gear: 4,
+      rpm: 0.98,
+      isOffRoad: true,
+      isLugging: true,
+      isRedlining: true,
+      isOverdrive: true,
+      isDrifting: true,
+      lastShiftTier: 'PERFECT',
+    });
     bridge.publish(() => snap);
 
     const rawHtml = renderToString(
@@ -113,29 +122,53 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    // Cassette Deck & Groove Tape module (with clean integrated playlist track)
     expect(text).toContain('Mayonaka FM — Plastic Love Night');
-    expect(text).toContain('TRK 2/3');
+    expect(text).toContain('2/3');
     expect(text).toContain('126.0 BPM');
     expect(text).toContain('BAR 016.1');
-    expect(text).toContain('FUNKY OVERDRIVE');
+    expect(text).toContain('GOLD · OVERDRIVE');
     expect(text).toContain('88%');
 
-    // Tofu Mode strip & switchboard
-    expect(text).toContain('TOFU CUP // ×2 GROOVE');
-    expect(text).toContain('SPILLS: 1');
-    expect(text).toContain('120 FPS');
+    expect(text).toContain('TOFU ×2');
+    expect(text).toContain('1 SPILL');
     expect(text).toContain('GP');
 
-    // JDM Digidash (Tachometer + Gearbox + Speedometer + Groove Flux)
-    expect(text).toContain('DRIFTING 1.4S');
-    expect(text).toContain('SHIFT ON BEAT [SPACE]');
-    expect(text).toContain('LAST SHIFT: PERFECT (-12MS)');
-    expect(text).toContain('72–90% BEAT ZONE');
+    expect(text).toContain('GROOVE');
     expect(text).toContain('214');
     expect(text).toContain('KM/H');
-    expect(text).toContain('GROOVE FLUX');
-    expect(text).toContain('TIER: OVERDRIVE');
+    expect(text).toContain('OVERDRIVE');
+    expect(text).toContain('SHIFT BEAT');
+
+    expect(text).not.toContain('120 FPS');
+    expect(text).not.toContain('GROOVE FLUX');
+    expect(text).not.toContain('72–90% BEAT ZONE');
+    expect(text).not.toContain('🤖');
+    expect(text).not.toContain('OFF-ROAD');
+    expect(text).not.toContain('DRIFTING 1.4S');
+    expect(text).not.toContain('BOGGING! DOWNSHIFT');
+    expect(text).not.toContain('REV LIMIT! SHIFT UP');
+    expect(text).not.toContain('SHIFT ON BEAT [SPACE]');
+    expect(text).not.toContain('LAST SHIFT:');
+    expect(text).not.toContain('PRESS ANY KEY OR DRIVE TO START SYNTH AUDIO');
+  });
+
+  it('does not render audio unlock banner when audioUnlocked is false', () => {
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const snap = createMockSnapshot({ audioUnlocked: false });
+    bridge.publish(() => snap);
+
+    const rawHtml = renderToString(
+      createElement(HUD, {
+        bridge,
+        debugOpen: false,
+        onToggleDebug: vi.fn(),
+        onOpenTrackLoader: vi.fn(),
+        onOpenInspector: vi.fn(),
+        onRestartRun: vi.fn(),
+      }),
+    );
+    const text = rawHtml.replace(/<!--.*?-->/g, '');
+    expect(text).not.toContain('PRESS ANY KEY OR DRIVE TO START SYNTH AUDIO');
   });
 
   it('renders session telemetry and personal best inside PauseMenu when paused', () => {
@@ -156,7 +189,7 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
     expect(text).toContain('PAUSED');
-    expect(text).toContain('STAGE');
+    expect(text).toContain('STAGE 02');
     expect(text).toContain((48200).toLocaleString());
     expect(text).toContain(`BEST S · ${(52000).toLocaleString()}`);
     expect(text).toContain('LAP 2');
@@ -182,9 +215,9 @@ describe('HUD (Overhauled Cockpit Overlay)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).not.toContain('GAME PAUSED');
-    expect(text).not.toContain('RESUME DRIVE [P]');
+    expect(text).not.toContain('RESUME [P]');
   });
+
   it('renders null when gameStarted is false, preventing premature in-game overlay and pause menu', () => {
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
     const snap = createMockSnapshot({ isPaused: true });

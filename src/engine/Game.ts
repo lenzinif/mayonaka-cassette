@@ -1235,16 +1235,17 @@ export class Game {
     this.updateForkState();
 
     // 5. Update reactive Web Audio filter/pitch and sample BeatClock
-    const playerWorldZ = this.position + playerZOffset;
-    const currentSeg = findSegment(this.track, playerWorldZ);
-    const isBridge = currentSeg ? currentSeg.env === 'bridge' : false;
-
-    this.drivingAudioParams.isBridge = isBridge;
-
-    if (isBridge && currentSeg && currentSeg.stripe === 0 && currentSeg.index % 8 === 0 && this.lastBridgeJointSegment !== currentSeg.index) {
-      this.lastBridgeJointSegment = currentSeg.index;
-      this.audio.playBridgeJoint();
-      if (this.melonSoda.active) {
+    if (this.melonSoda.active) {
+      const playerWorldZ = this.position + playerZOffset;
+      const currentSeg = findSegment(this.track, playerWorldZ);
+      if (
+        currentSeg &&
+        currentSeg.env === 'bridge' &&
+        currentSeg.stripe === 0 &&
+        currentSeg.index % 8 === 0 &&
+        this.lastBridgeJointSegment !== currentSeg.index
+      ) {
+        this.lastBridgeJointSegment = currentSeg.index;
         this.melonSoda.applyVerticalImpulse(0.04);
       }
     }
@@ -1758,7 +1759,7 @@ export class Game {
       this.collisionShake = Math.max(this.collisionShake, 0.55);
       this.prevCollisionShake = this.collisionShake;
       this.melonSoda.applyImpulse(event.side * 3.8);
-      this.audio.triggerCollisionSound('traffic');
+      this.audio.triggerPitchDip(0.08, 0.35);
       this.runManager.recordTruckKnockedOff();
     } else if (event.outcome === 'propBounce') {
       // Roadside prop scrape: gentle arcade rub and clean flow retention
@@ -1767,14 +1768,15 @@ export class Game {
       this.prevCollisionShake = this.collisionShake;
       this.car.deductGroove(tuning.grooveCollisionPenalty * 0.6, this.handleCarEvent);
       this.melonSoda.applyImpulse(event.side * 2.8);
-      this.audio.triggerCollisionSound('prop');
+      this.audio.triggerPitchDip(0.025, 0.18);
     } else {
       this.runManager.recordCollision();
       this.collisionShake = Math.max(this.collisionShake, 0.85);
       this.prevCollisionShake = this.collisionShake;
       this.car.deductGroove(tuning.grooveCollisionPenalty, this.handleCarEvent);
       this.melonSoda.applyImpulse(event.side * 6.5);
-      this.audio.triggerCollisionSound(event.obstacle);
+      const isTraffic = event.obstacle === 'traffic';
+      this.audio.triggerPitchDip(isTraffic ? 0.08 : 0.025, isTraffic ? 0.35 : 0.18);
     }
     this.bridge.emit(event);
   };

@@ -8,11 +8,11 @@ describe('MainMenu (UI Layer)', () => {
     progress: { percent: 45, loaded: 9, total: 20, currentAssetId: 'sprites/car.png', failed: 0 },
     ready: false,
     audioUnlocked: false,
-    currentTrackTitle: 'Neon Horizon (Synth Fallback)',
+    currentTrackTitle: 'Neon Horizon',
+    currentTrackArtist: 'Mayonaka FM',
     currentTrackBpm: 122,
     onStartDrive: vi.fn(),
     onOpenCassetteDeck: vi.fn(),
-    onOpenInspector: vi.fn(),
     onUnlockAudio: vi.fn(),
     autoShift: false,
     onToggleAutoShift: vi.fn(),
@@ -26,33 +26,34 @@ describe('MainMenu (UI Layer)', () => {
     onToggleCrt: vi.fn(),
   };
 
-  it('renders retro arcade title, Japanese calligraphy, version, and preloading status when ready is false', () => {
+  it('renders Future Funk logo, broadcast bar, cassette J-card, and preloading status when ready is false', () => {
     const rawHtml = renderToString(createElement(MainMenu, defaultProps));
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('真夜中CASSETTE');
+    expect(text).toContain('真夜中');
+    expect(text).toContain('CASSETTE');
     expect(text).toContain('MAYONAKA CASSETTE');
-    expect(text).toContain('OUTRUN FM 88.4');
-    expect(text).toContain('TUNE IN AUDIO');
-    expect(text).toContain('TAPE');
+    expect(text).toContain('88.4 FM');
+    expect(text).toContain('TOKYO BAY');
+    expect(text).toContain('SOUND');
+    expect(text).toContain('SIDE A');
     expect(text).toContain('Neon Horizon');
-    expect(text).toContain('122.0 BPM');
+    expect(text).toContain('Mayonaka FM');
+    expect(text).toContain('122 BPM');
 
-    // Clean 4-item arcade menu items
-    expect(text).toContain('LOADING ASSETS... (45%)');
-    expect(text).toContain('SELECT TRACK');
+    expect(text).toContain('LOADING (45%)');
+    expect(text).toContain('CASSETTES');
     expect(text).toContain('OPTIONS');
-    expect(text).toContain('CONTROLS &amp; GUIDE');
+    expect(text).toContain('GUIDE');
 
-    // Discrete dev button in footer
-    expect(text).toContain('BEATMAP LAB [DEV]');
-
-    // Footer navigation hint
-    expect(text).toContain('[W/S] NAVIGATE');
-    expect(text).toContain('[ENTER] SELECT');
+    expect(text).not.toContain('OUTRUN FM');
+    expect(text).not.toContain('BEATMAP LAB');
+    expect(text).not.toContain('(Synth Fallback)');
+    expect(text).not.toContain('READY');
+    expect(text).not.toContain('TUNE IN AUDIO');
   });
 
-  it('renders ready state and flashing READY badge when preloading completes', () => {
+  it('renders DRIVE menu item cleanly when preloading completes', () => {
     const rawHtml = renderToString(
       createElement(MainMenu, {
         ...defaultProps,
@@ -62,11 +63,11 @@ describe('MainMenu (UI Layer)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('START DRIVE');
-    expect(text).toContain('READY');
+    expect(text).toContain('DRIVE');
+    expect(text).not.toContain('LOADING');
   });
 
-  it('renders ON AIR equalizer badge when audio is unlocked', () => {
+  it('renders STEREO indicator when audio is unlocked', () => {
     const rawHtml = renderToString(
       createElement(MainMenu, {
         ...defaultProps,
@@ -75,7 +76,7 @@ describe('MainMenu (UI Layer)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('STEREO ON AIR');
-    expect(text).not.toContain('TUNE IN AUDIO');
+    expect(text).toContain('STEREO');
+    expect(text).not.toContain('SOUND');
   });
 });
