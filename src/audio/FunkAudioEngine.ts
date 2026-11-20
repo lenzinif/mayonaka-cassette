@@ -24,7 +24,7 @@ export const DEFAULT_SYNTH_BEATMAP: BeatMap = createDefaultSynthBeatMap();
  */
 export const BUNDLED_WANGAN_BEATMAP: BeatMap = createBundledTrackBeatMap({
   contentHash: 'sha256:bundled-midnight-wangan-126bpm',
-  title: 'Midnight Wangan 88 (Synth VIP)',
+  title: "Midnight Wangan '88",
   artist: 'Plastic Love FM',
   bpm: 126,
   sections: [
@@ -43,7 +43,7 @@ export const BUNDLED_WANGAN_BEATMAP: BeatMap = createBundledTrackBeatMap({
  */
 export const BUNDLED_COASTAL_BEATMAP: BeatMap = createBundledTrackBeatMap({
   contentHash: 'sha256:bundled-coastal-breeze-118bpm',
-  title: 'Melon Soda Sunset (Synth Mix)',
+  title: 'Melon Soda Sunset',
   artist: 'Kissaten 1986',
   bpm: 118,
   sections: [
@@ -66,8 +66,8 @@ export const BUNDLED_BEATMAPS: readonly BeatMap[] = [
 function createDefaultSynthBeatMap(): BeatMap {
   return createBundledTrackBeatMap({
     contentHash: 'sha256:bundled-neon-horizon-122bpm',
-    title: 'Neon Horizon (Synth Fallback)',
-    artist: 'OutRun FM 88.4',
+    title: 'Neon Horizon',
+    artist: 'Mayonaka FM',
     bpm: 122,
     sections: [
       { startBar: 0, bars: 8, role: 'intro' },
@@ -312,8 +312,6 @@ export interface DrivingAudioParams {
    * Used when `holdOutroLoop === true` to modulate Tape Drag (Stage 1).
    */
   roadBeatsRemaining?: number;
-  /** True when the car is on a bridge (Fase 5: expansion joint audio cues). */
-  isBridge?: boolean;
 }
 
 export interface PreviewSample {
@@ -585,41 +583,6 @@ export class FunkAudioEngine {
         this.dubDelayNode = dubDelay;
         this.dubFilterNode = dubFilter;
         this.dubFeedbackGain = dubFeedback;
-      }
-
-      // Warm up transient OscillatorNode -> GainNode pipeline silently (via zero-gain sink)
-      // including 'triangle' wavetable and exponentialRampToValueAtTime AudioParam timelines
-      // so the first in-game shift, collision, or bridge expansion joint has 0ms JIT/graph overhead.
-      try {
-        const nowWarm = ctx.currentTime;
-        const warmOsc = ctx.createOscillator();
-        const warmGain = ctx.createGain();
-        const muteSink = ctx.createGain();
-        muteSink.gain.value = 0;
-
-        warmOsc.type = 'triangle';
-        warmOsc.frequency.setValueAtTime(80, nowWarm);
-        warmOsc.frequency.exponentialRampToValueAtTime(32, nowWarm + 0.004);
-
-        warmGain.gain.setValueAtTime(0.01, nowWarm);
-        warmGain.gain.exponentialRampToValueAtTime(0.001, nowWarm + 0.004);
-
-        warmOsc.connect(warmGain);
-        warmGain.connect(muteSink);
-        muteSink.connect(gain);
-        warmOsc.onended = () => {
-          try {
-            warmOsc.disconnect();
-            warmGain.disconnect();
-            muteSink.disconnect();
-          } catch {
-            // Ignore
-          }
-        };
-        warmOsc.start(nowWarm);
-        warmOsc.stop(nowWarm + 0.005);
-      } catch {
-        // Ignore in restricted/mock contexts
       }
     }
 
@@ -1093,69 +1056,6 @@ export class FunkAudioEngine {
    */
   triggerFilterBlip(strength = 1): void {
     this.filterBlipBoost = Math.min(1.5, Math.max(this.filterBlipBoost, strength));
-  }
-
-  /**
-   * Plays a synthesized low-frequency "clack-clack" thud when crossing a metallic bridge expansion joint (Ponte B).
-   */
-  playBridgeJoint(): void {
-    if (!this.ctx || !this.masterGain || this.ctx.state !== 'running' || this.isPaused) return;
-    const now = this.ctx.currentTime;
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(80, now);
-    osc.frequency.exponentialRampToValueAtTime(32, now + 0.045);
-
-    const vol = tuning.bridgeJointVolume ?? 0.18;
-    gain.gain.setValueAtTime(vol, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
-
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    osc.onended = () => {
-      try {
-        osc.disconnect();
-        gain.disconnect();
-      } catch {
-        // Ignore disconnect errors in mock contexts
-      }
-    };
-    osc.start(now);
-    osc.stop(now + 0.055);
-  }
-
-  triggerCollisionSound(obstacle: 'prop' | 'traffic'): void {
-    this.triggerPitchDip(
-      obstacle === 'traffic' ? 0.08 : 0.025,
-      obstacle === 'traffic' ? 0.35 : 0.18,
-    );
-
-    if (!this.ctx || !this.masterGain || this.ctx.state !== 'running') return;
-    const now = this.ctx.currentTime;
-
-    const osc = this.ctx.createOscillator();
-    const gain = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(obstacle === 'traffic' ? 120 : 90, now);
-    osc.frequency.exponentialRampToValueAtTime(36, now + 0.12);
-
-    gain.gain.setValueAtTime(obstacle === 'traffic' ? 0.12 : 0.07, now);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
-
-    osc.connect(gain);
-    gain.connect(this.masterGain);
-    osc.onended = () => {
-      try {
-        osc.disconnect();
-        gain.disconnect();
-      } catch {
-        // Ignore disconnect errors in mock contexts
-      }
-    };
-    osc.start(now);
-    osc.stop(now + 0.14);
   }
 
   /**

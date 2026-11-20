@@ -496,7 +496,7 @@ export function drawMelonSodaInset(
   ctx.lineWidth = isSpilling || isCresting ? 1.5 : 1;
   ctx.strokeRect(0.5, 0.5, boxW - 1, boxH - 1);
 
-  // Header strip with live state label ("CALM", "SLOSH", "CREST!", "SPILL!") + skin short label
+  // Header strip with static skin label + danger meter
   ctx.fillStyle = isSpilling ? '#ff2a6d' : isCresting ? '#522608' : '#1b0938';
   ctx.fillRect(1, 1, boxW - 2, 13);
 
@@ -510,14 +510,7 @@ export function drawMelonSodaInset(
         : soda.skin === 'boss-coffee'
           ? 'BOSS CAN'
           : 'SODA';
-  const headerText = isSpilling
-    ? 'SPILL! -GROOVE'
-    : isCresting
-      ? `CREST! ${skinShort}`
-      : soda.sloshState === 'SLOSHING'
-        ? `SLOSH // ${skinShort}`
-        : `${skinShort} // x2`;
-  ctx.fillText(headerText, 5, 10);
+  ctx.fillText(`${skinShort} // x2`, 5, 10);
 
   // Danger meter bar on right side of header
   const meterW = 24;

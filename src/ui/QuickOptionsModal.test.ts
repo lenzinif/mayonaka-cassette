@@ -24,12 +24,17 @@ describe('QuickOptionsModal (UI Layer)', () => {
     expect(html).toBe('');
   });
 
-  it('renders unified header with single BACK [ESC] button and no footer', () => {
+  it('renders J-Card header with single BACK [ESC] button and clean toggle rows', () => {
     const rawHtml = renderToString(createElement(QuickOptionsModal, defaultProps));
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
     expect(text).toContain('OPTIONS');
     expect(text).toContain('BACK [ESC]');
+    expect(text).toContain('GEARBOX [G]');
+    expect(text).toContain('TOFU MODE [T]');
+    expect(text).toContain('DASHBOARD CUP [V]');
+    expect(text).toContain('HUD [H]');
+    expect(text).toContain('CRT SCANLINES');
     expect(text).not.toContain('[ESC · BACK]');
     const matches = text.match(/BACK/g);
     expect(matches).toHaveLength(1);

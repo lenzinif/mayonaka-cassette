@@ -14,27 +14,30 @@ describe('VfdDigidash', () => {
     gear: 4,
     rpm: 0.84,
     isLugging: false,
-    isRedlining: false,
-    isOverdrive: false,
     autoShift: false,
-    lastShiftTier: 'PERFECT',
-    lastShiftDeltaMs: 14,
-    isDrifting: true,
-    driftTime: 1.8,
-    isOffRoad: false,
     onToggleAutoShift: vi.fn(),
   };
 
-  it('renders VFD speed, tachometer sweet-spot, active gear, and drift alert', () => {
-    const text = renderClean(createElement(VfdDigidash, defaultProps));
+  it('renders VFD speed, shift beat cue, and active gear without dynamic alert popups', () => {
+    const text = renderClean(
+      createElement(VfdDigidash, {
+        ...defaultProps,
+        rpm: 0.98,
+        isLugging: true,
+      }),
+    );
 
     expect(text).toContain('188');
     expect(text).toContain('KM/H');
-    expect(text).toContain('72–90% BEAT ZONE');
-    expect(text).toContain('DRIFTING 1.8S');
-    expect(text).toContain('LAST SHIFT: PERFECT (+14MS)');
-    expect(text).toContain('SHIFT ON BEAT [SPACE]');
+    expect(text).toContain('SHIFT BEAT');
     expect(text).toContain('MAN');
+    expect(text).not.toContain('SHIFT ON BEAT [SPACE]');
+    expect(text).not.toContain('LAST SHIFT:');
+    expect(text).not.toContain('DRIFTING');
+    expect(text).not.toContain('OVERDRIVE');
+    expect(text).not.toContain('OFF-ROAD');
+    expect(text).not.toContain('BOGGING! DOWNSHIFT');
+    expect(text).not.toContain('REV LIMIT! SHIFT UP');
   });
 
   it('renders auto shift badge when enabled', () => {
@@ -48,7 +51,7 @@ describe('VfdDigidash', () => {
     expect(text).toContain('AUTO');
   });
 
-  it('renders Groove Flux VFD meter and tier badge', () => {
+  it('renders Groove meter and tier badge cleanly', () => {
     const text = renderClean(
       createElement(VfdDigidash, {
         ...defaultProps,
@@ -57,8 +60,10 @@ describe('VfdDigidash', () => {
       }),
     );
 
-    expect(text).toContain('GROOVE FLUX');
+    expect(text).toContain('GROOVE');
     expect(text).toContain('88%');
-    expect(text).toContain('TIER: HIGH');
+    expect(text).toContain('HIGH');
+    expect(text).not.toContain('GROOVE FLUX');
+    expect(text).not.toContain('TIER:');
   });
 });

@@ -41,32 +41,32 @@ export const RhythmBezel = memo(function RhythmBezel({
         className="absolute inset-x-0 top-0 h-8"
         style={{
           backgroundImage: isOverdrive
-            ? 'linear-gradient(to bottom, rgba(251, 191, 36, 0.34), rgba(255, 42, 109, 0.14), rgba(0, 0, 0, 0))'
-            : 'linear-gradient(to bottom, rgba(5, 217, 232, 0.24), rgba(255, 42, 109, 0.08), rgba(0, 0, 0, 0))',
+            ? 'linear-gradient(to bottom, rgba(255, 209, 102, 0.34), rgba(255, 59, 127, 0.16), rgba(0, 0, 0, 0))'
+            : 'linear-gradient(to bottom, rgba(46, 232, 196, 0.24), rgba(255, 59, 127, 0.10), rgba(0, 0, 0, 0))',
         }}
       />
       <div
         className="absolute inset-x-0 bottom-0 h-8"
         style={{
           backgroundImage: isOverdrive
-            ? 'linear-gradient(to top, rgba(251, 191, 36, 0.34), rgba(255, 42, 109, 0.14), rgba(0, 0, 0, 0))'
-            : 'linear-gradient(to top, rgba(5, 217, 232, 0.24), rgba(255, 42, 109, 0.08), rgba(0, 0, 0, 0))',
+            ? 'linear-gradient(to top, rgba(255, 209, 102, 0.34), rgba(255, 59, 127, 0.16), rgba(0, 0, 0, 0))'
+            : 'linear-gradient(to top, rgba(46, 232, 196, 0.24), rgba(255, 59, 127, 0.10), rgba(0, 0, 0, 0))',
         }}
       />
       <div
         className="absolute inset-y-0 left-0 w-8"
         style={{
           backgroundImage: isOverdrive
-            ? 'linear-gradient(to right, rgba(251, 191, 36, 0.34), rgba(255, 42, 109, 0.14), rgba(0, 0, 0, 0))'
-            : 'linear-gradient(to right, rgba(5, 217, 232, 0.24), rgba(255, 42, 109, 0.08), rgba(0, 0, 0, 0))',
+            ? 'linear-gradient(to right, rgba(255, 209, 102, 0.34), rgba(255, 59, 127, 0.16), rgba(0, 0, 0, 0))'
+            : 'linear-gradient(to right, rgba(46, 232, 196, 0.24), rgba(255, 59, 127, 0.10), rgba(0, 0, 0, 0))',
         }}
       />
       <div
         className="absolute inset-y-0 right-0 w-8"
         style={{
           backgroundImage: isOverdrive
-            ? 'linear-gradient(to left, rgba(251, 191, 36, 0.34), rgba(255, 42, 109, 0.14), rgba(0, 0, 0, 0))'
-            : 'linear-gradient(to left, rgba(5, 217, 232, 0.24), rgba(255, 42, 109, 0.08), rgba(0, 0, 0, 0))',
+            ? 'linear-gradient(to left, rgba(255, 209, 102, 0.34), rgba(255, 59, 127, 0.16), rgba(0, 0, 0, 0))'
+            : 'linear-gradient(to left, rgba(46, 232, 196, 0.24), rgba(255, 59, 127, 0.10), rgba(0, 0, 0, 0))',
         }}
       />
     </div>

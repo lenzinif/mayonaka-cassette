@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { DEFAULT_TUNING, TUNING_CONTROLS } from '@src/config/tuning';
+import { describe, expect, it, vi } from 'vitest';
 import { BeatClock } from './BeatClock';
 import {
   clearSynthLoopCache,
@@ -212,5 +213,77 @@ describe('BeatClock & FunkAudioEngine', () => {
     expect((engine as unknown as { virtualTrackSec: number }).virtualTrackSec).toBe(0);
 
     engine.dispose();
+  });
+
+  it('removes synthesized in-game SFX methods, warm-up oscillator, and bridgeJointVolume tuning', async () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+
+    expect('playBridgeJoint' in engine).toBe(false);
+    expect('triggerCollisionSound' in engine).toBe(false);
+    expect('bridgeJointVolume' in DEFAULT_TUNING).toBe(false);
+    expect(TUNING_CONTROLS.some((c) => (c.key as string) === 'bridgeJointVolume')).toBe(false);
+
+    const createOscillator = vi.fn();
+    const fakeParam = () => ({
+      value: 0,
+      setValueAtTime: vi.fn(),
+      linearRampToValueAtTime: vi.fn(),
+      exponentialRampToValueAtTime: vi.fn(),
+      cancelScheduledValues: vi.fn(),
+    });
+    const fakeNode = () => ({
+      gain: fakeParam(),
+      frequency: fakeParam(),
+      Q: fakeParam(),
+      delayTime: fakeParam(),
+      type: 'lowpass',
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    });
+    const mockCtx = {
+      state: 'running',
+      currentTime: 0,
+      sampleRate: 44100,
+      destination: {},
+      createBiquadFilter: vi.fn(fakeNode),
+      createGain: vi.fn(fakeNode),
+      createDelay: vi.fn(fakeNode),
+      createOscillator,
+      createBuffer: vi.fn((_c: number, length: number, sampleRate: number) => ({
+        length,
+        sampleRate,
+        duration: length / sampleRate,
+        getChannelData: () => new Float32Array(length),
+      })),
+      createBufferSource: vi.fn(() => ({
+        buffer: null,
+        loop: false,
+        playbackRate: fakeParam(),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+      })),
+      resume: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+
+    const g = globalThis as unknown as { window?: unknown; AudioContext?: unknown };
+    const prevWindow = g.window;
+    const prevAudioCtx = g.AudioContext;
+    const AudioCtxCtor = vi.fn(function () {
+      return mockCtx;
+    });
+    g.window = { AudioContext: AudioCtxCtor };
+    g.AudioContext = AudioCtxCtor;
+
+    try {
+      await engine.unlock();
+      expect(createOscillator).not.toHaveBeenCalled();
+    } finally {
+      g.window = prevWindow;
+      g.AudioContext = prevAudioCtx;
+      engine.dispose();
+    }
   });
 });
