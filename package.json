@@ -1,7 +1,7 @@
 {
   "name": "mayonaka-cassette",
   "private": true,
-  "version": "0.3.4-alpha",
+  "version": "0.4.0",
   "description": "真夜中Cassette (Mayonaka Cassette) — A retro-futuristic driving flow-state game powered by Japanese Future Funk rhythms (Playable Alpha).",
   "type": "module",
   "license": "MIT",
@@ -21,6 +21,9 @@
     "check": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
+    "@fontsource/archivo-black": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/space-grotesk": "^5.3.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

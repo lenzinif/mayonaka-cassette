@@ -16,7 +16,7 @@ describe('RhythmBezel', () => {
     expect(html).toBe('');
   });
 
-  it('renders cyan edge glow strips when pulse is active on downbeat', () => {
+  it('renders mint edge glow strips when pulse is active on downbeat', () => {
     const html = renderToString(
       createElement(RhythmBezel, {
         beatPulse: 0.9,
@@ -26,10 +26,10 @@ describe('RhythmBezel', () => {
     );
 
     expect(html).toContain('linear-gradient');
-    expect(html).toContain('rgba(5, 217, 232');
+    expect(html).toContain('rgba(46, 232, 196');
   });
 
-  it('renders amber overdrive edge glow when OVERDRIVE groove tier is active', () => {
+  it('renders gold overdrive edge glow when OVERDRIVE groove tier is active', () => {
     const html = renderToString(
       createElement(RhythmBezel, {
         beatPulse: 0.8,
@@ -38,6 +38,6 @@ describe('RhythmBezel', () => {
       }),
     );
 
-    expect(html).toContain('rgba(251, 191, 36');
+    expect(html).toContain('rgba(255, 209, 102');
   });
 });

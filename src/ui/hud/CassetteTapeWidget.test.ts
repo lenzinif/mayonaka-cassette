@@ -28,18 +28,16 @@ describe('CassetteTapeWidget', () => {
     onToggleVisible: vi.fn(),
   };
 
-  it('renders tape details, label, spools, and Dolby NR indicator when visible', () => {
+  it('renders tape details, label, spools, and physical tape grade when visible', () => {
     const text = renderClean(createElement(CassetteTapeWidget, defaultProps));
 
     expect(text).toContain('Plastic Love Band — Midnight Drive');
-    expect(text).toContain('DOLBY B·NR');
-    expect(text).toContain('真夜中 CASSETTE C-90');
-    expect(text).toContain('TYPE IV // FUTURE FUNK FLOW');
-    expect(text).toContain('TRACK 28%');
+    expect(text).toContain('METAL · TYPE IV');
     expect(text).toContain('124.0 BPM');
     expect(text).toContain('BAR 009.2');
     expect(text).toContain('TOFU ×2');
-    expect(text).toContain('▶ PLAY');
+    expect(text).not.toContain('LPF');
+    expect(text).not.toContain('DOLBY');
   });
 
   it('renders slack animation when damaged or soda spills', () => {
@@ -50,7 +48,7 @@ describe('CassetteTapeWidget', () => {
       }),
     );
 
-    expect(text).toContain('⚠ TAPE SLACK!');
+    expect(text).toContain('TAPE SLACK');
     expect(text).toContain('<svg');
   });
 
@@ -62,8 +60,8 @@ describe('CassetteTapeWidget', () => {
       }),
     );
 
-    expect(text).toContain('[C] ⏏ TAPE: Midnight Drive');
-    expect(text).not.toContain('TYPE IV // FUTURE FUNK FLOW');
+    expect(text).toContain('⏏ Midnight Drive [C]');
+    expect(text).not.toContain('METAL · TYPE IV');
   });
 
   it('renders Master Overdrive variant on OVERDRIVE tier', () => {
@@ -75,7 +73,7 @@ describe('CassetteTapeWidget', () => {
       }),
     );
 
-    expect(text).toContain('SPECIAL // FUNKY OVERDRIVE');
+    expect(text).toContain('GOLD · OVERDRIVE');
   });
 
   it('renders playlist track badge when multiple tracks exist in playlist', () => {
@@ -87,6 +85,6 @@ describe('CassetteTapeWidget', () => {
       }),
     );
 
-    expect(text).toContain('[TRK 2/4]');
+    expect(text).toContain('[2/4]');
   });
 });

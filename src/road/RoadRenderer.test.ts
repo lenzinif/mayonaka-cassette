@@ -1,5 +1,12 @@
+import { tuning } from '@src/config/tuning';
 import { describe, expect, it } from 'vitest';
-import { PALETTE_AKIBA_NIGHT, PALETTE_NIGHT_FUNK, PALETTE_OG_FUTURE_FUNK } from './palette';
+import {
+  lerpHexColor,
+  PALETTE_AKIBA_NIGHT,
+  PALETTE_NIGHT_FUNK,
+  PALETTE_OG_FUTURE_FUNK,
+  PALETTE_VAPORFUNK,
+} from './palette';
 import { RoadRenderer, type RoadView } from './RoadRenderer';
 import { createPoint, type RoadSegment, type SegmentEnvironment, type Track } from './RoadSegment';
 
@@ -543,5 +550,206 @@ describe('RoadRenderer — Rendering Environments', () => {
     renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
     expect(renderer.stats.crestClips).toBeGreaterThan(0);
     expect(clipCalls).toBeGreaterThan(0);
+  });
+
+  describe('Fase 1 — Local Prop Category Fade-In', () => {
+    function createLargeTrack(length = 220): Track {
+      const segments: RoadSegment[] = [];
+      const segmentLength = 200;
+      for (let i = 0; i < length; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      return { segments, segmentLength, length: length * segmentLength };
+    }
+
+    function createAlphaTrackingCtx() {
+      let currentAlpha = 1;
+      const drawAlphas: number[] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        get globalAlpha() {
+          return currentAlpha;
+        },
+        set globalAlpha(v: number) {
+          currentAlpha = v;
+        },
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: () => {
+          drawAlphas.push(currentAlpha);
+        },
+        stroke: noop,
+        fillRect: () => {
+          drawAlphas.push(currentAlpha);
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+      return { ctx, drawAlphas };
+    }
+
+    it('fades lamp, jihanki, and Band D building smoothly inside their category thresholds and draws at alpha 1 closer up', () => {
+      const drawDistance = 200;
+      const baseView: RoadView = { ...defaultView, drawDistance };
+
+      const cases: Array<{
+        kind: 'lamp' | 'jihanki' | 'building';
+        offset: number;
+        farN: number;
+        nearN: number;
+      }> = [
+        { kind: 'lamp', offset: 1.3, farN: Math.floor(drawDistance * 0.64), nearN: Math.floor(drawDistance * 0.4) },
+        { kind: 'jihanki', offset: 1.4, farN: Math.floor(drawDistance * 0.54), nearN: Math.floor(drawDistance * 0.35) },
+        { kind: 'building', offset: 7.0, farN: Math.floor(drawDistance * 0.46), nearN: Math.floor(drawDistance * 0.28) },
+      ];
+
+      for (const c of cases) {
+        const renderer = new RoadRenderer();
+
+        // Far edge just inside category cutoff -> drawn with alpha strictly in (0, 0.7)
+        const farTrack = createLargeTrack(220);
+        farTrack.segments[c.farN]!.sprites.push({ kind: c.kind, offset: c.offset, variant: 0 });
+        const farPropTracker = createAlphaTrackingCtx();
+        renderer.render(farPropTracker.ctx, farTrack, baseView, PALETTE_NIGHT_FUNK);
+        const nonOneAlphas = farPropTracker.drawAlphas.filter((a) => a !== 1);
+        expect(renderer.stats.drawnProps).toBe(1);
+        expect(nonOneAlphas.length).toBeGreaterThan(0);
+        for (const a of nonOneAlphas) {
+          expect(a).toBeGreaterThan(0);
+          expect(a).toBeLessThan(0.7);
+        }
+        expect(farPropTracker.ctx.globalAlpha).toBe(1);
+
+        // Mid-near inside full opacity range -> drawn at alpha === 1 (never dimmed)
+        const nearTrack = createLargeTrack(220);
+        nearTrack.segments[c.nearN]!.sprites.push({ kind: c.kind, offset: c.offset, variant: 0 });
+        const nearPropTracker = createAlphaTrackingCtx();
+        renderer.render(nearPropTracker.ctx, nearTrack, baseView, PALETTE_NIGHT_FUNK);
+        expect(renderer.stats.drawnProps).toBe(1);
+        for (const a of nearPropTracker.drawAlphas) {
+          expect(a).toBe(1);
+        }
+        expect(nearPropTracker.ctx.globalAlpha).toBe(1);
+      }
+    });
+  });
+
+  describe('Fase 2 — 4-Band Atmospheric Depth Fog', () => {
+    function createFogTrack(len = 200): Track {
+      const segments: RoadSegment[] = [];
+      const segmentLength = 200;
+      for (let i = 0; i < len; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: 0,
+          sprites: [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      return { segments, segmentLength, length: len * segmentLength };
+    }
+
+    function hexRgbDist(hexA: string, hexB: string): number {
+      const parse = (h: string) => [
+        parseInt(h.slice(1, 3), 16),
+        parseInt(h.slice(3, 5), 16),
+        parseInt(h.slice(5, 7), 16),
+      ];
+      const [r1, g1, b1] = parse(hexA);
+      const [r2, g2, b2] = parse(hexB);
+      return Math.abs(r1! - r2!) + Math.abs(g1! - g2!) + Math.abs(b1! - b2!);
+    }
+
+    it('renders Band 0 (<25%) with pure palette colors and Band 2-3 (>60%) with fog-blended colors', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const track = createFogTrack(200);
+      const mock = createMockCanvas();
+
+      renderer.render(mock.ctx, track, { ...defaultView, drawDistance: 200 }, PALETTE_OG_FUTURE_FUNK);
+
+      expect(mock.fills).toContain(PALETTE_OG_FUTURE_FUNK.road[0]);
+      expect(mock.fills).toContain(PALETTE_OG_FUTURE_FUNK.rumble[0]);
+      // Distant segments inject fog-blended colors not equal to pure Band 0 road/rumble
+      const uniqueFills = new Set(mock.fills);
+      expect(uniqueFills.size).toBeGreaterThan(6);
+    });
+
+    it('disables depth fog across the whole track when roadFogStrength is 0', () => {
+      tuning.roadFogStrength = 0;
+      const renderer = new RoadRenderer();
+      const track = createFogTrack(200);
+      const mock = createMockCanvas();
+
+      renderer.render(mock.ctx, track, { ...defaultView, drawDistance: 200 }, PALETTE_OG_FUTURE_FUNK);
+
+      const allowed = new Set([
+        PALETTE_OG_FUTURE_FUNK.grass[0],
+        PALETTE_OG_FUTURE_FUNK.grass[1],
+        PALETTE_OG_FUTURE_FUNK.rumble[0],
+        PALETTE_OG_FUTURE_FUNK.rumble[1],
+        PALETTE_OG_FUTURE_FUNK.road[0],
+        PALETTE_OG_FUTURE_FUNK.road[1],
+        PALETTE_OG_FUTURE_FUNK.lane,
+        PALETTE_OG_FUTURE_FUNK.mountainRim,
+        lerpHexColor(PALETTE_OG_FUTURE_FUNK.rumble[0], PALETTE_OG_FUTURE_FUNK.rumble[1], 0.5),
+        lerpHexColor(PALETTE_OG_FUTURE_FUNK.road[0], PALETTE_OG_FUTURE_FUNK.road[1], 0.5),
+      ]);
+      for (const f of mock.fills) {
+        expect(allowed.has(f)).toBe(true);
+      }
+      expect(mock.fills).not.toContain(PALETTE_OG_FUTURE_FUNK.fog);
+
+      tuning.roadFogStrength = 0.65;
+    });
+
+    it('applies stronger fog blending on PALETTE_VAPORFUNK (fogDensity 1.35) than PALETTE_AKIBA_NIGHT (0.85)', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const track = createFogTrack(200);
+
+      const mockVapor = createMockCanvas();
+      renderer.render(mockVapor.ctx, track, { ...defaultView, drawDistance: 200 }, PALETTE_VAPORFUNK);
+
+      const mockAkiba = createMockCanvas();
+      renderer.render(mockAkiba.ctx, track, { ...defaultView, drawDistance: 200 }, PALETTE_AKIBA_NIGHT);
+
+      const vaporBand3Road = mockVapor.fills.find((f) => f.startsWith('#') && f !== PALETTE_VAPORFUNK.road[0] && f !== PALETTE_VAPORFUNK.grass[0] && f !== PALETTE_VAPORFUNK.rumble[0] && f !== PALETTE_VAPORFUNK.lane);
+      expect(vaporBand3Road).toBeDefined();
+
+      // Measure relative shift toward fog in Band 3 (first non-Band0 road slices painted in back-to-front order)
+      const vaporBaseDist = hexRgbDist(PALETTE_VAPORFUNK.road[0], PALETTE_VAPORFUNK.fog);
+      const vaporMoved = mockVapor.fills.some(
+        (f) => f.startsWith('#') && f !== PALETTE_VAPORFUNK.road[0] && hexRgbDist(f, PALETTE_VAPORFUNK.fog) < vaporBaseDist * 0.45,
+      );
+      const akibaBaseDist = hexRgbDist(PALETTE_AKIBA_NIGHT.road[0], PALETTE_AKIBA_NIGHT.fog);
+      const akibaStrongerRatio = mockAkiba.fills.some(
+        (f) => f.startsWith('#') && f !== PALETTE_AKIBA_NIGHT.road[0] && hexRgbDist(f, PALETTE_AKIBA_NIGHT.fog) < akibaBaseDist * 0.35,
+      );
+      expect(vaporMoved).toBe(true);
+      expect(akibaStrongerRatio).toBe(false);
+    });
   });
 });

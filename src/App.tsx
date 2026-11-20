@@ -290,7 +290,7 @@ export function App() {
   };
 
   return (
-    <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[#060112]">
+    <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[var(--ff-ink)]">
       <div className="relative aspect-video max-h-full max-w-full w-full overflow-hidden">
         <CanvasStage
           bridge={bridge}
@@ -433,6 +433,7 @@ export function App() {
             ready={preloadReady}
             audioUnlocked={audioUnlocked}
             currentTrackTitle={audio.beatMap.title}
+            currentTrackArtist={audio.beatMap.artist}
             currentTrackBpm={audio.beatMap.bpm}
             onStartDrive={handleStartDrive}
             onOpenCassetteDeck={() => {
@@ -440,7 +441,6 @@ export function App() {
               setIsInitialSelect(true);
               setTrackLoaderOpen(true);
             }}
-            onOpenInspector={() => setInspectorOpen(true)}
             onUnlockAudio={() => {
               void audio.unlock().then(() => setAudioUnlocked(true));
             }}

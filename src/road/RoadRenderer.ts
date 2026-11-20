@@ -26,6 +26,7 @@ import {
   drawProp,
   getPropWorldHeight,
   getPylonAttachmentPoints,
+  setPropAtmosphere,
   setPropTheme,
 } from './RoadsideProps';
 
@@ -114,13 +115,32 @@ export class RoadRenderer {
   private cachedBridgeWaterGrad: CanvasGradient | null = null;
 
   // Cached Nyquist-filtered far-horizon colors for coalesced sub-pixel slices (Zero GC)
-  private cachedHorizonFog = '';
-  private cachedHorizonRumble0 = '';
-  private cachedHorizonRumble1 = '';
   private cachedHorizonCurbColor = '#4a4a6a';
-  private cachedHorizonRoad0 = '';
-  private cachedHorizonRoad1 = '';
   private cachedHorizonRoadColor = '#141928';
+
+  // Pre-allocated 4-band depth fog palette (Phase 2, Zero GC)
+  private static readonly FOG_BAND_T = [0, 0.22, 0.48, 0.72] as const;
+  private readonly fogGrass0 = ['', '', '', ''];
+  private readonly fogGrass1 = ['', '', '', ''];
+  private readonly fogRoad0 = ['', '', '', ''];
+  private readonly fogRoad1 = ['', '', '', ''];
+  private readonly fogRumble0 = ['', '', '', ''];
+  private readonly fogRumble1 = ['', '', '', ''];
+  private readonly fogLane = ['', '', '', ''];
+  private cachedFogColor = '';
+  private cachedFogGrass0 = '';
+  private cachedFogGrass1 = '';
+  private cachedFogRoad0 = '';
+  private cachedFogRoad1 = '';
+  private cachedFogRumble0 = '';
+  private cachedFogRumble1 = '';
+  private cachedFogLane = '';
+  private cachedFogMountain = '';
+  private cachedFogMountainRim = '';
+  private cachedFogStrength = -1;
+  private cachedFogPaletteDensity = -1;
+  private cachedPropSilhouette = '#070b20';
+  private cachedPropAccent = '#056e68';
 
   private profileTick = 0;
 
@@ -182,23 +202,65 @@ export class RoadRenderer {
       view.nextTrack.segments.length > 0;
     const nextTrackStartPassIdx = segments.length - base.index;
 
-    // Refresh cached Nyquist-filtered far-horizon colors only on palette change (Zero GC)
+    // Refresh 4-band depth fog & Nyquist far-horizon caches only on palette/tuning change (Zero GC)
+    const fogStrength = Math.max(0, Math.min(1, tuning.roadFogStrength));
+    const fogDensity = palette.fogDensity ?? 1.0;
     if (
-      this.cachedHorizonFog !== palette.fog ||
-      this.cachedHorizonRumble0 !== palette.rumble[0] ||
-      this.cachedHorizonRumble1 !== palette.rumble[1] ||
-      this.cachedHorizonRoad0 !== palette.road[0] ||
-      this.cachedHorizonRoad1 !== palette.road[1]
+      this.cachedFogColor !== palette.fog ||
+      this.cachedFogGrass0 !== palette.grass[0] ||
+      this.cachedFogGrass1 !== palette.grass[1] ||
+      this.cachedFogRoad0 !== palette.road[0] ||
+      this.cachedFogRoad1 !== palette.road[1] ||
+      this.cachedFogRumble0 !== palette.rumble[0] ||
+      this.cachedFogRumble1 !== palette.rumble[1] ||
+      this.cachedFogLane !== palette.lane ||
+      this.cachedFogMountain !== palette.mountain ||
+      this.cachedFogMountainRim !== palette.mountainRim ||
+      this.cachedFogStrength !== fogStrength ||
+      this.cachedFogPaletteDensity !== fogDensity
     ) {
-      this.cachedHorizonFog = palette.fog;
-      this.cachedHorizonRumble0 = palette.rumble[0];
-      this.cachedHorizonRumble1 = palette.rumble[1];
-      this.cachedHorizonRoad0 = palette.road[0];
-      this.cachedHorizonRoad1 = palette.road[1];
-      const midRumble = lerpHexColor(palette.rumble[0], palette.rumble[1], 0.5);
-      this.cachedHorizonCurbColor = lerpHexColor(midRumble, palette.fog, 0.45);
-      this.cachedHorizonRoadColor = lerpHexColor(palette.road[0], palette.road[1], 0.5);
+      this.cachedFogColor = palette.fog;
+      this.cachedFogGrass0 = palette.grass[0];
+      this.cachedFogGrass1 = palette.grass[1];
+      this.cachedFogRoad0 = palette.road[0];
+      this.cachedFogRoad1 = palette.road[1];
+      this.cachedFogRumble0 = palette.rumble[0];
+      this.cachedFogRumble1 = palette.rumble[1];
+      this.cachedFogLane = palette.lane;
+      this.cachedFogMountain = palette.mountain;
+      this.cachedFogMountainRim = palette.mountainRim;
+      this.cachedFogStrength = fogStrength;
+      this.cachedFogPaletteDensity = fogDensity;
+
+      this.cachedPropSilhouette = lerpHexColor(palette.mountain, palette.fog, 0.45);
+      this.cachedPropAccent = lerpHexColor(palette.mountainRim, palette.fog, 0.55);
+
+      for (let b = 0; b < 4; b++) {
+        const tFog =
+          b === 0 || fogStrength <= 0
+            ? 0
+            : Math.max(0, Math.min(0.88, RoadRenderer.FOG_BAND_T[b]! * fogStrength * fogDensity));
+        this.fogGrass0[b] =
+          tFog <= 0 ? palette.grass[0] : lerpHexColor(palette.grass[0], palette.fog, tFog);
+        this.fogGrass1[b] =
+          tFog <= 0 ? palette.grass[1] : lerpHexColor(palette.grass[1], palette.fog, tFog);
+        this.fogRoad0[b] =
+          tFog <= 0 ? palette.road[0] : lerpHexColor(palette.road[0], palette.fog, tFog);
+        this.fogRoad1[b] =
+          tFog <= 0 ? palette.road[1] : lerpHexColor(palette.road[1], palette.fog, tFog);
+        this.fogRumble0[b] =
+          tFog <= 0 ? palette.rumble[0] : lerpHexColor(palette.rumble[0], palette.fog, tFog);
+        this.fogRumble1[b] =
+          tFog <= 0 ? palette.rumble[1] : lerpHexColor(palette.rumble[1], palette.fog, tFog);
+        this.fogLane[b] = tFog <= 0 ? palette.lane : lerpHexColor(palette.lane, palette.fog, tFog);
+      }
+
+      const farRumbleMid = lerpHexColor(this.fogRumble0[3]!, this.fogRumble1[3]!, 0.5);
+      this.cachedHorizonCurbColor =
+        fogStrength <= 0 ? farRumbleMid : lerpHexColor(farRumbleMid, palette.fog, 0.25);
+      this.cachedHorizonRoadColor = lerpHexColor(this.fogRoad0[3]!, this.fogRoad1[3]!, 0.5);
     }
+    setPropAtmosphere(palette.fog, this.cachedPropSilhouette, this.cachedPropAccent);
 
     const horizonY = Math.floor(height * 0.5);
     const cameraSeg = findSegment(track, view.position);
@@ -217,7 +279,8 @@ export class RoadRenderer {
       const cameraZ = isNextSeg
         ? position - trackLength
         : position - (seg.index < base.index ? trackLength : 0);
-      seg.fog = 1;
+      const nRatio = drawDistance > 0 ? n / drawDistance : 0;
+      seg.fog = legacy || fogStrength <= 0 ? 1 : clamp01(1 - nRatio * fogStrength);
       project(seg.p1, cameraXBase - x, cameraY, cameraZ, cameraDepth, width, height, roadWidth);
       project(
         seg.p2,
@@ -341,6 +404,17 @@ export class RoadRenderer {
           }
         } else {
           this.stats.drawnSegments++;
+          const nRatio = drawDistance > 0 ? n / drawDistance : 0;
+          const fogBand =
+            legacy || fogStrength <= 0
+              ? 0
+              : nRatio < 0.25
+                ? 0
+                : nRatio < 0.5
+                  ? 1
+                  : nRatio < 0.75
+                    ? 2
+                    : 3;
           const tSeg0 = sampleSubsystems ? performance.now() : 0;
           this.renderSegment(
             ctx,
@@ -358,6 +432,7 @@ export class RoadRenderer {
             legacy,
             coalesceCount > 0 ? effectiveTopY : undefined,
             coalesceCount > 0,
+            fogBand,
           );
           if (sampleSubsystems) {
             sampleSlicesMs += performance.now() - tSeg0;
@@ -384,18 +459,21 @@ export class RoadRenderer {
       if (p1.screenY - 12000 * scaledPpu >= segClipY) continue;
 
       // Smooth distant alpha fade-in over far ~18% of drawDistance + low refPpu horizon band
+      const nRatio = drawDistance > 0 ? n / drawDistance : 0;
       const distAlpha =
         !legacy && drawDistance > 0 && n > drawDistance * 0.82
-          ? Math.max(0.05, Math.min(1, (1 - n / drawDistance) / 0.18))
+          ? Math.max(0.05, Math.min(1, (1 - nRatio) / 0.18))
           : 1;
       const ppuAlpha = Math.min(1, Math.max(0, (refPpu - 0.001) / 0.005));
       const propAlpha = legacy ? ppuAlpha : Math.min(distAlpha, ppuAlpha);
       const needsPropAlpha = propAlpha < 0.98;
       const needsStencilClip = legacy || this.clipNeedsStencil[n] === 1;
       let crestClipActive = false;
+      let activeAlpha = 1;
 
-      if (needsPropAlpha && sprites.length > 0) {
+      if (legacy && needsPropAlpha && sprites.length > 0) {
         ctx.globalAlpha = propAlpha;
+        activeAlpha = propAlpha;
       }
 
       // Roadside props (shifted outward along the widening Y-fork so props never sit on the asphalt)
@@ -430,39 +508,67 @@ export class RoadRenderer {
         const propPpu = scaledPpu * spriteScale;
         const propRefPpu = propPpu * (640 / Math.max(1, width));
 
-        // Distance culling calibrated against real projected propPpu (640x360) and drawDistance
+        // Phase 1: Per-category local distance & PPU fade-in (eliminates mid-distance pop-in)
+        let propFogFactor = 0;
+        let targetAlpha = propAlpha;
         if (!legacy) {
-          if (Math.abs(s.offset) >= 6.0 && (n > drawDistance * 0.45 || propRefPpu < 0.011)) {
+          const absOff = Math.abs(s.offset);
+          let maxRatio = 1.0;
+          let fadeRatioSpan = 0.18;
+          let minRefPpu = 0.004;
+          let fadePpuSpan = 0.003;
+
+          if (absOff >= 6.0) {
+            maxRatio = 0.5;
+            fadeRatioSpan = 0.12;
+            minRefPpu = 0.0095;
+            fadePpuSpan = 0.004;
+          } else if (
+            resolvedKind === 'shrub' ||
+            resolvedKind === 'bench' ||
+            resolvedKind === 'chevron' ||
+            resolvedKind === 'jihanki' ||
+            resolvedKind === 'phonebooth' ||
+            resolvedKind === 'bus-stop'
+          ) {
+            maxRatio = 0.58;
+            fadeRatioSpan = 0.12;
+            minRefPpu = 0.0095;
+            fadePpuSpan = 0.004;
+          } else if (
+            resolvedKind === 'sign' ||
+            resolvedKind === 'lamp' ||
+            resolvedKind === 'toro' ||
+            resolvedKind === 'kiosk' ||
+            resolvedKind === 'canopy' ||
+            (absOff >= 3.0 && resolvedKind !== 'building' && resolvedKind !== 'pylon')
+          ) {
+            maxRatio = 0.68;
+            fadeRatioSpan = 0.12;
+            minRefPpu = 0.0085;
+            fadePpuSpan = 0.0035;
+          }
+
+          if (nRatio >= maxRatio || propRefPpu <= minRefPpu) {
             continue;
           }
-          if (
-            Math.abs(s.offset) >= 3.0 &&
-            n > drawDistance * 0.65 &&
-            resolvedKind !== 'building' &&
-            resolvedKind !== 'pylon'
-          ) {
-            continue;
-          }
-          if (
-            (resolvedKind === 'shrub' ||
-              resolvedKind === 'bench' ||
-              resolvedKind === 'chevron' ||
-              resolvedKind === 'jihanki' ||
-              resolvedKind === 'phonebooth' ||
-              resolvedKind === 'bus-stop') &&
-            (n > drawDistance * 0.55 || propRefPpu < 0.011)
-          ) {
-            continue;
-          }
-          if (
-            (resolvedKind === 'sign' ||
-              resolvedKind === 'lamp' ||
-              resolvedKind === 'toro' ||
-              resolvedKind === 'kiosk' ||
-              resolvedKind === 'canopy') &&
-            (n > drawDistance * 0.65 || propRefPpu < 0.0095)
-          ) {
-            continue;
+
+          const localDistAlpha =
+            nRatio > maxRatio - fadeRatioSpan
+              ? clamp01((maxRatio - nRatio) / fadeRatioSpan)
+              : 1;
+          const localPpuAlpha =
+            propRefPpu < minRefPpu + fadePpuSpan
+              ? clamp01((propRefPpu - minRefPpu) / fadePpuSpan)
+              : 1;
+          const effectiveAlpha = Math.min(propAlpha, localDistAlpha, localPpuAlpha);
+          if (effectiveAlpha < 0.04) continue;
+
+          targetAlpha = effectiveAlpha >= 0.98 ? 1 : effectiveAlpha;
+
+          const relDepth = clamp01(nRatio / Math.max(0.1, maxRatio));
+          if (relDepth > 0.35 && tuning.propAtmosphereFog > 0) {
+            propFogFactor = clamp01(((relDepth - 0.35) / 0.45) * tuning.propAtmosphereFog);
           }
         } else if (Math.abs(s.offset) >= 6.0 && propPpu < 0.0012) {
           continue;
@@ -507,6 +613,16 @@ export class RoadRenderer {
         // Per-prop vertical crest culling using actual world height
         if (p1.screenY - getPropWorldHeight(resolvedKind) * propPpu >= segClipY) continue;
 
+        if (!legacy) {
+          if (
+            (targetAlpha === 1 && activeAlpha !== 1) ||
+            Math.abs(targetAlpha - activeAlpha) > 0.02
+          ) {
+            ctx.globalAlpha = targetAlpha;
+            activeAlpha = targetAlpha;
+          }
+        }
+
         if (
           !crestClipActive &&
           segClipY < height &&
@@ -537,6 +653,7 @@ export class RoadRenderer {
           beatPulse,
           view.beatIndex ?? 0,
           segClipY,
+          propFogFactor,
         );
         this.stats.drawnProps++;
       }
@@ -544,7 +661,7 @@ export class RoadRenderer {
       if (crestClipActive) {
         ctx.restore();
       }
-      if (needsPropAlpha && sprites.length > 0) {
+      if (activeAlpha !== 1) {
         ctx.globalAlpha = 1;
       }
       if (sampleSubsystems && sprites.length > 0) {
@@ -966,8 +1083,13 @@ export class RoadRenderer {
     legacy = false,
     overrideTopY?: number,
     isCoalesced = false,
+    fogBand = 0,
   ): void {
     const { p1, p2, stripe } = seg;
+    const grassColor = stripe === 0 ? this.fogGrass0[fogBand]! : this.fogGrass1[fogBand]!;
+    const roadColor = stripe === 0 ? this.fogRoad0[fogBand]! : this.fogRoad1[fogBand]!;
+    const rumbleColor = stripe === 0 ? this.fogRumble0[fogBand]! : this.fogRumble1[fogBand]!;
+    const laneColor = this.fogLane[fogBand]!;
     let x1 = p1.screenX;
     let y1 = p1.screenY;
     let w1 = p1.screenW;
@@ -1009,11 +1131,11 @@ export class RoadRenderer {
     } else if (isBridge) {
       const baseY2 = Math.max(horizonY, y2);
       if (y1 > baseY2) {
-        ctx.fillStyle = palette.grass[stripe];
+        ctx.fillStyle = grassColor;
         ctx.fillRect(0, baseY2, width, y1 - baseY2);
       }
     } else {
-      ctx.fillStyle = isCoalesced ? palette.grass[1] : palette.grass[stripe];
+      ctx.fillStyle = isCoalesced ? this.fogGrass1[3]! : grassColor;
       ctx.fillRect(0, y2, width, y1 - y2);
     }
 
@@ -1022,7 +1144,9 @@ export class RoadRenderer {
       this.renderForkSegment(
         ctx,
         seg,
-        palette,
+        rumbleColor,
+        roadColor,
+        laneColor,
         x1,
         y1,
         w1,
@@ -1057,15 +1181,15 @@ export class RoadRenderer {
       const roadSpan = Math.max(1, roadRight - roadLeft);
       const curbW = Math.max(1, Math.round(mr));
 
-      ctx.fillStyle = isCoalesced ? this.cachedHorizonCurbColor : palette.rumble[stripe];
+      ctx.fillStyle = isCoalesced ? this.cachedHorizonCurbColor : rumbleColor;
       ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
       ctx.fillRect(roadRight, y2, curbW, sliceH);
 
-      ctx.fillStyle = isCoalesced ? this.cachedHorizonRoadColor : palette.road[stripe];
+      ctx.fillStyle = isCoalesced ? this.cachedHorizonRoadColor : roadColor;
       ctx.fillRect(roadLeft, y2, roadSpan, sliceH);
 
       if (!isCoalesced && stripe === 0 && w1 >= 6) {
-        ctx.fillStyle = palette.lane;
+        ctx.fillStyle = laneColor;
         const lw = Math.max(1, mw / Math.max(32, 8 * LANES));
         const laneStep = roadSpan / LANES;
         let lx = roadLeft + laneStep;
@@ -1075,14 +1199,14 @@ export class RoadRenderer {
         }
       }
     } else {
-      ctx.fillStyle = palette.rumble[stripe];
+      ctx.fillStyle = rumbleColor;
       drawRumblePair(ctx, x1, y1, x2, y2, w1, w2, r1, r2);
 
-      ctx.fillStyle = palette.road[stripe];
+      ctx.fillStyle = roadColor;
       polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
 
       if (stripe === 0 && w1 >= 6) {
-        ctx.fillStyle = palette.lane;
+        ctx.fillStyle = laneColor;
         drawLanes(ctx, x1, y1, x2, y2, w1, w2);
       }
 
@@ -1105,7 +1229,9 @@ export class RoadRenderer {
   private renderForkSegment(
     ctx: CanvasRenderingContext2D,
     seg: RoadSegment,
-    palette: StagePalette,
+    rumbleColor: string,
+    roadColor: string,
+    laneColor: string,
     x1: number,
     y1: number,
     w1: number,
@@ -1149,31 +1275,31 @@ export class RoadRenderer {
         const roadLeft = Math.round(mx - ow);
         const roadRight = Math.round(mx + ow);
         const curbW = Math.max(1, Math.round(mr));
-        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillStyle = rumbleColor;
         ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
         ctx.fillRect(roadRight, y2, curbW, sliceH);
-        ctx.fillStyle = palette.road[stripe];
+        ctx.fillStyle = roadColor;
         ctx.fillRect(roadLeft, y2, Math.max(1, roadRight - roadLeft), sliceH);
         if (c2 > 0.5) {
           const mc = (c1 + c2) * 0.5;
           ctx.fillStyle =
-            stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
+            stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : rumbleColor;
           ctx.fillRect(mx - mc, y2, mc * 2, sliceH);
         }
         return;
       }
 
       // Outer rumble strips (batched pair)
-      ctx.fillStyle = palette.rumble[stripe];
+      ctx.fillStyle = rumbleColor;
       drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
 
       // Asphalt road surface
-      ctx.fillStyle = palette.road[stripe];
+      ctx.fillStyle = roadColor;
       polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
 
       // Central median gore chevron / triangle (widens smoothly from width 0 at t=0 to ir at t=0.18)
       if (c2 > 0.5) {
-        ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : palette.rumble[stripe];
+        ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : rumbleColor;
         polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
       }
 
@@ -1186,10 +1312,10 @@ export class RoadRenderer {
         const rightLine1 = x1 + (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
         const rightLine2 = x2 + (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
 
-        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
         polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
 
-        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
         polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
       }
     } else if (t2 <= FORK_SPLIT_END_T) {
@@ -1218,36 +1344,36 @@ export class RoadRenderer {
         const rightOuter = Math.round(mx + ow);
         const curbW = Math.max(1, Math.round(mr));
         const innerCurbW = Math.max(1, Math.round(ir));
-        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillStyle = rumbleColor;
         ctx.fillRect(leftOuter - curbW, y2, curbW, sliceH);
         ctx.fillRect(rightOuter, y2, curbW, sliceH);
-        ctx.fillStyle = palette.road[stripe];
+        ctx.fillStyle = roadColor;
         ctx.fillRect(leftOuter, y2, Math.max(1, leftInner - leftOuter), sliceH);
         ctx.fillRect(rightInner, y2, Math.max(1, rightOuter - rightInner), sliceH);
-        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : rumbleColor;
         ctx.fillRect(leftInner - innerCurbW, y2, innerCurbW, sliceH);
-        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : rumbleColor;
         ctx.fillRect(rightInner, y2, innerCurbW, sliceH);
         return;
       }
 
       // Outer rumble strips (batched pair)
-      ctx.fillStyle = palette.rumble[stripe];
+      ctx.fillStyle = rumbleColor;
       drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
 
       // Left branch asphalt
-      ctx.fillStyle = palette.road[stripe];
+      ctx.fillStyle = roadColor;
       polygon(ctx, x1 - outerW1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - outerW2, y2);
 
       // Right branch asphalt
-      ctx.fillStyle = palette.road[stripe];
+      ctx.fillStyle = roadColor;
       polygon(ctx, x1 + gap1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + gap2, y2);
 
       // Inner median V-curbs
-      ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.rumble[stripe];
+      ctx.fillStyle = choice === 'left' ? '#05d9e8' : rumbleColor;
       polygon(ctx, x1 - gap1 - ir1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - gap2 - ir2, y2);
 
-      ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.rumble[stripe];
+      ctx.fillStyle = choice === 'right' ? '#ffd319' : rumbleColor;
       polygon(ctx, x1 + gap1, y1, x1 + gap1 + ir1, y1, x2 + gap2 + ir2, y2, x2 + gap2, y2);
 
       // Center guide lines down each branch (from ±0.60 at t=0.18 to ±1.10 at t=0.65)
@@ -1259,10 +1385,10 @@ export class RoadRenderer {
         const rightMid1 = x1 + (outerW1 + gap1) * 0.5;
         const rightMid2 = x2 + (outerW2 + gap2) * 0.5;
 
-        ctx.fillStyle = choice === 'left' ? '#05d9e8' : palette.lane;
+        ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
         polygon(ctx, leftMid1 - l1, y1, leftMid1 + l1, y1, leftMid2 + l2, y2, leftMid2 - l2, y2);
 
-        ctx.fillStyle = choice === 'right' ? '#ffd319' : palette.lane;
+        ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
         polygon(ctx, rightMid1 - l1, y1, rightMid1 + l1, y1, rightMid2 + l2, y2, rightMid2 - l2, y2);
       }
     } else {
@@ -1281,10 +1407,10 @@ export class RoadRenderer {
         const cLeft = Math.round((cLeft1 + cLeft2) * 0.5);
         const cRight = Math.round((cRight1 + cRight2) * 0.5);
         const curbW = Math.max(1, Math.round((r1 + r2) * 0.5));
-        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillStyle = rumbleColor;
         ctx.fillRect(cLeft - curbW, y2, curbW, sliceH);
         ctx.fillRect(cRight, y2, curbW, sliceH);
-        ctx.fillStyle = palette.road[stripe];
+        ctx.fillStyle = roadColor;
         ctx.fillRect(cLeft, y2, Math.max(1, cRight - cLeft), sliceH);
 
         const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
@@ -1298,10 +1424,10 @@ export class RoadRenderer {
           const uHalfW = 0.58 * (1 - 0.2 * eMid) * ((w1 + w2) * 0.5);
           const uLeft = Math.round((x1 + x2) * 0.5 + uCenter - uHalfW);
           const uRight = Math.round((x1 + x2) * 0.5 + uCenter + uHalfW);
-          ctx.fillStyle = palette.rumble[stripe];
+          ctx.fillStyle = rumbleColor;
           ctx.fillRect(uLeft - curbW, y2, curbW, sliceH);
           ctx.fillRect(uRight, y2, curbW, sliceH);
-          ctx.fillStyle = palette.road[stripe];
+          ctx.fillStyle = roadColor;
           ctx.fillRect(uLeft, y2, Math.max(1, uRight - uLeft), sliceH);
           ctx.globalAlpha = prevAlpha;
         }
@@ -1309,11 +1435,11 @@ export class RoadRenderer {
       }
 
       // Chosen branch outer rumble strips (batched pair)
-      ctx.fillStyle = palette.rumble[stripe];
+      ctx.fillStyle = rumbleColor;
       drawRumblePairSplit(ctx, cLeft1, cRight1, y1, cLeft2, cRight2, y2, r1, r2);
 
       // Chosen branch asphalt
-      ctx.fillStyle = palette.road[stripe];
+      ctx.fillStyle = roadColor;
       polygon(ctx, cLeft1, y1, cRight1, y1, cRight2, y2, cLeft2, y2);
 
       // Seamless lane lines converging into standard 3-lane highway dividers (±1/3)
@@ -1330,7 +1456,7 @@ export class RoadRenderer {
           // Right branch lane line: smoothly converges from +1.10 to +1/3 (the right lane divider of normal road!)
           const rightLine1 = x1 + (FORK_PEAK_BRANCH_CENTER * (1 - ease1) + (1 / 3) * ease1) * w1;
           const rightLine2 = x2 + (FORK_PEAK_BRANCH_CENTER * (1 - ease2) + (1 / 3) * ease2) * w2;
-          ctx.fillStyle = ease1 < 0.85 ? '#ffd319' : palette.lane;
+          ctx.fillStyle = ease1 < 0.85 ? '#ffd319' : laneColor;
           polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
 
           // Left highway divider (-1/3) smoothly emerges as road widens past the median
@@ -1340,7 +1466,7 @@ export class RoadRenderer {
             const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
             const prevAlpha = ctx.globalAlpha;
             ctx.globalAlpha = prevAlpha * alpha;
-            ctx.fillStyle = palette.lane;
+            ctx.fillStyle = laneColor;
             polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
             ctx.globalAlpha = prevAlpha;
           }
@@ -1348,7 +1474,7 @@ export class RoadRenderer {
           // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
           const leftLine1 = x1 - (FORK_PEAK_BRANCH_CENTER * (1 - ease1) + (1 / 3) * ease1) * w1;
           const leftLine2 = x2 - (FORK_PEAK_BRANCH_CENTER * (1 - ease2) + (1 / 3) * ease2) * w2;
-          ctx.fillStyle = ease1 < 0.85 ? '#05d9e8' : palette.lane;
+          ctx.fillStyle = ease1 < 0.85 ? '#05d9e8' : laneColor;
           polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
 
           // Right highway divider (+1/3) smoothly emerges as road widens past the median
@@ -1358,7 +1484,7 @@ export class RoadRenderer {
             const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
             const prevAlpha = ctx.globalAlpha;
             ctx.globalAlpha = prevAlpha * alpha;
-            ctx.fillStyle = palette.lane;
+            ctx.fillStyle = laneColor;
             polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
             ctx.globalAlpha = prevAlpha;
           }
@@ -1386,11 +1512,11 @@ export class RoadRenderer {
         const uLeft2 = x2 + uCenter2 - uHalfW2;
         const uRight2 = x2 + uCenter2 + uHalfW2;
 
-        ctx.fillStyle = palette.rumble[stripe];
+        ctx.fillStyle = rumbleColor;
         polygon(ctx, uLeft1 - r1, y1, uLeft1, y1, uLeft2, y2, uLeft2 - r2, y2);
         polygon(ctx, uRight1, y1, uRight1 + r1, y1, uRight2 + r2, y2, uRight2, y2);
 
-        ctx.fillStyle = palette.road[stripe];
+        ctx.fillStyle = roadColor;
         polygon(ctx, uLeft1, y1, uRight1, y1, uRight2, y2, uLeft2, y2);
         ctx.globalAlpha = prevAlpha;
       }

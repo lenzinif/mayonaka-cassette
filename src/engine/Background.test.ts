@@ -541,4 +541,91 @@ describe('Fase 2 — Orizzonte & Fondali in Parallasse (Background.ts)', () => {
 
     expect(bg.skyTime).toBeCloseTo(1.0, 1);
   });
+
+  describe('Fase 3 — Horizon Pitch Shift Parallax', () => {
+    it('keeps pitchOffset at 0 on flat road and converges symmetrically on climbs/descents within bgPitchMaxPx', () => {
+      tuning.bgPitchStrength = 1.0;
+      tuning.bgPitchMaxPx = 18;
+
+      const bgFlat = new Background();
+      for (let i = 0; i < 60; i++) bgFlat.update(1 / 60, 0, 1.0, false, 0);
+      expect(bgFlat.pitchOffset).toBe(0);
+
+      const bgUp = new Background();
+      for (let i = 0; i < 120; i++) bgUp.update(1 / 60, 0, 1.0, false, 1.2);
+      expect(bgUp.pitchOffset).toBeGreaterThan(10);
+      expect(bgUp.pitchOffset).toBeLessThanOrEqual(tuning.bgPitchMaxPx);
+
+      const bgDown = new Background();
+      for (let i = 0; i < 120; i++) bgDown.update(1 / 60, 0, 1.0, false, -1.2);
+      expect(bgDown.pitchOffset).toBeLessThan(-10);
+      expect(bgDown.pitchOffset).toBeGreaterThanOrEqual(-tuning.bgPitchMaxPx);
+      expect(bgDown.pitchOffset).toBeCloseTo(-bgUp.pitchOffset, 3);
+    });
+
+    it('keeps pitchOffset at 0 when bgPitchStrength is 0', () => {
+      tuning.bgPitchStrength = 0;
+      tuning.bgPitchMaxPx = 18;
+      const bg = new Background();
+      for (let i = 0; i < 60; i++) bg.update(1 / 60, 0, 1.0, false, 1.5);
+      expect(bg.pitchOffset).toBe(0);
+      tuning.bgPitchStrength = 1.0;
+    });
+
+    it('allocates zero extra CanvasGradients across continuous roadSlope changes', () => {
+      tuning.bgPitchStrength = 1.0;
+      tuning.bgPitchMaxPx = 18;
+      const bg = new Background();
+      let linearGradCount = 0;
+      let radialGradCount = 0;
+      const noop = () => {};
+      const grad = { addColorStop: noop };
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        translate: noop,
+        beginPath: noop,
+        closePath: noop,
+        clip: noop,
+        clearRect: noop,
+        drawImage: noop,
+        moveTo: noop,
+        lineTo: noop,
+        arc: noop,
+        rect: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: noop,
+        createLinearGradient: () => {
+          linearGradCount++;
+          return grad;
+        },
+        createRadialGradient: () => {
+          radialGradCount++;
+          return grad;
+        },
+      } as unknown as CanvasRenderingContext2D;
+
+      // Warmup frame 0 populates gradient caches once
+      bg.update(1 / 60, 0, 1.0, false, 0);
+      bg.render(ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+      const baseLinear = linearGradCount;
+      const baseRadial = radialGradCount;
+
+      // Varying roadSlope across 60 frames must NEVER trigger gradient reallocation
+      for (let f = 1; f <= 60; f++) {
+        const slope = Math.sin(f * 0.15) * 1.4;
+        bg.update(1 / 60, 0, 1.0, false, slope);
+        bg.render(ctx, 640, 360, PALETTE_NIGHT_FUNK, 0, 0);
+      }
+
+      expect(linearGradCount).toBe(baseLinear);
+      expect(radialGradCount).toBe(baseRadial);
+    });
+  });
 });

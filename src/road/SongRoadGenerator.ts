@@ -7,6 +7,7 @@ import { easeIn, easeInOut } from './RoadProjection';
 import {
   createPoint,
   PROP_BAND_RANGES,
+  sortSegmentSprites,
   type PropBand,
   type RoadSegment,
   type RoadSprite,
@@ -347,6 +348,9 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
 
   // Populate composite roadside vignettes (docs/DESIGN.md §2 Fase 4)
   populateSongRoadVignettes(segments, placedChunks, catalog, segmentsPerBeat, totalBars, rng);
+
+  // Static lateral intra-segment ordering (Band D -> C -> B -> A, overhead portals last)
+  sortSegmentSprites(segments);
 
   // Pre-allocate immutable canonical blueprint for zero-GC runtime restoration & horizon stitching
   const count = segments.length;

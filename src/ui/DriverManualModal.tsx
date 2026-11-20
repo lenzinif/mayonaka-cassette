@@ -8,8 +8,8 @@ export interface DriverManualModalProps {
 type ManualTab = 'rhythm' | 'drift' | 'tofu' | 'controls';
 
 /**
- * 1980s Retro Arcade Driver's Manual.
- * Concise guide to Beat-Shifting, Flow-preserving Drift physics, Melon Soda / Tofu Mode, and Controls.
+ * Mayonaka Hi-Fi Driver's Guide Modal.
+ * Crisp player-facing instructions for Beat-Shifting, Drift, Melon Soda / Tofu Mode, and Controls.
  */
 export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
   const [activeTab, setActiveTab] = useState<ManualTab>('rhythm');
@@ -33,225 +33,313 @@ export function DriverManualModal({ open, onClose }: DriverManualModalProps) {
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#060112]/85 p-4 font-mono text-white select-none"
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#0B0E1E]/80 p-4 text-[var(--ff-cream)] select-none"
       role="dialog"
       aria-modal="true"
-      aria-label="Controls &amp; Guide"
+      aria-label="Guide"
     >
       <div
-        className="relative flex flex-col w-full max-w-2xl max-h-[85vh] overflow-hidden rounded-lg border-2 border-pink-500/70 bg-[#0d0221]/98 shadow-[0_0_40px_rgba(255,42,109,0.35)]"
+        className="ff-shadow-ink relative flex max-h-[85vh] w-full max-w-2xl overflow-hidden rounded-[2px] border-2 border-[var(--ff-cream)] bg-[var(--ff-panel)]"
         style={{ colorScheme: 'dark' }}
       >
-        {/* Header: CONTROLS & GUIDE on left, BACK [ESC] on right */}
-        <div className="flex items-center justify-between border-b border-fuchsia-500/30 bg-[#160435] px-4 py-2.5 text-xs font-black tracking-widest text-cyan-300 uppercase">
-          <span>CONTROLS &amp; GUIDE</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded border border-fuchsia-400/40 bg-[#1a0636] px-2.5 py-1 text-[11px] font-bold tracking-wider text-fuchsia-200 transition hover:border-pink-400 hover:bg-pink-950/60 hover:text-white"
-          >
-            BACK [ESC]
-          </button>
-        </div>
+        <div className="ff-obi-v w-2.5 shrink-0" />
 
-        {/* Navigation Tabs */}
-        <div className="grid grid-cols-4 border-b border-fuchsia-500/30 bg-[#12032b] text-[11px] font-bold">
-          <button
-            type="button"
-            onClick={() => setActiveTab('rhythm')}
-            className={`cursor-pointer py-2 text-center tracking-wider transition ${
-              activeTab === 'rhythm'
-                ? 'border-b-2 border-pink-400 bg-pink-950/40 text-pink-200'
-                : 'text-fuchsia-300/60 hover:text-pink-300 hover:bg-pink-950/20'
-            }`}
-          >
-            1. BEAT-SHIFT
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('drift')}
-            className={`cursor-pointer py-2 text-center tracking-wider transition ${
-              activeTab === 'drift'
-                ? 'border-b-2 border-cyan-400 bg-cyan-950/40 text-cyan-200'
-                : 'text-cyan-300/60 hover:text-cyan-300 hover:bg-cyan-950/20'
-            }`}
-          >
-            2. DRIFT &amp; FLOW
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('tofu')}
-            className={`cursor-pointer py-2 text-center tracking-wider transition ${
-              activeTab === 'tofu'
-                ? 'border-b-2 border-emerald-400 bg-emerald-950/40 text-emerald-200'
-                : 'text-emerald-300/60 hover:text-emerald-300 hover:bg-emerald-950/20'
-            }`}
-          >
-            3. MELON SODA
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('controls')}
-            className={`cursor-pointer py-2 text-center tracking-wider transition ${
-              activeTab === 'controls'
-                ? 'border-b-2 border-amber-400 bg-amber-950/40 text-amber-200'
-                : 'text-amber-300/60 hover:text-amber-300 hover:bg-amber-950/20'
-            }`}
-          >
-            4. CONTROLS
-          </button>
-        </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Cream J-Card Header */}
+          <div className="flex items-center justify-between bg-[var(--ff-cream)] px-4 py-2.5 text-[var(--ff-ink)]">
+            <span className="ff-display text-base font-black italic tracking-wider uppercase">
+              GUIDE
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="ff-mono cursor-pointer rounded-[2px] border-2 border-[var(--ff-ink)] px-2.5 py-0.5 text-[10px] font-black tracking-wider text-[var(--ff-ink)] transition hover:bg-[var(--ff-pink)] hover:text-[var(--ff-cream)]"
+            >
+              BACK [ESC]
+            </button>
+          </div>
 
-        {/* Tab Body */}
-        <div
-          className="flex-1 overflow-y-auto p-4 text-xs leading-relaxed text-fuchsia-100/90"
-          style={{ scrollbarColor: '#e879f9 #1a0633', scrollbarWidth: 'thin' }}
-        >
-          {activeTab === 'rhythm' && (
-            <div className="space-y-3">
-              <div className="rounded border border-pink-500/40 bg-pink-950/20 p-2.5">
-                <div className="text-xs font-black tracking-wider text-pink-300 uppercase">
-                  6-SPEED BEAT-SHIFT GEARBOX
+          {/* Navigation Tabs */}
+          <div className="grid grid-cols-4 border-b border-[var(--ff-border)] bg-[var(--ff-ink)] text-[10px] font-black tracking-[0.14em] uppercase">
+            <button
+              type="button"
+              onClick={() => setActiveTab('rhythm')}
+              className={`cursor-pointer border-b-2 py-2.5 text-center transition ${
+                activeTab === 'rhythm'
+                  ? 'border-[var(--ff-pink)] bg-[var(--ff-panel)] text-[var(--ff-cream)]'
+                  : 'border-transparent text-[var(--ff-muted)] hover:text-[var(--ff-cream)]'
+              }`}
+            >
+              BEAT-SHIFT
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('drift')}
+              className={`cursor-pointer border-b-2 py-2.5 text-center transition ${
+                activeTab === 'drift'
+                  ? 'border-[var(--ff-mint)] bg-[var(--ff-panel)] text-[var(--ff-cream)]'
+                  : 'border-transparent text-[var(--ff-muted)] hover:text-[var(--ff-cream)]'
+              }`}
+            >
+              DRIFT
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('tofu')}
+              className={`cursor-pointer border-b-2 py-2.5 text-center transition ${
+                activeTab === 'tofu'
+                  ? 'border-[var(--ff-gold)] bg-[var(--ff-panel)] text-[var(--ff-cream)]'
+                  : 'border-transparent text-[var(--ff-muted)] hover:text-[var(--ff-cream)]'
+              }`}
+            >
+              MELON SODA
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('controls')}
+              className={`cursor-pointer border-b-2 py-2.5 text-center transition ${
+                activeTab === 'controls'
+                  ? 'border-[var(--ff-pink)] bg-[var(--ff-panel)] text-[var(--ff-cream)]'
+                  : 'border-transparent text-[var(--ff-muted)] hover:text-[var(--ff-cream)]'
+              }`}
+            >
+              CONTROLS
+            </button>
+          </div>
+
+          {/* Tab Body */}
+          <div
+            className="flex-1 overflow-y-auto p-4 text-xs leading-relaxed text-[var(--ff-cream)]"
+            style={{ scrollbarColor: '#FF3B7F #0B0E1E', scrollbarWidth: 'thin' }}
+          >
+            {activeTab === 'rhythm' && (
+              <div className="space-y-3">
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                  <div className="font-black tracking-wider text-[var(--ff-pink)] uppercase">
+                    6-SPEED BEAT-SHIFT
+                  </div>
+                  <p className="mt-1 text-[11px] text-[var(--ff-muted)]">
+                    Shift on the beat to build Groove and open up the music.
+                  </p>
                 </div>
-                <p className="mt-1 text-[11px] text-pink-100/80">
-                  Shift gears on the musical beat to build Groove and sweep open the Web Audio low-pass filter.
-                </p>
-              </div>
 
+                <div className="grid grid-cols-2 gap-2.5 text-[11px]">
+                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                    <div className="font-bold text-[var(--ff-mint)] uppercase">TIMING</div>
+                    <ul className="mt-1.5 space-y-1 text-[var(--ff-muted)]">
+                      <li>
+                        <span className="font-bold text-[var(--ff-mint)]">PERFECT:</span> Max Groove
+                        boost
+                      </li>
+                      <li>
+                        <span className="font-bold text-[var(--ff-cream)]">GOOD:</span> Steady
+                        Groove gain
+                      </li>
+                      <li>
+                        <span className="font-bold text-[var(--ff-pink)]">BEAT 1:</span> 1.5×
+                        downbeat bonus
+                      </li>
+                    </ul>
+                  </div>
+                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                    <div className="font-bold text-[var(--ff-gold)] uppercase">ZERO PENALTY</div>
+                    <p className="mt-1.5 text-[var(--ff-muted)]">
+                      Off-beat shifts never stall the car — they simply skip the bonus. Press{' '}
+                      <code className="ff-mono text-[var(--ff-pink)]">[G]</code> anytime for
+                      auto-shift.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3 text-[11px]">
+                  <div className="font-bold text-[var(--ff-cream)] uppercase">GROOVE TIERS</div>
+                  <p className="mt-1 text-[var(--ff-muted)]">
+                    <span className="font-bold text-[var(--ff-muted)]">LOW</span> →{' '}
+                    <span className="font-bold text-[var(--ff-mint)]">MEDIUM</span> →{' '}
+                    <span className="font-bold text-[var(--ff-pink)]">HIGH</span> →{' '}
+                    <span className="font-bold text-[var(--ff-gold)]">OVERDRIVE</span>. Higher
+                    tiers brighten the road and widen the stereo mix.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'drift' && (
+              <div className="space-y-3">
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                  <div className="font-black tracking-wider text-[var(--ff-mint)] uppercase">
+                    CURVE SLIDE &amp; EXIT BOOST
+                  </div>
+                  <p className="mt-1 text-[11px] text-[var(--ff-muted)]">
+                    Lean into fast sweepers to hold your line without lifting off the gas.
+                  </p>
+                </div>
+
+                <div className="space-y-2 text-[11px]">
+                  <div className="flex gap-3 rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
+                    <div className="w-24 shrink-0 font-bold text-[var(--ff-pink)]">1. INITIATE</div>
+                    <div className="text-[var(--ff-muted)]">
+                      Hold <code className="ff-mono text-[var(--ff-cream)]">[LCTRL]</code> while
+                      steering, or tap <code className="ff-mono text-[var(--ff-cream)]">[S]</code>{' '}
+                      / <code className="ff-mono text-[var(--ff-cream)]">[DOWN]</code> into a turn.
+                    </div>
+                  </div>
+                  <div className="flex gap-3 rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
+                    <div className="w-24 shrink-0 font-bold text-[var(--ff-mint)]">2. HOLD</div>
+                    <div className="text-[var(--ff-muted)]">
+                      Counter-steer smoothly to keep the tail tucked through the apex.
+                    </div>
+                  </div>
+                  <div className="flex gap-3 rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
+                    <div className="w-24 shrink-0 font-bold text-[var(--ff-gold)]">3. BOOST</div>
+                    <div className="text-[var(--ff-muted)]">
+                      Cleanly straighten out after holding a drift for a speed surge down the
+                      straight.
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3 text-[11px]">
+                  <div className="font-bold text-[var(--ff-mint)] uppercase">KEEP MOVING</div>
+                  <p className="mt-1 text-[var(--ff-muted)]">
+                    Clipping signs or traffic dips your speed and Groove briefly, but never stops
+                    the music or ends the drive.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'tofu' && (
+              <div className="space-y-3">
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                  <div className="font-black tracking-wider text-[var(--ff-gold)] uppercase">
+                    DASHBOARD MELON SODA
+                  </div>
+                  <p className="mt-1 text-[11px] text-[var(--ff-muted)]">
+                    Smooth turns and gentle braking keep the melon soda inside the glass.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2.5 text-[11px]">
+                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                    <div className="font-bold text-[var(--ff-mint)] uppercase">TOFU MODE [T]</div>
+                    <p className="mt-1 text-[var(--ff-muted)]">
+                      Doubles all Groove earned from beat-shifts and clean corners.
+                    </p>
+                  </div>
+                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                    <div className="font-bold text-[var(--ff-pink)] uppercase">SPILL PENALTY</div>
+                    <p className="mt-1 text-[var(--ff-muted)]">
+                      Hard swerves or panic braking splash soda over the rim, costing 20% Groove.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3 text-[11px]">
+                  <div className="font-bold text-[var(--ff-gold)] uppercase">CUP SKINS [V]</div>
+                  <p className="mt-1 text-[var(--ff-muted)]">
+                    Swap between Melon Soda, Tofu Water Cup, Pocari Sweat, and Boss Coffee.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'controls' && (
               <div className="grid grid-cols-2 gap-2.5 text-[11px]">
-                <div className="rounded border border-cyan-400/30 bg-[#15042e] p-2.5">
-                  <div className="font-bold text-cyan-300 uppercase">TIMING JUDGEMENT</div>
-                  <ul className="mt-1.5 space-y-1 text-cyan-100/75">
-                    <li><span className="text-emerald-300 font-bold">PERFECT (±50ms):</span> Max Groove + filter blip</li>
-                    <li><span className="text-cyan-300 font-bold">GOOD (±100ms):</span> Standard Groove</li>
-                    <li><span className="text-pink-300 font-bold">DOWNBEAT:</span> Beat 1 yields 1.5× bonus</li>
-                  </ul>
-                </div>
-                <div className="rounded border border-cyan-400/30 bg-[#15042e] p-2.5">
-                  <div className="font-bold text-cyan-300 uppercase">FLOW FIRST (NO PUNISH)</div>
-                  <p className="mt-1.5 text-cyan-100/75">
-                    Mistimed shifts never stall or damage the engine — they simply yield no bonus. Toggle auto-shift assist anytime with <code className="text-pink-300">[G]</code>.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded border border-fuchsia-500/30 bg-[#180535] p-2.5 text-[11px]">
-                <div className="font-bold text-fuchsia-300 uppercase">GROOVE TIERS</div>
-                <p className="mt-1 text-fuchsia-200/80">
-                  <span className="text-pink-300 font-bold">LOW</span> → <span className="text-fuchsia-300 font-bold">MEDIUM</span> → <span className="text-cyan-300 font-bold">HIGH</span> → <span className="text-emerald-300 font-bold">OVERDRIVE</span>.
-                  Higher tiers unlock full synthwave frequencies and road glow.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'drift' && (
-            <div className="space-y-3">
-              <div className="rounded border border-cyan-400/40 bg-cyan-950/20 p-2.5">
-                <div className="text-xs font-black tracking-wider text-cyan-300 uppercase">
-                  CENTRIFUGAL PULL &amp; DRIFT
-                </div>
-                <p className="mt-1 text-[11px] text-cyan-100/80">
-                  Curves exert centrifugal pull scaling with speed. Initiate slide to carve turns without letting off the throttle.
-                </p>
-              </div>
-
-              <div className="space-y-2 text-[11px]">
-                <div className="flex gap-3 rounded border border-cyan-400/20 bg-[#13032b] p-2.5">
-                  <div className="font-bold text-pink-400 w-24 shrink-0">1. INITIATE:</div>
-                  <div className="text-cyan-100/80">
-                    Hold <code className="text-pink-300">[LCTRL]</code> while steering for pure throttle drift, or tap <code className="text-pink-300">[S]</code> / <code className="text-pink-300">[DOWN]</code> + steer for brake-drift entry.
+                <div className="space-y-1.5 rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                  <div className="border-b border-[var(--ff-border)] pb-1 font-bold text-[var(--ff-mint)] uppercase">
+                    KEYBOARD
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">GAS</span>
+                    <span className="ff-mono font-bold text-[var(--ff-cream)]">[W] / [UP]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">BRAKE / DRIFT</span>
+                    <span className="ff-mono font-bold text-[var(--ff-cream)]">[S] / [DOWN]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">PURE DRIFT</span>
+                    <span className="ff-mono font-bold text-[var(--ff-cream)]">[LCTRL]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">STEER</span>
+                    <span className="ff-mono font-bold text-[var(--ff-cream)]">[A] / [D]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">SHIFT UP</span>
+                    <span className="ff-mono font-bold text-[var(--ff-pink)]">[SPACE]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">SHIFT DOWN</span>
+                    <span className="ff-mono font-bold text-[var(--ff-pink)]">[SHIFT]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">AUTO-SHIFT</span>
+                    <span className="ff-mono font-bold text-[var(--ff-mint)]">[G]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">TOFU MODE</span>
+                    <span className="ff-mono font-bold text-[var(--ff-gold)]">[T]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">CUP SKIN</span>
+                    <span className="ff-mono font-bold text-[var(--ff-gold)]">[V]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">MINIMAL HUD</span>
+                    <span className="ff-mono font-bold text-[var(--ff-mint)]">[H]</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">PAUSE</span>
+                    <span className="ff-mono font-bold text-[var(--ff-pink)]">[P] / [ESC]</span>
                   </div>
                 </div>
-                <div className="flex gap-3 rounded border border-cyan-400/20 bg-[#13032b] p-2.5">
-                  <div className="font-bold text-cyan-300 w-24 shrink-0">2. COUNTER:</div>
-                  <div className="text-cyan-100/80">
-                    Steer opposite to stabilize your line while centrifugal curve pull neutralizes.
+
+                <div className="space-y-1.5 rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3">
+                  <div className="border-b border-[var(--ff-border)] pb-1 font-bold text-[var(--ff-gold)] uppercase">
+                    GAMEPAD
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">STEER</span>
+                    <span className="ff-mono font-bold text-[var(--ff-cream)]">STICK / D-PAD</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">GAS</span>
+                    <span className="ff-mono font-bold text-[var(--ff-cream)]">RT</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">BRAKE</span>
+                    <span className="ff-mono font-bold text-[var(--ff-cream)]">LT</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">DRIFT</span>
+                    <span className="ff-mono font-bold text-[var(--ff-pink)]">A / CROSS</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">CUP SKIN</span>
+                    <span className="ff-mono font-bold text-[var(--ff-gold)]">B / CIRCLE</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">TOFU MODE</span>
+                    <span className="ff-mono font-bold text-[var(--ff-gold)]">Y / TRIANGLE</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">SHIFT UP / DN</span>
+                    <span className="ff-mono font-bold text-[var(--ff-mint)]">RB / LB</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">AUTO-SHIFT</span>
+                    <span className="ff-mono font-bold text-[var(--ff-mint)]">BACK</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-[var(--ff-muted)]">PAUSE</span>
+                    <span className="ff-mono font-bold text-[var(--ff-pink)]">START</span>
                   </div>
                 </div>
-                <div className="flex gap-3 rounded border border-cyan-400/20 bg-[#13032b] p-2.5">
-                  <div className="font-bold text-emerald-300 w-24 shrink-0">3. BOOST:</div>
-                  <div className="text-cyan-100/80">
-                    Straighten out cleanly after 0.6s+ of slide for a forward momentum kick.
-                  </div>
-                </div>
               </div>
-
-              <div className="rounded border border-emerald-400/30 bg-[#092218] p-2.5 text-[11px]">
-                <div className="font-bold text-emerald-300 uppercase">NO DEAD STOPS</div>
-                <p className="mt-1 text-emerald-100/80">
-                  Clipping roadside props or Kei trucks dips speed and Groove momentarily, but never halts momentum. The flow never breaks.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'tofu' && (
-            <div className="space-y-3">
-              <div className="rounded border border-emerald-400/40 bg-emerald-950/20 p-2.5">
-                <div className="text-xs font-black tracking-wider text-emerald-300 uppercase">
-                  DASHBOARD MELON SODA &amp; TOFU MODE
-                </div>
-                <p className="mt-1 text-[11px] text-emerald-100/80">
-                  Liquid meniscus sloshes in real-time with lateral and longitudinal jerk.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5 text-[11px]">
-                <div className="rounded border border-emerald-400/30 bg-[#0d211a] p-2.5">
-                  <div className="font-bold text-emerald-300 uppercase">TOFU MODE [T]</div>
-                  <p className="mt-1 text-emerald-100/75">
-                    Toggle anytime. Doubles all Groove rewards from rhythm shifts and clean cornering.
-                  </p>
-                </div>
-                <div className="rounded border border-amber-400/30 bg-[#241305] p-2.5">
-                  <div className="font-bold text-amber-300 uppercase">SPILL PENALTY</div>
-                  <p className="mt-1 text-amber-100/75">
-                    Panic braking or jerky swerves slosh soda over the rim, deducting 20% Groove and adding tape slack.
-                  </p>
-                </div>
-              </div>
-
-              <div className="rounded border border-fuchsia-500/30 bg-[#180535] p-2.5 text-[11px]">
-                <div className="font-bold text-fuchsia-300 uppercase">CUP SKINS [V]</div>
-                <p className="mt-1 text-fuchsia-200/80">
-                  Cycle classic Melon Soda, Tofu Water Cup, Pocari Sweat, or Boss Coffee.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {activeTab === 'controls' && (
-            <div className="grid grid-cols-2 gap-2.5 text-[11px]">
-              <div className="space-y-1.5 rounded border border-cyan-400/30 bg-[#12042b] p-2.5">
-                <div className="font-bold text-cyan-300 border-b border-cyan-400/20 pb-1 uppercase">KEYBOARD</div>
-                <div className="flex justify-between"><span>THROTTLE:</span><span className="text-pink-300 font-bold">[W] / [UP]</span></div>
-                <div className="flex justify-between"><span>BRAKE / B-DRIFT:</span><span className="text-pink-300 font-bold">[S] / [DOWN]</span></div>
-                <div className="flex justify-between"><span>PURE DRIFT:</span><span className="text-pink-300 font-bold">[LCTRL]</span></div>
-                <div className="flex justify-between"><span>STEER:</span><span className="text-pink-300 font-bold">[A] / [D]</span></div>
-                <div className="flex justify-between"><span>SHIFT UP:</span><span className="text-pink-300 font-bold">[SPACE]</span></div>
-                <div className="flex justify-between"><span>SHIFT DOWN:</span><span className="text-pink-300 font-bold">[SHIFT]</span></div>
-                <div className="flex justify-between"><span>AUTO-SHIFT:</span><span className="text-pink-300 font-bold">[G]</span></div>
-                <div className="flex justify-between"><span>TOFU MODE:</span><span className="text-pink-300 font-bold">[T]</span></div>
-                <div className="flex justify-between"><span>CUP SKIN:</span><span className="text-pink-300 font-bold">[V]</span></div>
-                <div className="flex justify-between"><span>CLEAN HUD:</span><span className="text-pink-300 font-bold">[H]</span></div>
-                <div className="flex justify-between"><span>PAUSE:</span><span className="text-pink-300 font-bold">[P] / [ESC]</span></div>
-              </div>
-
-              <div className="space-y-1.5 rounded border border-amber-400/30 bg-[#191004] p-2.5">
-                <div className="font-bold text-amber-300 border-b border-amber-400/20 pb-1 uppercase">GAMEPAD</div>
-                <div className="flex justify-between"><span>STEERING:</span><span className="text-amber-200 font-bold">LEFT STICK / D-PAD</span></div>
-                <div className="flex justify-between"><span>THROTTLE:</span><span className="text-amber-200 font-bold">RT</span></div>
-                <div className="flex justify-between"><span>BRAKE:</span><span className="text-amber-200 font-bold">LT</span></div>
-                <div className="flex justify-between"><span>DRIFT:</span><span className="text-amber-200 font-bold">[A] / [X]</span></div>
-                <div className="flex justify-between"><span>CUP SKIN:</span><span className="text-amber-200 font-bold">[B] / CIRCLE</span></div>
-                <div className="flex justify-between"><span>TOFU MODE:</span><span className="text-amber-200 font-bold">[Y] / TRIANGLE</span></div>
-                <div className="flex justify-between"><span>SHIFT UP/DN:</span><span className="text-amber-200 font-bold">RB / LB</span></div>
-                <div className="flex justify-between"><span>AUTO-SHIFT:</span><span className="text-amber-200 font-bold">SELECT / BACK</span></div>
-                <div className="flex justify-between"><span>PAUSE:</span><span className="text-amber-200 font-bold">START / MENU</span></div>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

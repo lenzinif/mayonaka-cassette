@@ -17,8 +17,7 @@ export interface QuickOptionsModalProps {
 }
 
 /**
- * 1980s Retro Arcade Settings & Options Modal.
- * Live configuration of rhythm driving assist, Tofu Mode, Melon Soda skin, and visual filters.
+ * Mayonaka Hi-Fi J-Card Settings & Options Modal.
  */
 export function QuickOptionsModal({
   open,
@@ -53,120 +52,112 @@ export function QuickOptionsModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#060112]/85 p-4 font-mono text-white select-none"
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#0B0E1E]/80 p-4 text-[var(--ff-cream)] select-none"
       role="dialog"
       aria-modal="true"
       aria-label="Options"
     >
       <div
-        className="relative flex flex-col w-full max-w-md overflow-hidden rounded-lg border-2 border-pink-500/70 bg-[#0d0221]/98 shadow-[0_0_40px_rgba(255,42,109,0.35)]"
+        className="ff-shadow-ink relative flex w-full max-w-md overflow-hidden rounded-[2px] border-2 border-[var(--ff-cream)] bg-[var(--ff-panel)]"
         style={{ colorScheme: 'dark' }}
       >
-        {/* Header: OPTIONS on left, BACK [ESC] on right */}
-        <div className="flex items-center justify-between border-b border-fuchsia-500/30 bg-[#160435] px-4 py-2.5 text-xs font-black tracking-widest text-cyan-300 uppercase">
-          <span>OPTIONS</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="cursor-pointer rounded border border-fuchsia-400/40 bg-[#1a0636] px-2.5 py-1 text-[11px] font-bold tracking-wider text-fuchsia-200 transition hover:border-pink-400 hover:bg-pink-950/60 hover:text-white"
-          >
-            BACK [ESC]
-          </button>
-        </div>
+        <div className="ff-obi-v w-2.5 shrink-0" />
 
-        {/* Body: 5 Key-Value toggle buttons */}
-        <div className="p-4 space-y-2.5">
-          {/* 1. Transmission */}
-          <button
-            type="button"
-            onClick={onToggleAutoShift}
-            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
-              autoShift
-                ? 'border-cyan-400 bg-cyan-950/40 text-cyan-200 shadow-[0_0_12px_rgba(5,217,232,0.25)]'
-                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-cyan-400/60'
-            }`}
-          >
-            <span className="font-bold">TRANSMISSION [G]</span>
-            <span
-              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                autoShift ? 'bg-cyan-400 text-black' : 'bg-[#250840] text-fuchsia-300'
-              }`}
+        <div className="flex-1">
+          {/* Cream J-Card Header */}
+          <div className="flex items-center justify-between bg-[var(--ff-cream)] px-4 py-2.5 text-[var(--ff-ink)]">
+            <span className="ff-display text-base font-black italic tracking-wider uppercase">
+              OPTIONS
+            </span>
+            <button
+              type="button"
+              onClick={onClose}
+              className="ff-mono cursor-pointer rounded-[2px] border-2 border-[var(--ff-ink)] px-2.5 py-0.5 text-[10px] font-black tracking-wider text-[var(--ff-ink)] transition hover:bg-[var(--ff-pink)] hover:text-[var(--ff-cream)]"
             >
-              {autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
-            </span>
-          </button>
+              BACK [ESC]
+            </button>
+          </div>
 
-          {/* 2. Tofu Mode */}
-          <button
-            type="button"
-            onClick={onToggleTofuMode}
-            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
-              tofuMode
-                ? 'border-emerald-400 bg-emerald-950/40 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.25)]'
-                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-emerald-400/60'
-            }`}
-          >
-            <span className="font-bold">TOFU MODE [T]</span>
-            <span
-              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                tofuMode ? 'bg-emerald-400 text-black' : 'bg-[#250840] text-fuchsia-300'
-              }`}
+          <div className="space-y-2 p-4 text-xs">
+            <button
+              type="button"
+              onClick={onToggleAutoShift}
+              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-mint)]"
             >
-              {tofuMode ? 'ON (×2 GROOVE)' : 'OFF'}
-            </span>
-          </button>
+              <span className="font-bold tracking-wider uppercase">GEARBOX [G]</span>
+              <span
+                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
+                  autoShift
+                    ? 'bg-[var(--ff-gold)] text-[var(--ff-ink)]'
+                    : 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
+                }`}
+              >
+                {autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
+              </span>
+            </button>
 
-          {/* 3. Dashboard Cup */}
-          <button
-            type="button"
-            onClick={onCycleSodaSkin}
-            className="flex w-full cursor-pointer items-center justify-between rounded border border-amber-400/40 bg-[#1a0f05]/60 px-3.5 py-2.5 text-xs text-amber-200 transition hover:border-amber-300"
-          >
-            <span className="font-bold">DASHBOARD CUP [V]</span>
-            <span className="font-bold px-2 py-0.5 rounded text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/40">
-              {SODA_SKIN_LABELS[sodaSkin]}
-            </span>
-          </button>
-
-          {/* 4. HUD Display */}
-          <button
-            type="button"
-            onClick={onToggleCleanHud}
-            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
-              cleanHud
-                ? 'border-cyan-400 bg-cyan-950/40 text-cyan-200 shadow-[0_0_12px_rgba(5,217,232,0.25)]'
-                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-cyan-400/60'
-            }`}
-          >
-            <span className="font-bold">HUD DISPLAY [H]</span>
-            <span
-              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                cleanHud ? 'bg-cyan-400 text-black' : 'bg-[#250840] text-fuchsia-300'
-              }`}
+            <button
+              type="button"
+              onClick={onToggleTofuMode}
+              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-mint)]"
             >
-              {cleanHud ? 'MINIMAL' : 'FULL'}
-            </span>
-          </button>
+              <span className="font-bold tracking-wider uppercase">TOFU MODE [T]</span>
+              <span
+                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
+                  tofuMode
+                    ? 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
+                    : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
+                }`}
+              >
+                {tofuMode ? 'ON (×2)' : 'OFF'}
+              </span>
+            </button>
 
-          {/* 5. CRT Scanlines */}
-          <button
-            type="button"
-            onClick={onToggleCrt}
-            className={`flex w-full cursor-pointer items-center justify-between rounded border px-3.5 py-2.5 text-xs transition ${
-              crtEnabled
-                ? 'border-pink-400 bg-pink-950/40 text-pink-200 shadow-[0_0_12px_rgba(255,42,109,0.25)]'
-                : 'border-fuchsia-500/30 bg-[#160530]/60 text-fuchsia-200 hover:border-pink-400/60'
-            }`}
-          >
-            <span className="font-bold">CRT SCANLINES</span>
-            <span
-              className={`font-bold px-2 py-0.5 rounded text-[10px] ${
-                crtEnabled ? 'bg-pink-500 text-white' : 'bg-[#250840] text-fuchsia-300'
-              }`}
+            <button
+              type="button"
+              onClick={onCycleSodaSkin}
+              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-gold)]"
             >
-              {crtEnabled ? 'ON' : 'OFF'}
-            </span>
-          </button>
+              <span className="font-bold tracking-wider uppercase">DASHBOARD CUP [V]</span>
+              <span className="ff-mono rounded-[2px] bg-[var(--ff-gold)] px-2 py-0.5 text-[10px] font-black text-[var(--ff-ink)]">
+                {SODA_SKIN_LABELS[sodaSkin]}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleCleanHud}
+              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-mint)]"
+            >
+              <span className="font-bold tracking-wider uppercase">HUD [H]</span>
+              <span
+                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
+                  cleanHud
+                    ? 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
+                    : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
+                }`}
+              >
+                {cleanHud ? 'MINIMAL' : 'FULL'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onToggleCrt}
+              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-pink)]"
+            >
+              <span className="font-bold tracking-wider uppercase">CRT SCANLINES</span>
+              <span
+                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
+                  crtEnabled
+                    ? 'bg-[var(--ff-pink)] text-[var(--ff-cream)]'
+                    : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
+                }`}
+              >
+                {crtEnabled ? 'ON' : 'OFF'}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
