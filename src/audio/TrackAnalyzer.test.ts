@@ -151,6 +151,40 @@ describe('BeatMap helpers', () => {
     expect(beatMap.confidence.tempoStable).toBe(true);
     expect(firstDropBar(beatMap)).toBe(8);
   });
+
+  it('pinpoints exact bar-level drop onsets after a 1-bar vocal pickup or 9-bar filtered build', () => {
+    const pcmPickup1 = synthesizeFourOnTheFloorTrack({
+      bpm: 118,
+      durationSec: 48,
+      firstBeatOffsetSec: 0.04,
+      introBars: 1,
+    });
+    const { beatMap: map1 } = analyzePcm(pcmPickup1, ANALYSIS_SAMPLE_RATE, {
+      contentHash: 'sha256:pickup-1bar',
+      title: 'Pickup 1 Bar',
+      artist: 'Tester',
+    });
+    expect(firstDropBar(map1)).toBe(1);
+    expect(sectionAtBar(map1, 0)?.role).toBe('intro');
+    expect(sectionAtBar(map1, 1)?.role).toBe('drop');
+    expect(map1.barEnergy[1]! - map1.barEnergy[0]!).toBeGreaterThanOrEqual(0.35);
+
+    const pcmIntro9 = synthesizeFourOnTheFloorTrack({
+      bpm: 120,
+      durationSec: 64,
+      firstBeatOffsetSec: 0.05,
+      introBars: 9,
+    });
+    const { beatMap: map9 } = analyzePcm(pcmIntro9, ANALYSIS_SAMPLE_RATE, {
+      contentHash: 'sha256:intro-9bar',
+      title: 'Intro 9 Bar',
+      artist: 'Tester',
+    });
+    expect(firstDropBar(map9)).toBe(9);
+    expect(sectionAtBar(map9, 8)?.role).not.toBe('drop');
+    expect(sectionAtBar(map9, 9)?.role).toBe('drop');
+    expect(map9.barEnergy[9]! - map9.barEnergy[8]!).toBeGreaterThanOrEqual(0.35);
+  });
 });
 
 const corpusDir = resolve(process.cwd(), 'test-tracks');

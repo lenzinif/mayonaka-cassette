@@ -1164,5 +1164,44 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
       expect(dropReport.session.frames).toBe(1);
       expect(dropReport.session.avgFps).toBeCloseTo(48, 1);
     });
+
+    it('triggers lightning on a post-pickup drop climax surge even 1 bar after a low-energy drop entry', () => {
+      const prevRain = tuning.bgRain;
+      const prevLightning = tuning.bgLightningOnBeat;
+      tuning.bgRain = 1;
+      tuning.bgLightningOnBeat = 1;
+      try {
+        const customMap = {
+          ...DEFAULT_SYNTH_BEATMAP,
+          contentHash: 'sha256:delayed-drop-climax-test',
+          bpm: 120,
+          firstBeatOffsetSec: 0,
+          barEnergy: [0.18, 0.22, 0.24, 0.20, 0.31, 0.74, 0.80, 0.82],
+          sections: [
+            { startBar: 0, bars: 4, role: 'build' as const },
+            { startBar: 4, bars: 4, role: 'drop' as const },
+          ],
+        };
+        const audio = new FunkAudioEngine(customMap);
+        const game = new Game({ input: new FakeInput(), audio });
+        const bgAcc = (game as unknown as { background: { lightningStrikeCount: number } }).background;
+
+        // Advance across bar 4 (drop entry with low energy 0.31) -> strike 1
+        (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 7.95;
+        game.update(0.02);
+        (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 8.05;
+        game.update(0.02);
+        const strikesAtBar4 = bgAcc.lightningStrikeCount;
+        expect(strikesAtBar4).toBeGreaterThanOrEqual(1);
+
+        // Advance across bar 5 (1 bar later: energy surges from 0.31 -> 0.74, Δ+0.43) -> must fire climax strike!
+        (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 10.05;
+        game.update(0.02);
+        expect(bgAcc.lightningStrikeCount).toBe(strikesAtBar4 + 1);
+      } finally {
+        tuning.bgRain = prevRain;
+        tuning.bgLightningOnBeat = prevLightning;
+      }
+    });
   });
 });

@@ -8,7 +8,7 @@ import {
 import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
 
 const IDB_NAME = 'mayonaka-cassette-audio';
-const IDB_VERSION = 2;
+const IDB_VERSION = 3;
 const BEATMAP_STORE = 'beatmaps';
 const SCORE_STORE = 'scores';
 const LS_SCORES_KEY = 'mayonaka-cassette-best-scores-v1';
@@ -633,10 +633,12 @@ export class TrackLibrary {
     return new Promise<IDBDatabase | null>((resolve) => {
       try {
         const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-        req.onupgradeneeded = () => {
+        req.onupgradeneeded = (event) => {
           const db = req.result;
           if (!db.objectStoreNames.contains(BEATMAP_STORE)) {
             db.createObjectStore(BEATMAP_STORE, { keyPath: 'contentHash' });
+          } else if (event.oldVersion > 0 && event.oldVersion < 3) {
+            req.transaction?.objectStore(BEATMAP_STORE).clear();
           }
           if (!db.objectStoreNames.contains(SCORE_STORE)) {
             db.createObjectStore(SCORE_STORE, { keyPath: 'contentHash' });

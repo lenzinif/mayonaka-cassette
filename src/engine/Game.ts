@@ -1358,10 +1358,15 @@ export class Game {
         this.sectionRole !== 'intro' &&
         this.barEnergy >= 0.88 &&
         this.barsSinceLastLightning >= 12;
-      // Extreme Case 3: Sudden massive spectral novelty surge (+0.32 in a single bar)
+      // Extreme Case 3: Sudden massive spectral novelty surge (+0.28 in a single bar),
+      // or a delayed post-pickup drop climax when the drop section started 1-2 bars earlier on a low-energy bar
       const isSpectralSurge =
-        this.barEnergy - prevBarEnergy >= 0.32 &&
-        this.barsSinceLastLightning >= 8;
+        this.barEnergy - prevBarEnergy >= 0.28 &&
+        (this.barsSinceLastLightning >= 8 ||
+          (this.sectionRole === 'drop' &&
+            this.barsSinceLastLightning <= 2 &&
+            prevBarEnergy < 0.48 &&
+            this.barEnergy >= 0.60));
 
       if (isDropEntry || isExtremeSpectralPeak || isSpectralSurge) {
         triggerExtremeLightning = true;
