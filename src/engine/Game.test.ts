@@ -956,37 +956,38 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
     game.render(mockCtx, 1, 60);
   });
 
+  function createSimpleMockCtx(): CanvasRenderingContext2D {
+    const noop = () => {};
+    return {
+      canvas: { width: 640, height: 360 },
+      save: noop,
+      restore: noop,
+      fillRect: noop,
+      strokeRect: noop,
+      fillText: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      ellipse: noop,
+      rect: noop,
+      clip: noop,
+      fill: noop,
+      stroke: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      setTransform: noop,
+      setLineDash: noop,
+      createLinearGradient: () => ({ addColorStop: noop }),
+      createRadialGradient: () => ({ addColorStop: noop }),
+      drawImage: noop,
+    } as unknown as CanvasRenderingContext2D;
+  }
+
   describe('Fase 6 — Micro-FOV Dinamico', () => {
-    function createSimpleMockCtx(): CanvasRenderingContext2D {
-      const noop = () => {};
-      return {
-        canvas: { width: 640, height: 360 },
-        save: noop,
-        restore: noop,
-        fillRect: noop,
-        strokeRect: noop,
-        fillText: noop,
-        beginPath: noop,
-        closePath: noop,
-        moveTo: noop,
-        lineTo: noop,
-        quadraticCurveTo: noop,
-        arc: noop,
-        ellipse: noop,
-        rect: noop,
-        clip: noop,
-        fill: noop,
-        stroke: noop,
-        translate: noop,
-        rotate: noop,
-        scale: noop,
-        setTransform: noop,
-        setLineDash: noop,
-        createLinearGradient: () => ({ addColorStop: noop }),
-        createRadialGradient: () => ({ addColorStop: noop }),
-        drawImage: noop,
-      } as unknown as CanvasRenderingContext2D;
-    }
 
     it('keeps rendered FOV equal to tuning.fieldOfView at rest (speed = 0, LOW groove)', () => {
       tuning.fieldOfView = 100;
@@ -1101,5 +1102,146 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
       tuning.dynamicFovOverdriveBonus = 3.5;
       tuning.dynamicFovBoostKick = 3.0;
     });
+  });
+
+  describe('Frame pacing & lookahead prewarming', () => {
+    it('prewarms the next-track lookahead road on init and reuses it without mid-stage regeneration', () => {
+      const library = new TrackLibrary();
+      const game = new Game({ input: new FakeInput(), library });
+      const gameAcc = game as unknown as {
+        position: number;
+        nextTrackCache: { contentHash: string; track: unknown } | null;
+        activeNextTrackLookahead?: unknown;
+      };
+
+      expect(gameAcc.nextTrackCache).not.toBeNull();
+      expect(gameAcc.nextTrackCache!.contentHash).toBe(library.nextTrackItem!.beatMap.contentHash);
+      const prewarmedTrack = gameAcc.nextTrackCache!.track;
+
+      gameAcc.position = game.track.length - 10000;
+      game.update(1 / 60);
+      expect(gameAcc.activeNextTrackLookahead).toBe(prewarmedTrack);
+    });
+
+    it('uses rafNow timestamps, skips resume warmup frames, and normalizes 59.94 Hz avgFps to 60', () => {
+      const game = new Game({ input: new FakeInput() });
+      const ctx = createSimpleMockCtx();
+      const step5994Ms = 1000 / (60000 / 1001);
+
+      // Initial timestamp establishment + 5 frames at 59.94 Hz (16.6833 ms)
+      let t = 1000;
+      game.render(ctx, 1, 60, t);
+      for (let i = 0; i < 5; i++) {
+        t += step5994Ms;
+        game.render(ctx, 1, 60, t);
+      }
+
+      const initialReport = game.getBenchmarkReport();
+      expect(initialReport.session.frames).toBe(5);
+      expect(initialReport.session.avgFps).toBe(60);
+
+      // Pausing and resuming must discard the resume gap + 2 warmup frames
+      game.setPaused(true);
+      game.setPaused(false);
+      game.render(ctx, 1, 60, 5000);
+      game.render(ctx, 1, 60, 5050);
+      game.render(ctx, 1, 60, 5100);
+      game.render(ctx, 1, 60, 5100 + step5994Ms);
+
+      const postResumeReport = game.getBenchmarkReport();
+      expect(postResumeReport.session.frames).toBe(6);
+      expect(postResumeReport.session.maxFrameMs).toBeLessThan(18);
+      expect(postResumeReport.session.avgFps).toBe(60);
+
+      // Genuine sub-60 frame rates remain faithfully reported (reset sets 2 warmup frames)
+      game.resetPerfBenchmark();
+      game.render(ctx, 1, 48, 6000);
+      game.render(ctx, 1, 48, 6020.83);
+      game.render(ctx, 1, 48, 6041.66);
+      game.render(ctx, 1, 48, 6062.49);
+
+      const dropReport = game.getBenchmarkReport();
+      expect(dropReport.session.frames).toBe(1);
+      expect(dropReport.session.avgFps).toBeCloseTo(48, 1);
+    });
+  });
+});
+
+describe('Drop Onset & Climax Lightning Sync', () => {
+  it('triggers lightning once on a post-pickup drop climax surge and enforces refractory cooldown afterward', () => {
+    const prevRain = tuning.bgRain;
+    const prevLightning = tuning.bgLightningOnBeat;
+    tuning.bgRain = 1;
+    tuning.bgLightningOnBeat = 1;
+    try {
+      const customMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:delayed-drop-climax-test',
+        bpm: 120,
+        firstBeatOffsetSec: 0,
+        barEnergy: [0.18, 0.22, 0.24, 0.20, 0.31, 0.74, 0.38, 0.78],
+        sections: [
+          { startBar: 0, bars: 4, role: 'build' as const },
+          { startBar: 4, bars: 4, role: 'drop' as const },
+        ],
+      };
+      const audio = new FunkAudioEngine(customMap);
+      const game = new Game({ input: new FakeInput(), audio });
+      const bgAcc = (game as unknown as { background: { lightningStrikeCount: number } }).background;
+
+      // Advance across bar 4 (drop entry with low energy 0.31) -> strike 1
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 7.95;
+      game.update(0.02);
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 8.05;
+      game.update(0.02);
+      const strikesAtBar4 = bgAcc.lightningStrikeCount;
+      expect(strikesAtBar4).toBeGreaterThanOrEqual(1);
+
+      // Advance across bar 5 (1 bar later: energy surges from 0.31 -> 0.74, Δ+0.43) -> fires climax strike!
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 10.05;
+      game.update(0.02);
+      expect(bgAcc.lightningStrikeCount).toBe(strikesAtBar4 + 1);
+
+      // Advance across bar 6 (dip to 0.38) and bar 7 (rebound to 0.78, Δ+0.40):
+      // Post-pickup exception was consumed at bar 5, so 8-bar refractory cooldown blocks bar 7!
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 12.05;
+      game.update(0.02);
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 14.05;
+      game.update(0.02);
+      expect(bgAcc.lightningStrikeCount).toBe(strikesAtBar4 + 1);
+    } finally {
+      tuning.bgRain = prevRain;
+      tuning.bgLightningOnBeat = prevLightning;
+    }
+  });
+});
+
+describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () => {
+  it('preserves track.length, car position, and transitions cleanly to akiba_night viaducts even after tuning.maxSpeed changes', () => {
+    const prevMaxSpeed = tuning.maxSpeed;
+    try {
+      const game = new Game({ input: new FakeInput(), audio: new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP) });
+      const initialLength = game.track.length;
+      const targetPos = initialLength * 0.45;
+      game.hasStartedDriving = true;
+      game.position = targetPos;
+      (game as unknown as { prevPosition: number }).prevPosition = targetPos;
+
+      // Simulate user altering maxSpeed tuning live via DebugPanel before switching stage
+      tuning.maxSpeed = prevMaxSpeed * 1.4;
+      game.setStagePaletteIndex(2); // AKIBA NIGHT RUSH -> viaducts
+
+      expect(game.palette.id).toBe('akiba_night');
+      expect(game.track.length).toBe(initialLength);
+      expect(game.position).toBeCloseTo(targetPos, 5);
+      expect(game.position).toBeLessThan(game.track.length);
+      expect(game.bridge.getSnapshot()?.lap).toBe(1);
+
+      const envs = new Set(game.track.segments.map((s) => s.env));
+      expect(envs.has('viaduct')).toBe(true);
+      expect(envs.has('bridge')).toBe(false);
+    } finally {
+      tuning.maxSpeed = prevMaxSpeed;
+    }
   });
 });

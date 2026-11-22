@@ -326,7 +326,11 @@ export class Game {
   private paletteBlendElapsed = 0;
   private readonly paletteBlendDurationSec = 2.5;
   private lastPaletteBlendStep = -1;
-  private nextTrackCache: { contentHash: string; track: SongTrack } | null = null;
+  private nextTrackCache: {
+    contentHash: string;
+    stageId: StagePalette['id'];
+    track: SongTrack;
+  } | null = null;
   private activeNextTrackLookahead: SongTrack | undefined = undefined;
   private cachedForkLeftOption: ForkOptionInfo | null = null;
   private cachedForkRightOption: ForkOptionInfo | null = null;
@@ -363,6 +367,7 @@ export class Game {
   private sectionRole: SectionRole = 'intro';
   private barEnergy = 0.5;
   private barsSinceLastLightning = 99;
+  private lastLightningWasDropEntry = false;
 
   readonly syncController = new SongRoadSyncController();
   readonly forkController = new StageForkController();
@@ -478,6 +483,7 @@ export class Game {
       void this.audio.pause();
     } else {
       void this.audio.resume();
+      this.benchmarkWarmupFrames = Math.max(this.benchmarkWarmupFrames, 2);
       this.lastRenderTimestamp = 0;
       this.onTimingReset?.();
     }
@@ -773,7 +779,7 @@ export class Game {
     this.paletteTransitionSnapshot = createMutablePaletteClone(this.palette);
     this.hasCustomTrack = options.track !== undefined;
     this.activeRoadBeatMap = this.audio.beatMap;
-    this.track = options.track ?? generateSongRoad(this.audio.beatMap);
+    this.track = options.track ?? generateSongRoad(this.audio.beatMap, { stageId: this.palette.id });
     this.traffic = new TrafficManager(this.track, this.audio.beatMap.contentHash);
     this.preloader = options.preloader;
     this.autopilot = options.autopilot;
@@ -783,6 +789,7 @@ export class Game {
     for (let i = 0; i < 3; i++) {
       this.background.prewarmPalette(getStagePalette(i));
     }
+    this.prewarmNextLookaheadTrack();
     this.updateRoadProgressTelemetry();
   }
 
@@ -912,7 +919,7 @@ export class Game {
   /** Regenerates the road and traffic from `beatMap` and resets run state when switching songs. */
   loadBeatMapRoad(beatMap: BeatMap, resetPosition = true): void {
     const prevLength = this.track.length;
-    const songTrack = generateSongRoad(beatMap);
+    const songTrack = generateSongRoad(beatMap, { stageId: this.palette.id });
     this.track = songTrack;
     this.activeRoadBeatMap = beatMap;
     this.nextTrackCache = null;
@@ -938,6 +945,8 @@ export class Game {
       this.dynamicFov = tuning.fieldOfView;
       this.prevDynamicFov = tuning.fieldOfView;
       this.fovBoostPulse = 0;
+      this.barsSinceLastLightning = 99;
+      this.lastLightningWasDropEntry = false;
       this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
       this.resetPerfBenchmark();
     } else if (prevLength > 0) {
@@ -947,6 +956,7 @@ export class Game {
     }
 
     this.renderDirty = true;
+    this.prewarmNextLookaheadTrack();
     this.updateRoadProgressTelemetry();
     this.bridge.emit({
       type: 'songRoadGenerated',
@@ -964,9 +974,11 @@ export class Game {
     const prevLength = this.track.length;
     const overshoot = Math.max(0, nextPos - prevLength);
     const songTrack =
-      this.nextTrackCache && this.nextTrackCache.contentHash === beatMap.contentHash
+      this.nextTrackCache &&
+      this.nextTrackCache.contentHash === beatMap.contentHash &&
+      this.nextTrackCache.stageId === this.palette.id
         ? this.nextTrackCache.track
-        : generateSongRoad(beatMap);
+        : generateSongRoad(beatMap, { stageId: this.palette.id });
     this.nextTrackCache = null;
     this.activeNextTrackLookahead = undefined;
     this.track = songTrack;
@@ -988,6 +1000,7 @@ export class Game {
     this.benchmarkWarmupFrames = 2;
     this.lastRenderTimestamp = 0;
     this.renderDirty = true;
+    this.prewarmNextLookaheadTrack();
     this.updateRoadProgressTelemetry();
     this.bridge.emit({
       type: 'songRoadGenerated',
@@ -1030,12 +1043,37 @@ export class Game {
   }
 
   /**
-   * Directly sets the active stage palette by index and notifies HUD and DebugPanel immediately.
+   * Directly sets the active stage palette by index, re-dresses scenery for the new macro-region
+   * (preserving pure geometry), and notifies HUD and DebugPanel immediately.
    */
   setStagePaletteIndex(index: number): void {
     this.palette = getStagePalette(index);
     this.renderPalette = this.palette;
     this.paletteTransitionFrom = null;
+    if (!this.hasCustomTrack) {
+      const prevSong = isSongTrack(this.track) ? this.track : null;
+      this.track = generateSongRoad(
+        this.activeRoadBeatMap,
+        prevSong
+          ? {
+              stageId: this.palette.id,
+              maxSpeed: prevSong.referenceSpeed,
+              referenceSpeedRatio: 1,
+            }
+          : { stageId: this.palette.id },
+      );
+      if (this.track.length > 0) {
+        this.position =
+          ((this.position % this.track.length) + this.track.length) % this.track.length;
+        this.prevPosition = this.position;
+      }
+      this.lastBridgeJointSegment = -1;
+      this.nextTrackCache = null;
+      this.activeNextTrackLookahead = undefined;
+      this.prewarmNextLookaheadTrack();
+      this.updateRoadProgressTelemetry();
+      this.updateForkState();
+    }
     this.renderDirty = true;
     this.bridge.publish(this.buildSnapshot);
   }
@@ -1255,12 +1293,13 @@ export class Game {
     this.updateForkState();
 
     // 5. Update reactive Web Audio filter/pitch and sample BeatClock
+    const cameraSeg = findSegment(this.track, this.position);
     if (this.melonSoda.active) {
       const playerWorldZ = this.position + playerZOffset;
       const currentSeg = findSegment(this.track, playerWorldZ);
       if (
         currentSeg &&
-        currentSeg.env === 'bridge' &&
+        (currentSeg.env === 'bridge' || currentSeg.env === 'viaduct') &&
         currentSeg.stripe === 0 &&
         currentSeg.index % 8 === 0 &&
         this.lastBridgeJointSegment !== currentSeg.index
@@ -1274,6 +1313,7 @@ export class Game {
     this.drivingAudioParams.isDrifting = this.car.isDrifting;
     this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
     this.drivingAudioParams.offRoadDepth = this.car.offRoadDepth;
+    this.drivingAudioParams.inTunnel = cameraSeg?.env === 'tunnel';
     // If multi-track playlist is active and the player is in the late approach to the stage fork
     // but hasn't reached the finish line yet (docs/OUTRO_EXTENSION_PROPOSALS.md), instruct the
     // audio engine to apply progressive Tape Drag and hold the Dub Tape Delay wash if the track concludes.
@@ -1354,14 +1394,21 @@ export class Game {
         this.sectionRole !== 'intro' &&
         this.barEnergy >= 0.88 &&
         this.barsSinceLastLightning >= 12;
-      // Extreme Case 3: Sudden massive spectral novelty surge (+0.32 in a single bar)
+      // Extreme Case 3: Sudden massive spectral novelty surge (+0.28 in a single bar),
+      // or a delayed post-pickup drop climax when the drop section started 1-2 bars earlier on a low-energy bar
       const isSpectralSurge =
-        this.barEnergy - prevBarEnergy >= 0.32 &&
-        this.barsSinceLastLightning >= 8;
+        this.barEnergy - prevBarEnergy >= 0.28 &&
+        (this.barsSinceLastLightning >= 8 ||
+          (this.sectionRole === 'drop' &&
+            this.lastLightningWasDropEntry &&
+            this.barsSinceLastLightning <= 2 &&
+            prevBarEnergy < 0.48 &&
+            this.barEnergy >= 0.60));
 
       if (isDropEntry || isExtremeSpectralPeak || isSpectralSurge) {
         triggerExtremeLightning = true;
         this.barsSinceLastLightning = 0;
+        this.lastLightningWasDropEntry = isDropEntry && !isSpectralSurge;
       }
     }
 
@@ -1414,8 +1461,9 @@ export class Game {
     this.simTimeAccumMs += elapsed;
   };
 
-  render = (ctx: CanvasRenderingContext2D, alpha = 1, fps = 0): void => {
+  render = (ctx: CanvasRenderingContext2D, alpha = 1, fps = 0, rafNow?: number): void => {
     const t0 = performance.now();
+    const frameStamp = rafNow !== undefined && rafNow > 0 ? rafNow : t0;
     const isFirstRender = this.lastRenderTimestamp <= 0;
     this.lastFps = fps;
     if (!this.isPaused && this.lastRenderTimestamp > 0) {
@@ -1423,7 +1471,7 @@ export class Game {
         this.benchmarkWarmupFrames--;
         this.frameTimeMs = 16.67;
       } else {
-        const dt = Math.min(t0 - this.lastRenderTimestamp, 100);
+        const dt = Math.max(0, Math.min(frameStamp - this.lastRenderTimestamp, 100));
         this.frameTimeMs = this.frameTimeMs * 0.85 + dt * 0.15;
         this.frameDtHistory[this.frameDtCursor] = dt;
         this.frameDtCursor = (this.frameDtCursor + 1) % this.frameDtHistory.length;
@@ -1462,7 +1510,7 @@ export class Game {
     } else if (fps > 0 && this.lastRenderTimestamp <= 0) {
       this.frameTimeMs = 1000 / fps;
     }
-    this.lastRenderTimestamp = t0;
+    this.lastRenderTimestamp = frameStamp;
 
     // While paused, render once to paint the frozen scene + pause overlay, then skip redundant redraws
     if (this.isPaused && !this.renderDirty && this.lastRenderCtx === ctx) {
@@ -1580,7 +1628,8 @@ export class Game {
       drawPlayerCar(ctx, this.car, width, height, alpha);
     }
     const tFgWeather0 = performance.now();
-    if (this.renderBg) {
+    const cameraSegForWeather = findSegment(this.track, renderPos);
+    if (this.renderBg && cameraSegForWeather?.env !== 'tunnel') {
       this.background.renderForegroundWeather(ctx, width, height);
     }
     const tParts0 = performance.now();
@@ -1640,6 +1689,32 @@ export class Game {
     this.bridge.emit({ type: 'forkChoiceChanged', choice, source });
   };
 
+  private prewarmNextLookaheadTrack(): void {
+    if (
+      this.hasCustomTrack ||
+      !this.library.hasNextTrack ||
+      !isSongTrack(this.track)
+    ) {
+      return;
+    }
+    const nextItem = this.library.nextTrackItem;
+    if (!nextItem) return;
+    const nextPalette = getStagePalette(this.runManager.stageNumber);
+    if (
+      !this.nextTrackCache ||
+      this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash ||
+      this.nextTrackCache.stageId !== nextPalette.id
+    ) {
+      const nextTrack = generateSongRoad(nextItem.beatMap, { stageId: nextPalette.id });
+      this.nextTrackCache = {
+        contentHash: nextItem.beatMap.contentHash,
+        stageId: nextPalette.id,
+        track: nextTrack,
+      };
+      this.background.prewarmPalette(nextPalette);
+    }
+  }
+
   private getNextLookaheadTrack(): SongTrack | undefined {
     if (
       this.hasCustomTrack ||
@@ -1659,13 +1734,18 @@ export class Game {
       return undefined;
     }
 
-    if (!this.nextTrackCache || this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash) {
-      const nextTrack = generateSongRoad(nextItem.beatMap);
-      this.nextTrackCache = { contentHash: nextItem.beatMap.contentHash, track: nextTrack };
-      const nextPalette = getStagePalette(this.runManager.stageNumber);
-      this.background.prewarmPalette(nextPalette);
+    const nextPalette = getStagePalette(this.runManager.stageNumber);
+    if (
+      !this.nextTrackCache ||
+      this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash ||
+      this.nextTrackCache.stageId !== nextPalette.id
+    ) {
+      this.prewarmNextLookaheadTrack();
     }
-    return this.nextTrackCache.track;
+    return this.nextTrackCache?.contentHash === nextItem.beatMap.contentHash &&
+      this.nextTrackCache?.stageId === nextPalette.id
+      ? this.nextTrackCache.track
+      : undefined;
   }
 
   private updateForkState(): void {
@@ -1983,8 +2063,10 @@ export class Game {
   } {
     if (this.sessionFrames > 0 && this.sessionElapsedMs > 0) {
       const avgMs = this.sessionElapsedMs / this.sessionFrames;
+      const rawFps = 1000 / avgMs;
       return {
-        sessionAvgFps: Math.round((1000 / avgMs) * 10) / 10,
+        sessionAvgFps:
+          rawFps >= 59.85 && rawFps <= 60.15 ? 60 : Math.round(rawFps * 10) / 10,
         sessionMinFps:
           this.sessionFrames > 30 ? Math.round(this.sessionMinWindowFps) : this.lastFps || 60,
         sessionAvgFrameMs: avgMs,

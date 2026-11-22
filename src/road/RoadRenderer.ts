@@ -89,8 +89,8 @@ export interface RoadRenderStats {
  */
 export class RoadRenderer {
   private readonly visible: RoadSegment[] = new Array<RoadSegment>(MAX_DRAW_DISTANCE);
-  private readonly clipY = new Float32Array(MAX_DRAW_DISTANCE);
-  /** 1 when any nearer segment between camera and index `n` is a bridge (requiring stencil clip behind crests). */
+  private readonly clipY = new Float64Array(MAX_DRAW_DISTANCE);
+  /** 1 when the occluding horizon crest at index `n` is a bridge segment (requiring stencil clip behind crests). */
   private readonly clipNeedsStencil = new Uint8Array(MAX_DRAW_DISTANCE);
 
   // --- Phase 3 Power Line Chain State (Zero GC) ---
@@ -117,6 +117,13 @@ export class RoadRenderer {
   // Cached Nyquist-filtered far-horizon colors for coalesced sub-pixel slices (Zero GC)
   private cachedHorizonCurbColor = '#4a4a6a';
   private cachedHorizonRoadColor = '#141928';
+
+  // Zero-GC state for minimal single-frame tunnel aperture surround masking
+  private tunnelMaskEmitted = false;
+  private tunnelMaskMinX = 0;
+  private tunnelMaskMaxX = 0;
+  private tunnelMaskMinY = 0;
+  private tunnelMaskMaxY = 0;
 
   // Pre-allocated 4-band depth fog palette (Phase 2, Zero GC)
   private static readonly FOG_BAND_T = [0, 0.22, 0.48, 0.72] as const;
@@ -265,12 +272,15 @@ export class RoadRenderer {
     const horizonY = Math.floor(height * 0.5);
     const cameraSeg = findSegment(track, view.position);
     const isCameraOnBridge = cameraSeg ? cameraSeg.env === 'bridge' : false;
+    const isCameraInTunnel = cameraSeg ? cameraSeg.env === 'tunnel' : false;
 
     // Pass 1: front-to-back projection & hill-crest occlusion horizon (maxy).
     let x = 0;
     let dx = -(base.curve * basePercent);
     let maxy = height;
-    let seenBridge = isCameraOnBridge;
+    let crestIsBridge = isCameraOnBridge;
+    let cameraTunnelEndN = -1;
+    let leftCameraTunnel = false;
     for (let n = 0; n < drawDistance; n++) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
       const seg = isNextSeg
@@ -294,12 +304,17 @@ export class RoadRenderer {
       );
       x += dx;
       dx += seg.curve;
-      if (seg.env === 'bridge') {
-        seenBridge = true;
-      }
       this.visible[n] = seg;
       this.clipY[n] = maxy;
-      this.clipNeedsStencil[n] = seenBridge ? 1 : 0;
+      this.clipNeedsStencil[n] = crestIsBridge ? 1 : 0;
+
+      if (isCameraInTunnel && !leftCameraTunnel) {
+        if (seg.env === 'tunnel') {
+          cameraTunnelEndN = n;
+        } else {
+          leftCameraTunnel = true;
+        }
+      }
 
       if (
         seg.p1.cameraZ > cameraDepth &&
@@ -307,8 +322,15 @@ export class RoadRenderer {
         seg.p2.screenY < maxy
       ) {
         maxy = seg.p2.screenY;
+        crestIsBridge = seg.env === 'bridge';
       }
     }
+
+    this.tunnelMaskEmitted = false;
+    this.tunnelMaskMinX = 0;
+    this.tunnelMaskMaxX = width;
+    this.tunnelMaskMinY = 0;
+    this.tunnelMaskMaxY = height;
 
     // Pass 2: painter's algorithm (back-to-front).
     if (isCameraOnBridge) {
@@ -376,6 +398,7 @@ export class RoadRenderer {
           const dy = p1.screenY - p2.screenY;
           shouldDeferSlice = !(dy >= 0.15 || p1.screenW >= 8 || seg.sprites.length > 0 || firstTruckIdx !== -1);
         } else if (
+          (seg.env ?? 'standard') === 'standard' &&
           n > 60 &&
           combinedDy < 0.75 &&
           seg.sprites.length === 0 &&
@@ -415,10 +438,22 @@ export class RoadRenderer {
                   : nRatio < 0.75
                     ? 2
                     : 3;
+          const segArr = isNextSeg ? view.nextTrack!.segments : segments;
+          const segArrLen = segArr.length;
+          const prevEnv =
+            segArrLen > 0
+              ? (segArr[(seg.index - 1 + segArrLen) % segArrLen]?.env ?? 'standard')
+              : 'standard';
+          const nextEnv =
+            segArrLen > 0
+              ? (segArr[(seg.index + 1) % segArrLen]?.env ?? 'standard')
+              : 'standard';
           const tSeg0 = sampleSubsystems ? performance.now() : 0;
+          const isInCurrentTunnel = isCameraInTunnel && n <= cameraTunnelEndN;
           this.renderSegment(
             ctx,
             width,
+            height,
             seg,
             palette,
             view.beatPulse ?? 0,
@@ -427,6 +462,9 @@ export class RoadRenderer {
             view.forkChoice,
             segClipY,
             isCameraOnBridge,
+            isInCurrentTunnel,
+            prevEnv,
+            nextEnv,
             horizonY,
             view.grooveIntensity ?? 0.5,
             legacy,
@@ -535,6 +573,11 @@ export class RoadRenderer {
             fadeRatioSpan = 0.12;
             minRefPpu = 0.0095;
             fadePpuSpan = 0.004;
+          } else if (resolvedKind === 'building' && absOff >= 3.0 && absOff < 6.0) {
+            maxRatio = 0.78;
+            fadeRatioSpan = 0.14;
+            minRefPpu = 0.0055;
+            fadePpuSpan = 0.003;
           } else if (
             resolvedKind === 'sign' ||
             resolvedKind === 'lamp' ||
@@ -586,6 +629,10 @@ export class RoadRenderer {
         // Phase 3: Always register every visible pylon in the longitudinal wire chain regardless of lateral cull,
         // so catenary spans never pop off when the near tower slides past the viewport edge.
         if (resolvedKind === 'pylon' && s.chainId !== undefined && !view.skipPylonWires) {
+          if (!legacy && activeAlpha !== 1) {
+            ctx.globalAlpha = 1;
+            activeAlpha = 1;
+          }
           this.handlePylonChainWires(
             ctx,
             s,
@@ -626,7 +673,7 @@ export class RoadRenderer {
         if (
           !crestClipActive &&
           segClipY < height &&
-          p1.screenY > segClipY &&
+          p1.screenY > segClipY + 0.5 &&
           needsStencilClip &&
           typeof ctx.clip === 'function'
         ) {
@@ -741,7 +788,7 @@ export class RoadRenderer {
                   !truckClipActive &&
                   needsStencilClip &&
                   segClipY < height &&
-                  truckScreenY > segClipY &&
+                  truckScreenY > segClipY + 0.5 &&
                   typeof ctx.clip === 'function'
                 ) {
                   ctx.save();
@@ -842,98 +889,100 @@ export class RoadRenderer {
 
       // Connect all consecutive towers belonging to the same corridor run
       if (isCrossing || segDelta <= 200) {
-        ctx.strokeStyle = '#2d1c4a';
-        ctx.lineWidth = 1;
+        if (legacy || propPpu >= 0.0055) {
+          ctx.strokeStyle = '#2d1c4a';
+          ctx.lineWidth = 1;
 
-        const pOffset = slot * 10;
-        let drewAnyWire = false;
-        if (legacy) {
-          for (let k = 0; k < 5; k++) {
-            const xNear = this.currentPylonPoints[k * 2]!;
-            const yNear = this.currentPylonPoints[k * 2 + 1]!;
-            const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
-
-            drewAnyWire = true;
-            const dx = xFar - xNear;
-            const dy = yFar - yNear;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            const sagRatio = isCrossing ? 0.05 : 0.09;
-            const sag = Math.max(1.5, dist * sagRatio);
-            const midX = (xNear + xFar) * 0.5;
-            const midY = (yNear + yFar) * 0.5 + sag;
-
-            ctx.beginPath();
-            ctx.moveTo(xNear, yNear);
-            ctx.quadraticCurveTo(midX, midY, xFar, yFar);
-            ctx.stroke();
-          }
-
-          if (drewAnyWire) {
-            this.stats.drawnPylonSpans++;
-          }
-
-          if (drewAnyWire && propPpu > 0.0035) {
-            ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+          const pOffset = slot * 10;
+          let drewAnyWire = false;
+          if (legacy) {
             for (let k = 0; k < 5; k++) {
               const xNear = this.currentPylonPoints[k * 2]!;
-              const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+              const yNear = this.currentPylonPoints[k * 2 + 1]!;
               const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
+              drewAnyWire = true;
               const dx = xFar - xNear;
               const dy = yFar - yNear;
               const dist = Math.sqrt(dx * dx + dy * dy);
+
               const sagRatio = isCrossing ? 0.05 : 0.09;
               const sag = Math.max(1.5, dist * sagRatio);
+              const midX = (xNear + xFar) * 0.5;
+              const midY = (yNear + yFar) * 0.5 + sag;
+
               ctx.beginPath();
               ctx.moveTo(xNear, yNear);
-              ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+              ctx.quadraticCurveTo(midX, midY, xFar, yFar);
               ctx.stroke();
             }
-          }
-        } else {
-          // Batched catenary wire draw: 1 beginPath + 5 quadratic curves + 1 stroke
-          ctx.beginPath();
-          for (let k = 0; k < 5; k++) {
-            const xNear = this.currentPylonPoints[k * 2]!;
-            const yNear = this.currentPylonPoints[k * 2 + 1]!;
-            const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
-            const dx = xFar - xNear;
-            const dy = yFar - yNear;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const sagRatio = isCrossing ? 0.05 : 0.09;
-            const sag = Math.max(1.5, dist * sagRatio);
-            const midX = (xNear + xFar) * 0.5;
-            const midY = (yNear + yFar) * 0.5 + sag;
+            if (drewAnyWire) {
+              this.stats.drawnPylonSpans++;
+            }
 
-            ctx.moveTo(xNear, yNear);
-            ctx.quadraticCurveTo(midX, midY, xFar, yFar);
-          }
-          ctx.stroke();
-          this.stats.drawnPylonSpans++;
+            if (drewAnyWire && propPpu > 0.0035) {
+              ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+              for (let k = 0; k < 5; k++) {
+                const xNear = this.currentPylonPoints[k * 2]!;
+                const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+                const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+                const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
 
-          if (propPpu > 0.018) {
-            ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+                const dx = xFar - xNear;
+                const dy = yFar - yNear;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const sagRatio = isCrossing ? 0.05 : 0.09;
+                const sag = Math.max(1.5, dist * sagRatio);
+                ctx.beginPath();
+                ctx.moveTo(xNear, yNear);
+                ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+                ctx.stroke();
+              }
+            }
+          } else {
+            // Batched catenary wire draw: 1 beginPath + 5 quadratic curves + 1 stroke
             ctx.beginPath();
             for (let k = 0; k < 5; k++) {
               const xNear = this.currentPylonPoints[k * 2]!;
-              const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+              const yNear = this.currentPylonPoints[k * 2 + 1]!;
               const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
               const dx = xFar - xNear;
               const dy = yFar - yNear;
               const dist = Math.sqrt(dx * dx + dy * dy);
               const sagRatio = isCrossing ? 0.05 : 0.09;
               const sag = Math.max(1.5, dist * sagRatio);
+              const midX = (xNear + xFar) * 0.5;
+              const midY = (yNear + yFar) * 0.5 + sag;
+
               ctx.moveTo(xNear, yNear);
-              ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+              ctx.quadraticCurveTo(midX, midY, xFar, yFar);
             }
             ctx.stroke();
+            this.stats.drawnPylonSpans++;
+
+            if (propPpu > 0.018) {
+              ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+              ctx.beginPath();
+              for (let k = 0; k < 5; k++) {
+                const xNear = this.currentPylonPoints[k * 2]!;
+                const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+                const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+                const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+
+                const dx = xFar - xNear;
+                const dy = yFar - yNear;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const sagRatio = isCrossing ? 0.05 : 0.09;
+                const sag = Math.max(1.5, dist * sagRatio);
+                ctx.moveTo(xNear, yNear);
+                ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+              }
+              ctx.stroke();
+            }
           }
         }
 
@@ -1070,6 +1119,7 @@ export class RoadRenderer {
   private renderSegment(
     ctx: CanvasRenderingContext2D,
     width: number,
+    height: number,
     seg: RoadSegment,
     palette: StagePalette,
     beatPulse = 0,
@@ -1078,6 +1128,9 @@ export class RoadRenderer {
     forkChoice?: 'left' | 'right',
     segClipY = Number.POSITIVE_INFINITY,
     isCameraOnBridge = false,
+    isCameraInTunnel = false,
+    prevEnv: RoadSegment['env'] = 'standard',
+    nextEnv: RoadSegment['env'] = 'standard',
     horizonY = 180,
     grooveIntensity = 0.5,
     legacy = false,
@@ -1117,11 +1170,38 @@ export class RoadRenderer {
     const r2 = (w2 / Math.max(6, 2 * LANES)) * pulseScale;
 
     const isBridge = seg.env === 'bridge';
+    const isViaduct = seg.env === 'viaduct';
+    const isTunnel = seg.env === 'tunnel';
 
-    // Bridge bay water surface vs full-elevation terrain ground fill.
-    // Non-bridge terrain ALWAYS fills [y2, y1] (including hills rising above horizonY) so the road
-    // and roadside props remain solidly grounded on terrain and hill crests naturally occlude
-    // farther slices/props behind them via Painter's Algorithm without ctx.clip().
+    if (isTunnel) {
+      this.renderTunnelSegment(
+        ctx,
+        width,
+        height,
+        seg,
+        palette,
+        grassColor,
+        roadColor,
+        rumbleColor,
+        laneColor,
+        x1,
+        y1,
+        w1,
+        r1,
+        x2,
+        y2,
+        w2,
+        r2,
+        beatPulse,
+        isCameraInTunnel,
+        prevEnv !== 'tunnel',
+        nextEnv !== 'tunnel',
+      );
+      return;
+    }
+
+    // Bridge bay water surface vs viaduct/terrain ground fill.
+    // Viaducts NEVER draw bay water; non-bridge terrain fills [y2, y1] for natural hill-crest occlusion.
     if (isBridge && isCameraOnBridge) {
       if (stripe === 0 && y1 > horizonY) {
         const waterColors = palette.water ?? palette.grass;
@@ -1169,6 +1249,7 @@ export class RoadRenderer {
     const rawDy = p1.screenY - p2.screenY;
     const useFastSliceRect =
       !isBridge &&
+      !isViaduct &&
       (legacy
         ? w1 < 20 && rawDy < 2.2
         : isCoalesced || (rawDy <= 1.6 && Math.abs(w1 - w2) <= 4.5 && Math.abs(x1 - x2) <= 3.5));
@@ -1213,7 +1294,7 @@ export class RoadRenderer {
       }
 
       // Zero-GC high-Groove / OVERDRIVE outer curb neon edge rails (dash fillRects without stroke/globalAlpha churn)
-      if (clampedGroove >= 0.85 && stripe === 0 && !isBridge && w1 >= 24) {
+      if (clampedGroove >= 0.85 && stripe === 0 && !isBridge && !isViaduct && w1 >= 24) {
         const mx = (x1 + x2) * 0.5;
         const mw = (w1 + w2) * 0.5;
         const mr = (r1 + r2) * 0.5;
@@ -1225,6 +1306,8 @@ export class RoadRenderer {
 
     if (isBridge && w1 >= 18) {
       this.renderBridgeParapets(ctx, seg, x1, y1, w1, r1, x2, y2, w2, r2);
+    } else if (isViaduct && w1 >= 18) {
+      this.renderViaductParapets(ctx, seg, palette, x1, y1, w1, r1, x2, y2, w2, r2);
     }
   }
 
@@ -1681,6 +1764,333 @@ export class RoadRenderer {
     if (stripe === 0 && seg.index % 8 === 0 && w1 >= 22) {
       ctx.fillStyle = '#5c5478';
       polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+    }
+  }
+
+  private renderViaductParapets(
+    ctx: CanvasRenderingContext2D,
+    seg: RoadSegment,
+    palette: StagePalette,
+    x1: number,
+    y1: number,
+    w1: number,
+    r1: number,
+    x2: number,
+    y2: number,
+    w2: number,
+    r2: number,
+  ): void {
+    const stripe = seg.stripe;
+    const parH1 = Math.max(2, Math.round(w1 * 0.22));
+    const parH2 = Math.max(1, Math.round(w2 * 0.22));
+
+    // Shuto C1 elevated expressway concrete sound-barrier walls (Left & Right batched in 1 path)
+    ctx.fillStyle = stripe === 0 ? '#2c2740' : '#211c32';
+    ctx.beginPath();
+    ctx.moveTo(x1 - w1 - r1, y1);
+    ctx.lineTo(x1 - w1 - r1, y1 - parH1);
+    ctx.lineTo(x2 - w2 - r2, y2 - parH2);
+    ctx.lineTo(x2 - w2 - r2, y2);
+    ctx.closePath();
+    ctx.moveTo(x1 + w1 + r1, y1);
+    ctx.lineTo(x1 + w1 + r1, y1 - parH1);
+    ctx.lineTo(x2 + w2 + r2, y2 - parH2);
+    ctx.lineTo(x2 + w2 + r2, y2);
+    ctx.closePath();
+    ctx.fill();
+
+    // Neon accent guide rail & amber reflectors (closer segments)
+    if (w1 >= 24 && stripe === 0) {
+      const leftWallX = Math.round(x1 - w1 - r1);
+      const rightWallX = Math.round(x1 + w1 + r1);
+      const railY = Math.round(y1 - parH1);
+      const railW = Math.max(2, Math.round(r1 * 0.3));
+
+      ctx.fillStyle = palette.mountainRim;
+      ctx.fillRect(leftWallX, railY, railW, 1);
+      ctx.fillRect(rightWallX - railW, railY, railW, 1);
+
+      ctx.fillStyle = seg.index % 4 === 0 ? '#ffaa00' : palette.rumble[1];
+      const reflSize = Math.max(1, Math.round(parH1 * 0.28));
+      ctx.fillRect(leftWallX + 1, Math.round(y1 - parH1 * 0.58), reflSize, reflSize);
+      ctx.fillRect(rightWallX - reflSize - 1, Math.round(y1 - parH1 * 0.58), reflSize, reflSize);
+    }
+
+    // Concrete viaduct expansion joint every 8 segments
+    if (stripe === 0 && seg.index % 8 === 0 && w1 >= 22) {
+      ctx.fillStyle = '#474063';
+      polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+    }
+  }
+
+  private renderTunnelSegment(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    seg: RoadSegment,
+    palette: StagePalette,
+    grassColor: string,
+    roadColor: string,
+    rumbleColor: string,
+    laneColor: string,
+    x1: number,
+    y1: number,
+    w1: number,
+    r1: number,
+    x2: number,
+    y2: number,
+    w2: number,
+    r2: number,
+    beatPulse: number,
+    isCameraInTunnel: boolean,
+    isTunnelEntry: boolean,
+    isTunnelExit: boolean,
+  ): void {
+    const stripe = seg.stripe;
+    const tunnelH1 = Math.max(4, w1 * 1.18);
+    const tunnelH2 = Math.max(3, w2 * 1.18);
+    const ceilY1 = y1 - tunnelH1;
+    const ceilY2 = y2 - tunnelH2;
+    const innerL1 = x1 - w1 - r1;
+    const innerR1 = x1 + w1 + r1;
+    const innerL2 = x2 - w2 - r2;
+    const innerR2 = x2 + w2 + r2;
+
+    const outerPad1 = Math.max(2, w1 * 0.25);
+    const outerPad2 = Math.max(1, w2 * 0.25);
+    const outerL1 = innerL1 - outerPad1;
+    const outerR1 = innerR1 + outerPad1;
+    const outerL2 = innerL2 - outerPad2;
+    const outerR2 = innerR2 + outerPad2;
+    const outerCeilY1 = ceilY1 - outerPad1 * 0.85;
+    const outerCeilY2 = ceilY2 - outerPad2 * 0.85;
+
+    // 1. Exterior surround / approach terrain (zero ctx.clip)
+    if (isCameraInTunnel) {
+      ctx.fillStyle = '#070510';
+      if (!this.tunnelMaskEmitted) {
+        // Emit the full-viewport surround mask once per frame on the farthest visible slice of
+        // the current tunnel so outdoor sky/horizon stay visible strictly through the exit mouth.
+        const topH = Math.max(0, Math.min(height, ceilY2));
+        if (topH > 0) {
+          ctx.fillRect(0, 0, width, topH);
+        }
+        const botY = Math.max(topH, Math.min(height, y2));
+        const spanY = botY - topH;
+        const leftW = Math.max(0, Math.min(width, innerL2));
+        if (leftW > 0 && spanY > 0) {
+          ctx.fillRect(0, topH, leftW, spanY);
+        }
+        const rightX = Math.max(0, Math.min(width, innerR2));
+        if (rightX < width && spanY > 0) {
+          ctx.fillRect(rightX, topH, width - rightX, spanY);
+        }
+        if (botY < height) {
+          ctx.fillRect(0, botY, width, height - botY);
+        }
+        this.tunnelMaskEmitted = true;
+        this.tunnelMaskMinX = leftW;
+        this.tunnelMaskMaxX = rightX;
+        this.tunnelMaskMinY = topH;
+        this.tunnelMaskMaxY = botY;
+      } else {
+        // On closer slices, paint only delta slivers when bends/crests narrow the exit aperture
+        const clipL = Math.min(innerL1, innerL2);
+        if (clipL > this.tunnelMaskMinX) {
+          const fillW = Math.min(this.tunnelMaskMaxX, clipL) - this.tunnelMaskMinX;
+          if (fillW > 0 && this.tunnelMaskMaxY > this.tunnelMaskMinY) {
+            ctx.fillRect(
+              this.tunnelMaskMinX,
+              this.tunnelMaskMinY,
+              fillW,
+              this.tunnelMaskMaxY - this.tunnelMaskMinY,
+            );
+          }
+          this.tunnelMaskMinX = clipL;
+        }
+        const clipR = Math.max(innerR1, innerR2);
+        if (clipR < this.tunnelMaskMaxX) {
+          const startX = Math.max(this.tunnelMaskMinX, clipR);
+          const fillW = this.tunnelMaskMaxX - startX;
+          if (fillW > 0 && this.tunnelMaskMaxY > this.tunnelMaskMinY) {
+            ctx.fillRect(
+              startX,
+              this.tunnelMaskMinY,
+              fillW,
+              this.tunnelMaskMaxY - this.tunnelMaskMinY,
+            );
+          }
+          this.tunnelMaskMaxX = clipR;
+        }
+        const clipTop = Math.min(ceilY1, ceilY2);
+        if (clipTop > this.tunnelMaskMinY) {
+          const fillH = Math.min(this.tunnelMaskMaxY, clipTop) - this.tunnelMaskMinY;
+          if (fillH > 0 && this.tunnelMaskMaxX > this.tunnelMaskMinX) {
+            ctx.fillRect(
+              this.tunnelMaskMinX,
+              this.tunnelMaskMinY,
+              this.tunnelMaskMaxX - this.tunnelMaskMinX,
+              fillH,
+            );
+          }
+          this.tunnelMaskMinY = clipTop;
+        }
+      }
+    } else {
+      // Approaching from outside: ground terrain below horizon + smooth concrete exterior shell outside bore
+      ctx.fillStyle = grassColor;
+      ctx.fillRect(0, y2, width, y1 - y2);
+
+      ctx.fillStyle = stripe === 0 ? '#1b162e' : '#151126';
+      ctx.beginPath();
+      // Left outer casing flank
+      ctx.moveTo(outerL1, y1);
+      ctx.lineTo(outerL1, outerCeilY1);
+      ctx.lineTo(outerL2, outerCeilY2);
+      ctx.lineTo(outerL2, y2);
+      ctx.closePath();
+      // Right outer casing flank
+      ctx.moveTo(outerR2, y2);
+      ctx.lineTo(outerR2, outerCeilY2);
+      ctx.lineTo(outerR1, outerCeilY1);
+      ctx.lineTo(outerR1, y1);
+      ctx.closePath();
+      // Top outer roof slab
+      ctx.moveTo(outerL1, outerCeilY1);
+      ctx.lineTo(outerR1, outerCeilY1);
+      ctx.lineTo(outerR2, outerCeilY2);
+      ctx.lineTo(outerL2, outerCeilY2);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // 2. Interior tunnel walls (tiled concrete bays, Left & Right batched into 1 path)
+    ctx.fillStyle = stripe === 0 ? '#1b172c' : '#130f20';
+    ctx.beginPath();
+    ctx.moveTo(innerL1, y1);
+    ctx.lineTo(innerL1, ceilY1);
+    ctx.lineTo(innerL2, ceilY2);
+    ctx.lineTo(innerL2, y2);
+    ctx.closePath();
+    ctx.moveTo(innerR1, y1);
+    ctx.lineTo(innerR1, ceilY1);
+    ctx.lineTo(innerR2, ceilY2);
+    ctx.lineTo(innerR2, y2);
+    ctx.closePath();
+    ctx.fill();
+
+    // 3. Interior ceiling vault slab
+    ctx.fillStyle = stripe === 0 ? '#100c1e' : '#0b0816';
+    polygon(ctx, innerL1, ceilY1, innerR1, ceilY1, innerR2, ceilY2, innerL2, ceilY2);
+
+    // 4. Roadway surface inside bore (rumble curbs, dark tunnel tarmac, lanes)
+    ctx.fillStyle = rumbleColor;
+    drawRumblePair(ctx, x1, y1, x2, y2, w1, w2, r1, r2);
+
+    ctx.fillStyle = roadColor;
+    polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+
+    if (stripe === 0 && w1 >= 6) {
+      ctx.fillStyle = laneColor;
+      drawLanes(ctx, x1, y1, x2, y2, w1, w2);
+    }
+
+    // 5. Structural concrete ribs & rhythmic beat-synced fluorescent ceiling light bars
+    if (seg.index % 6 === 0 && w1 >= 12) {
+      const ribW1 = Math.max(2, w1 * 0.045);
+      const ribW2 = Math.max(1, w2 * 0.045);
+      ctx.fillStyle = '#292242';
+      ctx.beginPath();
+      ctx.moveTo(innerL1, y1);
+      ctx.lineTo(innerL1, ceilY1);
+      ctx.lineTo(innerL1 + ribW1, ceilY1);
+      ctx.lineTo(innerL1 + ribW1, y1);
+      ctx.closePath();
+      ctx.moveTo(innerR1 - ribW1, y1);
+      ctx.lineTo(innerR1 - ribW1, ceilY1);
+      ctx.lineTo(innerR1, ceilY1);
+      ctx.lineTo(innerR1, y1);
+      ctx.closePath();
+      ctx.moveTo(innerL1, ceilY1);
+      ctx.lineTo(innerR1, ceilY1);
+      ctx.lineTo(innerR2, ceilY2 + ribW2);
+      ctx.lineTo(innerL2, ceilY2 + ribW2);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const hasCeilingLight = seg.tunnelLight !== undefined ? seg.tunnelLight : seg.index % 16 === 0;
+    if (hasCeilingLight && w1 >= 6) {
+      const glowW = Math.max(3, (w1 + w2) * (0.46 + beatPulse * 0.08));
+      const barH = Math.max(1, Math.min(4, Math.abs(ceilY2 - ceilY1) * 0.65));
+      const midCeilX = (x1 + x2) * 0.5;
+      const midCeilY = Math.min(ceilY1, ceilY2) + Math.abs(ceilY2 - ceilY1) * 0.18;
+
+      ctx.fillStyle = palette.horizonGlow ?? '#fff3cc';
+      ctx.fillRect(Math.round(midCeilX - glowW * 0.5), Math.round(midCeilY), Math.round(glowW), Math.round(barH));
+
+      if (w1 >= 22) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(
+          Math.round(midCeilX - glowW * 0.34),
+          Math.round(midCeilY),
+          Math.max(2, Math.round(glowW * 0.68)),
+          Math.max(1, Math.round(barH * 0.6)),
+        );
+      }
+    }
+
+    // Wall-base amber reflector dashes along shoulders
+    if (w1 >= 18 && stripe === 0) {
+      const reflW = Math.max(2, Math.round(w1 * 0.04));
+      const reflH = Math.max(1, Math.round(w1 * 0.03));
+      const reflY = Math.round((y1 + y2) * 0.5 - reflH * 1.4);
+      ctx.fillStyle = '#ffaa00';
+      ctx.fillRect(Math.round(innerL1 + 1), reflY, reflW, reflH);
+      ctx.fillRect(Math.round(innerR1 - reflW - 1), reflY, reflW, reflH);
+    }
+
+    // 6. Monumental Tunnel Entrance & Exit Portals
+    if (isTunnelEntry && !isCameraInTunnel && w1 >= 8) {
+      const portalTop = Math.round(outerCeilY1);
+      const portalBot = Math.round(y1);
+      const portalH = Math.max(2, portalBot - portalTop);
+      const leftPillarW = Math.max(2, Math.round(innerL1 - outerL1));
+      const rightPillarW = Math.max(2, Math.round(outerR1 - innerR1));
+      const lintelH = Math.max(2, Math.round(ceilY1 - outerCeilY1));
+
+      // Concrete portal pillars & lintel beam around open bore
+      ctx.fillStyle = '#2d2645';
+      ctx.fillRect(Math.round(outerL1), portalTop, leftPillarW, portalH);
+      ctx.fillRect(Math.round(innerR1), portalTop, rightPillarW, portalH);
+      ctx.fillRect(Math.round(outerL1), portalTop, Math.round(outerR1 - outerL1), lintelH);
+
+      // Hazard warning stripe & illuminated green lane status beacons above bore
+      if (w1 >= 18) {
+        const stripeY = Math.round(ceilY1 - Math.max(2, lintelH * 0.25));
+        ctx.fillStyle = '#ffd166';
+        ctx.fillRect(Math.round(innerL1), stripeY, Math.round(innerR1 - innerL1), Math.max(1, Math.round(lintelH * 0.16)));
+
+        const beaconSize = Math.max(2, Math.round(lintelH * 0.26));
+        const beaconY = Math.round(portalTop + lintelH * 0.32);
+        ctx.fillStyle = '#00f5d4';
+        ctx.fillRect(Math.round(x1 - w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+        ctx.fillRect(Math.round(x1 + w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+      }
+    }
+
+    if (isTunnelExit && w2 >= 6) {
+      // Bright backlit portal arch rim framing the sky opening at the end of the tunnel
+      const rimThick = Math.max(1, Math.round(w2 * 0.07));
+      ctx.fillStyle = palette.horizonGlow ?? palette.skyHorizon;
+      ctx.fillRect(
+        Math.round(innerL2 - rimThick),
+        Math.round(ceilY2 - rimThick),
+        Math.round(innerR2 - innerL2 + rimThick * 2),
+        rimThick,
+      );
+      ctx.fillRect(Math.round(innerL2 - rimThick), Math.round(ceilY2), rimThick, Math.max(2, Math.round(y2 - ceilY2)));
+      ctx.fillRect(Math.round(innerR2), Math.round(ceilY2), rimThick, Math.max(2, Math.round(y2 - ceilY2)));
     }
   }
 }

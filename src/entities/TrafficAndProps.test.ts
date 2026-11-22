@@ -1,11 +1,16 @@
+import { DEFAULT_SYNTH_BEATMAP } from '@src/audio/FunkAudioEngine';
 import { resetTuning, tuning } from '@src/config/tuning';
 import { PlayerCar } from '@src/entities/PlayerCar';
+import { easeInOut } from '@src/road/RoadProjection';
 import {
+  createPoint,
   getEffectiveTruckLaneOffset,
   getForkCrossSection,
   getTruckForkBranch,
+  type RoadSegment,
 } from '@src/road/RoadSegment';
-import { buildTestTrack } from '@src/road/TrackBuilder';
+import { generateSongRoad, type SongTrack } from '@src/road/SongRoadGenerator';
+import { buildTestTrack, HILL } from '@src/road/TrackBuilder';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TrafficManager, type CollisionEvent } from './TrafficAndProps';
 
@@ -473,6 +478,134 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
         tmAhead.update(1 / 60, track, fastCar, prev, az);
       }
       expect(Math.abs(truckAhead.laneOffset - initOffsetAhead)).toBeLessThan(0.005);
+    });
+  });
+
+  describe('Geometry-Aware Traffic Spawning (Phase A)', () => {
+    it('respects chunk trafficProfile ("clear" spawns 0 trucks) and never spawns on blind crests, tight apexes, or structure thresholds', () => {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+      const tm = new TrafficManager(road, DEFAULT_SYNTH_BEATMAP.contentHash);
+
+      expect(tm.trucks.length).toBeGreaterThan(0);
+
+      for (const truck of tm.trucks) {
+        const segIdx = truck.segmentIndex;
+        const barIdx = Math.floor(segIdx / road.segmentsPerBar);
+        const ownerChunk = road.chunks.find(
+          (c) => barIdx >= c.startBar && barIdx < c.startBar + c.bars,
+        );
+        expect(ownerChunk).toBeDefined();
+        expect(ownerChunk!.trafficProfile).not.toBe('clear');
+
+        // Never on tight curve apexes (|curve| >= 4.2)
+        const loC = Math.max(0, segIdx - 2);
+        const hiC = Math.min(road.segments.length - 1, segIdx + 2);
+        for (let i = loC; i <= hiC; i++) {
+          expect(Math.abs(road.segments[i]!.curve)).toBeLessThan(4.2);
+        }
+
+        // Never straddling structure thresholds (±8 segments around bridge/tunnel boundaries)
+        const baseEnv = road.segments[segIdx]!.env ?? 'standard';
+        const loE = Math.max(0, segIdx - 8);
+        const hiE = Math.min(road.segments.length - 1, segIdx + 8);
+        for (let i = loE; i <= hiE; i++) {
+          expect(road.segments[i]!.env ?? 'standard').toBe(baseEnv);
+        }
+
+        // Never on blind hill crests
+        const prevSeg = road.segments[Math.max(0, segIdx - 1)]!;
+        const nextSeg = road.segments[Math.min(road.segments.length - 1, segIdx + 1)]!;
+        const sPrev = prevSeg.p2.worldY - prevSeg.p1.worldY;
+        const sNext = nextSeg.p2.worldY - nextSeg.p1.worldY;
+        expect(sPrev - sNext).toBeLessThanOrEqual(18);
+      }
+    });
+
+    it('rejects realistic easeInOut HILL.HIGH blind crests at segmentsPerBar=88 and post-drop plunge lip (+7..+16 segs)', () => {
+      const segmentsPerBar = 88;
+      const totalBars = 12;
+      const segCount = totalBars * segmentsPerBar;
+      const segLen = 200;
+      const hillTop = HILL.HIGH * segLen; // +12000 * 200 worldY over 1 bar up + 1 bar down at bar 4
+
+      const segments: RoadSegment[] = [];
+      let prevY = 0;
+      for (let i = 0; i < segCount; i++) {
+        let y2 = 0;
+        if (i >= 3 * segmentsPerBar && i < 4 * segmentsPerBar) {
+          const t = (i + 1 - 3 * segmentsPerBar) / segmentsPerBar;
+          y2 = easeInOut(0, hillTop, t);
+        } else if (i >= 4 * segmentsPerBar && i < 5 * segmentsPerBar) {
+          const t = (i + 1 - 4 * segmentsPerBar) / segmentsPerBar;
+          y2 = easeInOut(hillTop, 0, t);
+        }
+        segments.push({
+          index: i,
+          p1: createPoint(prevY, i * segLen),
+          p2: createPoint(y2, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: 'standard',
+        });
+        prevY = y2;
+      }
+
+      const crestSeg = 4 * segmentsPerBar;
+      const syntheticTrack = {
+        segments,
+        segmentLength: segLen,
+        length: segCount * segLen,
+        contentHash: 'sha256:crest-regression',
+        seed: 'sha256:crest-regression',
+        stageId: 'night',
+        trackDna: {
+          bpm: 122,
+          meanEnergy: 0.7,
+          energyVariance: 0.2,
+          styleWeights: { cruise: 1, wangan: 1, technical: 1, scenic: 1 },
+        },
+        totalBars,
+        segmentsPerBar,
+        barLengthWorld: segmentsPerBar * segLen,
+        referenceSpeed: 9120,
+        chunks: [
+          {
+            chunkId: 'synthetic-climb-drop',
+            role: 'drop',
+            startBar: 0,
+            bars: totalBars,
+            startSegment: 0,
+            segmentCount: segCount,
+            mirrored: false,
+            avgEnergy: 0.7,
+            trafficProfile: 'weaving',
+            allowedStructures: ['standard'],
+            fixtureCadenceBeats: 2,
+            archetype: 'costiero',
+            env: 'standard',
+          },
+        ],
+        dropMarkers: [{ barIndex: 4, segmentIndex: crestSeg, worldZ: crestSeg * segLen }],
+        tunnelSpans: [],
+        zoneTransitions: [],
+        canonical: {
+          curve: new Float64Array(segCount),
+          p1WorldY: new Float64Array(segments.map((s) => s.p1.worldY)),
+          p2WorldY: new Float64Array(segments.map((s) => s.p2.worldY)),
+          sprites: segments.map(() => []),
+          env: segments.map(() => 'standard'),
+        },
+      } as unknown as SongTrack;
+
+      const tm = new TrafficManager(syntheticTrack, 'blind-crest-seed');
+      expect(tm.trucks.length).toBeGreaterThan(0);
+
+      for (const truck of tm.trucks) {
+        // Must not spawn around crest apex (crestSeg - 10 .. crestSeg + 16)
+        expect(truck.segmentIndex < crestSeg - 10 || truck.segmentIndex > crestSeg + 16).toBe(true);
+      }
     });
   });
 });

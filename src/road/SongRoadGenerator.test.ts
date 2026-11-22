@@ -6,11 +6,13 @@ import {
 } from '@src/audio/FunkAudioEngine';
 import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { describe, expect, it } from 'vitest';
+import { detectMuffledSpans } from './EnvironmentArchetypes';
 import { defineChunk, getChunksForRole, ROAD_CHUNKS, type RoadChunk, validateRoadChunk } from './RoadChunks';
 import { isOverheadProp } from './RoadSegment';
-import { CURVE } from './TrackBuilder';
+import { CURVE, HILL } from './TrackBuilder';
 import {
   barToWorldZ,
+  computeTrackDna,
   generateSongRoad,
   getSectionPaceFactor,
   restoreCanonicalTrack,
@@ -125,16 +127,19 @@ describe('SongRoadGenerator', () => {
     expect(getSectionPaceFactor(road, 20, 'drop')).toBe(1.0);
   });
 
-    it('propagates bridge environment and places suspension towers on bridge chunks', () => {
-    const bridgeChunk = ROAD_CHUNKS.find((c) => c.id === 'build-bay-bridge-ascent-8')!;
-    expect(bridgeChunk.env).toBe('bridge');
-
-    const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { catalog: [bridgeChunk] });
-    const bridgeSegments = road.segments.filter((s) => s.env === 'bridge');
+  it('maps elevated stretches to bridge on night/coastal stages and viaduct on akiba_night', () => {
+    const bridgeRoad = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+    const bridgeSegments = bridgeRoad.segments.filter((s) => s.env === 'bridge');
     expect(bridgeSegments.length).toBeGreaterThan(0);
 
-    const hasTower = bridgeSegments.some((s) => s.sprites.some((sp) => sp.kind === 'suspension-tower'));
+    const hasTower = bridgeSegments.some((s) =>
+      s.sprites.some((sp) => sp.kind === 'suspension-tower'),
+    );
     expect(hasTower).toBe(true);
+
+    const akibaRoad = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'akiba_night' });
+    expect(akibaRoad.segments.some((s) => s.env === 'bridge')).toBe(false);
+    expect(akibaRoad.segments.some((s) => s.env === 'viaduct')).toBe(true);
   });
 
   it('guarantees straight-ramp build chunks have zero curvature (zero lateral displacement)', () => {
@@ -165,10 +170,10 @@ describe('SongRoadGenerator', () => {
         const toIdx = fromIdx + deltaSegs;
         if (deltaSegs < 12 || toIdx + drawDistance + 16 >= road.segments.length) continue;
         let windowValid = true;
-        for (let n = 0; n < copyCount; n++) {
+        for (let n = 0; n < drawDistance; n++) {
           const srcEnv = road.segments[fromIdx + n]?.env ?? 'standard';
           const destEnv = road.canonical.env[toIdx + n] ?? 'standard';
-          if (srcEnv === 'bridge' || destEnv === 'bridge' || srcEnv !== destEnv) {
+          if (srcEnv !== 'standard' || destEnv !== 'standard') {
             windowValid = false;
             break;
           }
@@ -235,18 +240,18 @@ describe('SongRoadGenerator', () => {
       const drawDistance = 200;
       const copyCount = drawDistance - 24; // 176
 
-      // Find a non-bridge window where a 1.75-bar forward stitch (< 176 segments) overlaps its own source
+      // Find a standard open-sky window where a 1.75-bar forward stitch (< 176 segments) overlaps its own source
       let stitchBar = -1;
       for (let b = 4; b < road.totalBars - 10; b++) {
         const startSeg = b * road.segmentsPerBar;
-        let hasBridge = false;
+        let hasSpecial = false;
         for (let s = 0; s < Math.ceil(1.75 * road.segmentsPerBar) + drawDistance + 16; s++) {
-          if (road.segments[startSeg + s]?.env === 'bridge') {
-            hasBridge = true;
+          if ((road.segments[startSeg + s]?.env ?? 'standard') !== 'standard') {
+            hasSpecial = true;
             break;
           }
         }
-        if (!hasBridge) {
+        if (!hasSpecial) {
           stitchBar = b;
           break;
         }
@@ -348,12 +353,14 @@ describe('SongRoadGenerator', () => {
         role: 'drop',
         bars: 4,
         allowMirror: false,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['wangan'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'normal',
         maneuvers: [
           { bars: 1, curve: 0, elevation: 0 },
           { bars: 3, curve: CURVE.MEDIUM, elevation: 0 },
-        ],
-        props: [
-          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
         ],
       });
 
@@ -363,12 +370,14 @@ describe('SongRoadGenerator', () => {
         role: 'drop',
         bars: 4,
         allowMirror: false,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['wangan'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'normal',
         maneuvers: [
           { bars: 1, curve: 0, elevation: 0 },
           { bars: 3, curve: -CURVE.MEDIUM, elevation: 0 },
-        ],
-        props: [
-          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
         ],
       });
 
@@ -376,6 +385,7 @@ describe('SongRoadGenerator', () => {
         ...DEFAULT_SYNTH_BEATMAP,
         contentHash: 'sha256:chevron-phase2-track',
         barEnergy: new Array<number>(4).fill(0.5), // energy 0.5 => curveScale = 1.0
+        barBrightness: new Array<number>(4).fill(0.8),
         sections: [{ startBar: 0, bars: 4, role: 'drop' }],
       };
 
@@ -441,12 +451,14 @@ describe('SongRoadGenerator', () => {
         role: 'drop',
         bars: 4,
         allowMirror: false,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['cruise'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'sparse',
         maneuvers: [
           { bars: 1, curve: 0, elevation: 0 },
           { bars: 3, curve: CURVE.EASY, elevation: 0 }, // 2.0 < 4 * 0.85 = 3.4
-        ],
-        props: [
-          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
         ],
       });
 
@@ -454,6 +466,7 @@ describe('SongRoadGenerator', () => {
         ...DEFAULT_SYNTH_BEATMAP,
         contentHash: 'sha256:easy-chunk-track',
         barEnergy: new Array<number>(4).fill(0.5),
+        barBrightness: new Array<number>(4).fill(0.8),
         sections: [{ startBar: 0, bars: 4, role: 'drop' }],
       };
 
@@ -475,12 +488,14 @@ describe('SongRoadGenerator', () => {
         description: 'Test chunk with gentle curve below 1.5',
         role: 'drop',
         bars: 4,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['cruise'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'sparse',
         maneuvers: [
           { bars: 2, curve: 0, elevation: 0 },
           { bars: 2, curve: 1.0, elevation: 0 }, // 1.0 < 1.5
-        ],
-        props: [
-          { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
         ],
       });
 
@@ -488,6 +503,7 @@ describe('SongRoadGenerator', () => {
         ...DEFAULT_SYNTH_BEATMAP,
         contentHash: 'sha256:gentle-chunk-track',
         barEnergy: new Array<number>(4).fill(0.5),
+        barBrightness: new Array<number>(4).fill(0.8),
         sections: [{ startBar: 0, bars: 4, role: 'drop' }],
       };
 
@@ -506,22 +522,31 @@ describe('SongRoadGenerator', () => {
         description: 'MEDIUM curve chunk',
         role: 'drop',
         bars: 4,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['technical'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'sparse',
         maneuvers: [{ bars: 4, curve: CURVE.MEDIUM, elevation: 0 }],
-        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
       });
       const hardChunk: RoadChunk = defineChunk({
         id: 'test-hard-chunk',
         description: 'HARD curve chunk',
         role: 'drop',
         bars: 4,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['technical'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'sparse',
         maneuvers: [{ bars: 4, curve: CURVE.HARD, elevation: 0 }],
-        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
       });
 
       const customMap: BeatMap = {
         ...DEFAULT_SYNTH_BEATMAP,
         contentHash: 'sha256:density-scale-track',
         barEnergy: new Array<number>(4).fill(0.5),
+        barBrightness: new Array<number>(4).fill(0.8),
         sections: [{ startBar: 0, bars: 4, role: 'drop' }],
       };
 
@@ -542,25 +567,34 @@ describe('SongRoadGenerator', () => {
         description: '2-bar curve chunk',
         role: 'drop',
         bars: 4,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['wangan'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'normal',
         maneuvers: [
           { bars: 2, curve: 0, elevation: 0 },
           { bars: 2, curve: CURVE.MEDIUM, elevation: 0 },
         ],
-        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
       });
       const longChunk: RoadChunk = defineChunk({
         id: 'test-long-chunk',
         description: '4-bar curve chunk',
         role: 'drop',
         bars: 4,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['wangan'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'normal',
         maneuvers: [{ bars: 4, curve: CURVE.MEDIUM, elevation: 0 }],
-        props: [{ kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true }],
       });
 
       const customMap: BeatMap = {
         ...DEFAULT_SYNTH_BEATMAP,
         contentHash: 'sha256:duration-scale-track',
         barEnergy: new Array<number>(4).fill(0.5),
+        barBrightness: new Array<number>(4).fill(0.8),
         sections: [{ startBar: 0, bars: 4, role: 'drop' }],
       };
 
@@ -625,84 +659,185 @@ describe('SongRoadGenerator', () => {
       }
     });
 
-    it('generates multiple sprites for cluster rules', () => {
-      const clusterChunk = defineChunk({
-        id: 'test-cluster-chunk',
-        description: 'Test chunk for cluster generation',
-        role: 'intro',
-        bars: 4,
-        maneuvers: [{ bars: 4, curve: 0, elevation: 0 }],
-        props: [
-          {
-            kind: 'shrub',
-            placement: 'right',
-            everyBeats: 4,
-            band: 'B',
-            offset: 1.8,
-            cluster: { min: 3, max: 5, spreadBeats: 1.0, spreadLateral: 0.3 },
-            rhythmic: false,
-          },
-        ],
+    it('generates organic multi-sprite shrub clusters on coastal & semiurban roads', () => {
+      const road = generateSongRoad(BUNDLED_COASTAL_BEATMAP, {
+        seed: 'cluster-test-seed',
+        stageId: 'og_future_funk',
       });
-
-      const customMap: BeatMap = {
-        ...DEFAULT_SYNTH_BEATMAP,
-        contentHash: 'sha256:cluster-test-seed',
-        barEnergy: new Array<number>(4).fill(0.5),
-        sections: [{ startBar: 0, bars: 4, role: 'intro' }],
-      };
-
-      const road = generateSongRoad(customMap, { catalog: [clusterChunk] });
       const shrubs = road.segments.flatMap((seg) => seg.sprites.filter((s) => s.kind === 'shrub'));
 
-      // 4 bars = 16 beats. With everyBeats: 4, there are 4 anchors.
-      // With cluster min: 3, max: 5, total shrubs must be between 12 and 20.
-      expect(shrubs.length).toBeGreaterThanOrEqual(12);
-      expect(shrubs.length).toBeLessThanOrEqual(20);
+      expect(shrubs.length).toBeGreaterThan(10);
       for (const sh of shrubs) {
         expect(Math.abs(sh.offset)).toBeGreaterThanOrEqual(1.6);
       }
     });
 
-    it('emits ZERO pylon or jihanki sprites from all canonical chunks', () => {
+    it('keeps RoadChunk definitions strictly pure choreography with zero props, vignettes, or env fields', () => {
       for (const chunk of ROAD_CHUNKS) {
-        const customMap: BeatMap = {
-          ...DEFAULT_SYNTH_BEATMAP,
-          contentHash: `sha256:no-pylon-jihanki-${chunk.id}`,
-          barEnergy: new Array<number>(chunk.bars).fill(0.7),
-          sections: [{ startBar: 0, bars: chunk.bars, role: chunk.role }],
-        };
-
-        const road = generateSongRoad(customMap, { catalog: [chunk] });
-        for (const seg of road.segments) {
-          for (const s of seg.sprites) {
-            expect(s.kind).not.toBe('pylon');
-            expect(s.kind).not.toBe('jihanki');
-          }
-        }
+        expect('props' in chunk).toBe(false);
+        expect('vignettes' in chunk).toBe(false);
+        expect('env' in chunk).toBe(false);
+        expect(chunk.allowedStructures.length).toBeGreaterThan(0);
+        expect(chunk.styleTags.length).toBeGreaterThan(0);
       }
     });
 
-    it('keeps bridge chunks free of Band C and Band D props', () => {
-      const bridgeChunks = ROAD_CHUNKS.filter((c) => c.env === 'bridge');
-      expect(bridgeChunks.length).toBeGreaterThanOrEqual(2);
-
-      for (const chunk of bridgeChunks) {
-        const customMap: BeatMap = {
-          ...DEFAULT_SYNTH_BEATMAP,
-          contentHash: `sha256:bridge-depth-${chunk.id}`,
-          barEnergy: new Array<number>(chunk.bars).fill(0.7),
-          sections: [{ startBar: 0, bars: chunk.bars, role: chunk.role }],
-        };
-
-        const road = generateSongRoad(customMap, { catalog: [chunk] });
-        for (const seg of road.segments) {
+    it('keeps bridge segments free of Band C and Band D props', () => {
+      for (const stageId of ['night', 'og_future_funk'] as const) {
+        const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId });
+        const bridgeSegs = road.segments.filter((s) => s.env === 'bridge');
+        expect(bridgeSegs.length).toBeGreaterThan(0);
+        for (const seg of bridgeSegs) {
           for (const s of seg.sprites) {
-            // Bridge must be free of Band C and Band D props (|offset| >= 3.0)
             expect(Math.abs(s.offset)).toBeLessThan(3.0);
           }
         }
       }
+    });
+  });
+
+  describe('Phase A & Phase C — Continuous Curves, Contracts, Track DNA, and Muffled Tunnels', () => {
+    it('maintains C0/C1 continuity across blendToNext double-apex and tightening curves without resetting to 0', () => {
+      const doubleApexChunk = ROAD_CHUNKS.find((c) => c.id === 'drop-wangan-double-apex-8')!;
+      expect(doubleApexChunk).toBeDefined();
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:blend-to-next-test',
+        barEnergy: new Array<number>(8).fill(0.75),
+        barBrightness: new Array<number>(8).fill(0.85),
+        sections: [{ startBar: 0, bars: 8, role: 'drop' }],
+      };
+
+      const road = generateSongRoad(customMap, { catalog: [doubleApexChunk] });
+      // Between maneuver 0 (2 bars) and maneuver 1 (3 bars), curvature stays strictly non-zero in same direction
+      const seamSegIdx = Math.round(2 * road.segmentsPerBar);
+      const windowCurves = road.segments
+        .slice(seamSegIdx - 3, seamSegIdx + 4)
+        .map((s) => Math.abs(s.curve));
+      for (const c of windowCurves) {
+        expect(c).toBeGreaterThan(1.0);
+      }
+
+      // Smooth C1 derivative: no abrupt curve step > 1.5 between consecutive segments anywhere
+      for (let i = 1; i < road.segments.length; i++) {
+        expect(Math.abs(road.segments[i]!.curve - road.segments[i - 1]!.curve)).toBeLessThan(1.5);
+      }
+    });
+
+    it('keeps breakdown technical curves responsive even at low barEnergy (role-aware modulation)', () => {
+      const breakdownChunk = ROAD_CHUNKS.find((c) => c.id === 'breakdown-touge-s-bends')!;
+      const lowEnergyMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:breakdown-low-energy',
+        barEnergy: new Array<number>(8).fill(0.15),
+        barBrightness: new Array<number>(8).fill(0.7),
+        sections: [{ startBar: 0, bars: 8, role: 'breakdown' }],
+      };
+      const midEnergyMap: BeatMap = {
+        ...lowEnergyMap,
+        barEnergy: new Array<number>(8).fill(0.55),
+      };
+
+      const roadLow = generateSongRoad(lowEnergyMap, { catalog: [breakdownChunk] });
+      const roadMid = generateSongRoad(midEnergyMap, { catalog: [breakdownChunk] });
+
+      const peakLow = Math.max(...roadLow.segments.map((s) => Math.abs(s.curve)));
+      const peakMid = Math.max(...roadMid.segments.map((s) => Math.abs(s.curve)));
+
+      // At low breakdown energy (0.15), curves remain >= 85% of mid-energy strength (never flattened to 0.4x!)
+      expect(peakLow).toBeGreaterThanOrEqual(peakMid * 0.85);
+    });
+
+    it('enforces pre-drop crest contracts on intro->drop and breakdown->drop transitions and selects postCrestReveal', () => {
+      const map: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:intro-to-drop-crest',
+        barEnergy: [
+          ...new Array<number>(8).fill(0.35), // intro
+          ...new Array<number>(12).fill(0.85), // drop 1
+          ...new Array<number>(8).fill(0.35), // breakdown
+          ...new Array<number>(12).fill(0.9), // drop 2
+          ...new Array<number>(4).fill(0.3), // outro
+        ],
+        barBrightness: new Array<number>(44).fill(0.82),
+        sections: [
+          { startBar: 0, bars: 8, role: 'intro' },
+          { startBar: 8, bars: 12, role: 'drop' },
+          { startBar: 20, bars: 8, role: 'breakdown' },
+          { startBar: 28, bars: 12, role: 'drop' },
+          { startBar: 40, bars: 4, role: 'outro' },
+        ],
+      };
+
+      const road = generateSongRoad(map);
+      // Both drop entries at bar 8 and bar 28 must have climbed onto a crest beforehand
+      for (const dropBar of [8, 28]) {
+        const dropSeg = dropBar * road.segmentsPerBar;
+        const yBefore = road.segments[(dropBar - 4) * road.segmentsPerBar]!.p1.worldY;
+        const yAtCrest = road.segments[dropSeg - 1]!.p2.worldY;
+        expect(yAtCrest).toBeGreaterThan(yBefore + 3000);
+
+        const firstDropChunk = road.chunks.find((c) => c.startBar === dropBar)!;
+        const chunkDef = ROAD_CHUNKS.find((c) => c.id === firstDropChunk.chunkId)!;
+        expect(chunkDef.postCrestReveal).toBe(true);
+      }
+    });
+
+    it('computes deterministic Track DNA prioritizing cruise/scenic for chill tracks and wangan for fast tracks', () => {
+      const chillMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        bpm: 102,
+        barEnergy: new Array<number>(32).fill(0.32),
+      };
+      const fastMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        bpm: 136,
+        barEnergy: new Array<number>(32).fill(0.84),
+      };
+
+      const chillDna = computeTrackDna(chillMap);
+      const fastDna = computeTrackDna(fastMap);
+
+      expect(chillDna.styleWeights.cruise).toBeGreaterThan(chillDna.styleWeights.wangan);
+      expect(fastDna.styleWeights.wangan).toBeGreaterThan(fastDna.styleWeights.cruise);
+    });
+
+    it('maps muffled spans (>= 4 bars) to env === "tunnel" aligned with drop downbeat and blocks horizon stitch across tunnels/viaducts', () => {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+      // Neon Horizon has muffledSpans: [[40, 44]] before Drop 2 at bar 44
+      expect(road.tunnelSpans).toEqual([{ startBar: 40, endBar: 44 }]);
+
+      const tunnelStartSeg = 40 * road.segmentsPerBar;
+      const tunnelEndSeg = 44 * road.segmentsPerBar;
+      for (let s = tunnelStartSeg; s < tunnelEndSeg; s++) {
+        const seg = road.segments[s]!;
+        expect(seg.env).toBe('tunnel');
+        // Zero exterior props/pylons/vignettes inside tunnel (only optional interior chevrons)
+        for (const sp of seg.sprites) {
+          expect(sp.kind).toBe('chevron');
+        }
+      }
+      // Drop entry segment right after tunnel exit is back to open sky!
+      expect(road.segments[tunnelEndSeg]!.env).not.toBe('tunnel');
+
+      // Horizon stitch guard blocks stitching while on tunnel or viaduct
+      const tunnelZ = tunnelStartSeg * road.segmentLength;
+      expect(
+        stitchHorizonToTargetZ(road, tunnelZ, tunnelZ + 2 * road.barLengthWorld, 200),
+      ).toBeNull();
+
+      const akibaRoad = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'akiba_night' });
+      const viaductSeg = akibaRoad.segments.findIndex((s) => s.env === 'viaduct');
+      expect(viaductSeg).toBeGreaterThanOrEqual(0);
+      expect(
+        stitchHorizonToTargetZ(
+          akibaRoad,
+          viaductSeg * akibaRoad.segmentLength,
+          (viaductSeg + 2 * akibaRoad.segmentsPerBar) * akibaRoad.segmentLength,
+          200,
+        ),
+      ).toBeNull();
     });
   });
 
@@ -777,5 +912,201 @@ describe('SongRoadGenerator', () => {
       }
       expect(checkedMultiSpriteSegs).toBeGreaterThan(0);
     }
+  });
+
+  describe('Code Review Regression Invariants (C1, M3, M6, M7, M8, S1, S2)', () => {
+    it('C1 & S1: preserves open-sky scenery in mixed chunks with partial tunnels and stamps beat-synced tunnelLight markers', () => {
+      // Muffled span at bars [12, 16] while 8-bar breakdown spans [8, 16] (bars 8..12 open, 12..16 tunnel)
+      const bright = new Array<number>(36).fill(0.82);
+      for (let b = 12; b < 16; b++) bright[b] = 0.1;
+
+      const map: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:partial-tunnel-chunk-c1',
+        barEnergy: new Array<number>(36).fill(0.45),
+        barBrightness: bright,
+        sections: [
+          { startBar: 0, bars: 8, role: 'intro' },
+          { startBar: 8, bars: 8, role: 'breakdown' },
+          { startBar: 16, bars: 12, role: 'drop' },
+          { startBar: 28, bars: 8, role: 'outro' },
+        ],
+      };
+
+      const road = generateSongRoad(map, { stageId: 'night' });
+      expect(road.tunnelSpans).toEqual([{ startBar: 12, endBar: 16 }]);
+
+      // Even if a chunk straddles bar 8..16 (partial tunnel on [12, 16]), open bars [8, 12) must still receive Band A/B/C/D props!
+      const openSegStart = 8 * road.segmentsPerBar;
+      const openSegEnd = 12 * road.segmentsPerBar;
+      let openSceneryCount = 0;
+      for (let s = openSegStart; s < openSegEnd; s++) {
+        expect(road.segments[s]!.env).toBe('standard');
+        openSceneryCount += road.segments[s]!.sprites.filter((sp) => sp.kind !== 'chevron').length;
+      }
+      expect(openSceneryCount).toBeGreaterThan(5);
+
+      // Inside tunnel [12, 16), zero outdoor props, and tunnelLight marks appear cleanly at beat/cadence stride
+      const tunStart = 12 * road.segmentsPerBar;
+      const tunEnd = 16 * road.segmentsPerBar;
+      let tunnelLightCount = 0;
+      for (let s = tunStart; s < tunEnd; s++) {
+        const seg = road.segments[s]!;
+        expect(seg.env).toBe('tunnel');
+        for (const sp of seg.sprites) {
+          expect(sp.kind).toBe('chevron');
+        }
+        if (seg.tunnelLight) tunnelLightCount++;
+      }
+      // 4 bars = 16 beats; with cadence 1 or 2 beats, expect 8..16 beat-synced lights (far fewer than % 4's ~88)
+      expect(tunnelLightCount).toBeGreaterThanOrEqual(4);
+      expect(tunnelLightCount).toBeLessThanOrEqual(20);
+    });
+
+    it('M3: blocks stitchHorizonToTargetZ when a special structure falls inside the 24-segment blend zone', () => {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+      const drawDistance = 200;
+      const rumbleStep = 2 * RUMBLE_LENGTH;
+      // Neon Horizon has tunnel at bar 40 (`40 * segmentsPerBar`)
+      const tunnelSeg = 40 * road.segmentsPerBar;
+      // Pick toIdx so tunnelSeg lands strictly inside [toIdx + (drawDistance - 24), toIdx + drawDistance - 1]
+      const targetToSeg = tunnelSeg - (drawDistance - 12);
+      const rawDelta = Math.max(rumbleStep * 3, 2 * road.segmentsPerBar);
+      const alignedDelta = rumbleStep * Math.round(rawDelta / rumbleStep);
+      const fromSeg = targetToSeg - alignedDelta;
+      expect(fromSeg).toBeGreaterThanOrEqual(0);
+      // Confirm source window itself is all standard
+      let fromAllStandard = true;
+      for (let n = 0; n < drawDistance; n++) {
+        if ((road.segments[fromSeg + n]?.env ?? 'standard') !== 'standard') {
+          fromAllStandard = false;
+          break;
+        }
+      }
+      if (fromAllStandard) {
+        const currentZ = fromSeg * road.segmentLength;
+        const targetZ = (fromSeg + alignedDelta) * road.segmentLength;
+        expect(stitchHorizonToTargetZ(road, currentZ, targetZ, drawDistance)).toBeNull();
+      }
+    });
+
+    it('M6 & Minor#3: detectMuffledSpans rejects all-zero brightness and trims 4-bar muffled intro [0, 4] to [1, 4]', () => {
+      const zeroMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        barBrightness: new Array<number>(32).fill(0),
+        sections: [{ startBar: 0, bars: 32, role: 'drop' }],
+      };
+      expect(detectMuffledSpans(zeroMap, 32)).toEqual([]);
+
+      const uniformBrightMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        barBrightness: new Array<number>(32).fill(0.9),
+      };
+      expect(detectMuffledSpans(uniformBrightMap, 32)).toEqual([]);
+
+      const introMuffledMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        barBrightness: [0.1, 0.12, 0.12, 0.15, ...new Array<number>(28).fill(0.85)],
+        sections: [
+          { startBar: 0, bars: 4, role: 'intro' },
+          { startBar: 4, bars: 28, role: 'drop' },
+        ],
+      };
+      expect(detectMuffledSpans(introMuffledMap, 32)).toEqual([{ startBar: 1, endBar: 4 }]);
+    });
+
+    it('M7: muffled breakdowns strictly select tunnel-compatible chunks', () => {
+      const bright = new Array<number>(48).fill(0.85);
+      for (let b = 16; b < 28; b++) bright[b] = 0.12;
+      const map: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:muffled-breakdown-strict-m7',
+        barEnergy: new Array<number>(48).fill(0.45),
+        barBrightness: bright,
+        sections: [
+          { startBar: 0, bars: 8, role: 'intro' },
+          { startBar: 8, bars: 8, role: 'drop' },
+          { startBar: 16, bars: 12, role: 'breakdown' },
+          { startBar: 28, bars: 12, role: 'drop' },
+          { startBar: 40, bars: 8, role: 'outro' },
+        ],
+      };
+
+      const road = generateSongRoad(map, { stageId: 'night' });
+      const breakdownChunks = road.chunks.filter((c) => c.role === 'breakdown');
+      expect(breakdownChunks.length).toBeGreaterThan(0);
+      for (const c of breakdownChunks) {
+        expect(c.allowedStructures).toContain('tunnel');
+      }
+    });
+
+    it('M8: never places drop-marker billboards on bridge or viaduct segments', () => {
+      for (const stageId of ['night', 'akiba_night'] as const) {
+        for (const map of [DEFAULT_SYNTH_BEATMAP, BUNDLED_WANGAN_BEATMAP, BUNDLED_COASTAL_BEATMAP]) {
+          const road = generateSongRoad(map, { stageId });
+          for (const dm of road.dropMarkers) {
+            const seg = road.segments[dm.segmentIndex]!;
+            if (seg.env !== 'standard') {
+              const hasBillboard = seg.sprites.some((sp) => sp.kind === 'billboard');
+              expect(hasBillboard).toBe(false);
+            }
+          }
+        }
+      }
+    });
+
+    it('S2: outro retains authorial elevation contour before fork approach and finishes cleanly at worldY = 0', () => {
+      const hillyOutroChunk: RoadChunk = defineChunk({
+        id: 'outro-hilly-test-8',
+        description: 'Outro con dosso espressivo pre-bivio',
+        role: 'outro',
+        bars: 8,
+        elevationIntent: 'rolling',
+        allowedStructures: ['standard'],
+        styleTags: ['scenic'],
+        fixtureCadenceBeats: 4,
+        trafficProfile: 'sparse',
+        maneuvers: [
+          { bars: 2, curve: 0, elevation: HILL.HIGH },
+          { bars: 2, curve: CURVE.EASY, elevation: -HILL.HIGH },
+          { bars: 4, curve: 0, elevation: 0 },
+        ],
+      });
+
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:s2-outro-hills',
+        barEnergy: new Array<number>(16).fill(0.5),
+        barBrightness: new Array<number>(16).fill(0.8),
+        sections: [
+          { startBar: 0, bars: 8, role: 'drop' },
+          { startBar: 8, bars: 8, role: 'outro' },
+        ],
+      };
+
+      const dropHillyChunk: RoadChunk = defineChunk({
+        id: 'drop-flat-test-8',
+        description: 'Flat drop before outro',
+        role: 'drop',
+        bars: 8,
+        elevationIntent: 'flat',
+        allowedStructures: ['standard'],
+        styleTags: ['cruise'],
+        fixtureCadenceBeats: 2,
+        trafficProfile: 'sparse',
+        maneuvers: [{ bars: 8, curve: 0, elevation: 0 }],
+      });
+
+      const road = generateSongRoad(customMap, { catalog: [dropHillyChunk, hillyOutroChunk] });
+      const outroStartSeg = 8 * road.segmentsPerBar;
+      const forkStartSeg = 12 * road.segmentsPerBar;
+      let peakPreForkY = 0;
+      for (let s = outroStartSeg; s < forkStartSeg; s++) {
+        peakPreForkY = Math.max(peakPreForkY, road.segments[s]!.p2.worldY);
+      }
+      // Additive tail steering preserves the authorial HILL.HIGH outro bump (~12000) before fork
+      expect(peakPreForkY).toBeGreaterThan(8000);
+      expect(road.segments[road.segments.length - 1]!.p2.worldY).toBeCloseTo(0, 3);
+    });
   });
 });

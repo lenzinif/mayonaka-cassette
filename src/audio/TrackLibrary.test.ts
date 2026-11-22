@@ -1,4 +1,7 @@
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isBeatMap, type BeatMap } from './BeatMap';
 import {
   DEFAULT_SYNTH_BEATMAP,
   BUNDLED_WANGAN_BEATMAP,
@@ -123,5 +126,117 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
     expect(lib.items[0]?.contentHash).toBe(DEFAULT_SYNTH_BEATMAP.contentHash);
     expect(lib.items[1]?.contentHash).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
     expect(lib.items[2]?.contentHash).toBe(BUNDLED_COASTAL_BEATMAP.contentHash);
+  });
+
+  it('S3: public/audio/*.beatmap.json pass isBeatMap() and include matching barEnergy & barBrightness', () => {
+    const audioDir = path.resolve(process.cwd(), 'public', 'audio');
+    const files: Array<{ file: string; expected: BeatMap }> = [
+      { file: 'neon-horizon.beatmap.json', expected: DEFAULT_SYNTH_BEATMAP },
+      { file: 'midnight-wangan.beatmap.json', expected: BUNDLED_WANGAN_BEATMAP },
+      { file: 'melon-soda-sunset.beatmap.json', expected: BUNDLED_COASTAL_BEATMAP },
+    ];
+
+    for (const { file, expected } of files) {
+      const parsed: unknown = JSON.parse(fs.readFileSync(path.join(audioDir, file), 'utf8'));
+      expect(isBeatMap(parsed)).toBe(true);
+      if (isBeatMap(parsed)) {
+        expect(parsed.barEnergy).toEqual(expected.barEnergy);
+        expect(parsed.barBrightness).toEqual(expected.barBrightness);
+        expect(parsed.sections).toEqual(expected.sections);
+      }
+    }
+  });
+
+  it('M1: IndexedDB v4 upgrade preserves source="manual" BeatMaps while purging legacy source="analysis" entries lacking barBrightness', async () => {
+    const manualMap: BeatMap = {
+      ...DEFAULT_SYNTH_BEATMAP,
+      contentHash: 'sha256:user-manual-bpm',
+      source: 'manual',
+    };
+    delete manualMap.barBrightness;
+
+    const legacyAnalysisMap: BeatMap = {
+      ...DEFAULT_SYNTH_BEATMAP,
+      contentHash: 'sha256:legacy-analysis-no-bright',
+      source: 'analysis',
+    };
+    delete legacyAnalysisMap.barBrightness;
+
+    const freshAnalysisMap: BeatMap = {
+      ...DEFAULT_SYNTH_BEATMAP,
+      contentHash: 'sha256:fresh-analysis-with-bright',
+      source: 'analysis',
+    };
+
+    const records = new Map<string, BeatMap>([
+      [manualMap.contentHash, manualMap],
+      [legacyAnalysisMap.contentHash, legacyAnalysisMap],
+      [freshAnalysisMap.contentHash, freshAnalysisMap],
+    ]);
+
+    const mockStore = {
+      openCursor: vi.fn(() => {
+        const keys = Array.from(records.keys());
+        let idx = 0;
+        const cursorReq = {
+          result: null as null | { value: BeatMap; delete: () => void; continue: () => void },
+          onsuccess: null as null | (() => void),
+        };
+        const advance = () => {
+          if (idx < keys.length) {
+            const key = keys[idx++]!;
+            cursorReq.result = {
+              value: records.get(key)!,
+              delete: () => {
+                records.delete(key);
+              },
+              continue: () => {
+                queueMicrotask(advance);
+              },
+            };
+          } else {
+            cursorReq.result = null;
+          }
+          cursorReq.onsuccess?.();
+        };
+        queueMicrotask(advance);
+        return cursorReq;
+      }),
+    };
+
+    const g = globalThis as unknown as { indexedDB?: unknown };
+    const prevIdb = g.indexedDB;
+    g.indexedDB = {
+      open: vi.fn(() => {
+        const fakeDb = {
+          objectStoreNames: { contains: () => true },
+        };
+        const req = {
+          result: fakeDb,
+          transaction: { objectStore: () => mockStore },
+          onupgradeneeded: null as null | ((e: { oldVersion: number }) => void),
+          onsuccess: null as null | (() => void),
+          onerror: null as null | (() => void),
+        };
+        queueMicrotask(() => {
+          req.onupgradeneeded?.({ oldVersion: 3 });
+          req.onsuccess?.();
+        });
+        return req;
+      }),
+    };
+
+    try {
+      const lib = new TrackLibrary();
+      await (lib as unknown as { openDb: () => Promise<unknown> }).openDb();
+      // Give cursor microtasks a turn to complete
+      await new Promise((r) => setTimeout(r, 10));
+
+      expect(records.has(manualMap.contentHash)).toBe(true); // Manual correction preserved!
+      expect(records.has(freshAnalysisMap.contentHash)).toBe(true); // Fresh v4 record preserved!
+      expect(records.has(legacyAnalysisMap.contentHash)).toBe(false); // Legacy analysis entry purged for lazy reanalysis!
+    } finally {
+      g.indexedDB = prevIdb;
+    }
   });
 });

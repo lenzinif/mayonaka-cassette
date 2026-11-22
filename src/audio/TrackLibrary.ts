@@ -8,7 +8,7 @@ import {
 import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
 
 const IDB_NAME = 'mayonaka-cassette-audio';
-const IDB_VERSION = 2;
+const IDB_VERSION = 4;
 const BEATMAP_STORE = 'beatmaps';
 const SCORE_STORE = 'scores';
 const LS_SCORES_KEY = 'mayonaka-cassette-best-scores-v1';
@@ -424,9 +424,13 @@ export class TrackLibrary {
       const decoded = await decodeAudioForAnalysis(bytes);
 
       let beatMap: BeatMap;
-      const fromCache = cachedBeatMap !== null;
+      const needsBrightnessReanalysis =
+        cachedBeatMap !== null &&
+        cachedBeatMap.source === 'analysis' &&
+        cachedBeatMap.barBrightness === undefined;
+      const fromCache = cachedBeatMap !== null && !needsBrightnessReanalysis;
 
-      if (cachedBeatMap) {
+      if (cachedBeatMap && !needsBrightnessReanalysis) {
         beatMap = cachedBeatMap;
       } else {
         const parsed = parseTitleArtistFromFilename(file.name);
@@ -633,10 +637,24 @@ export class TrackLibrary {
     return new Promise<IDBDatabase | null>((resolve) => {
       try {
         const req = indexedDB.open(IDB_NAME, IDB_VERSION);
-        req.onupgradeneeded = () => {
+        req.onupgradeneeded = (event) => {
           const db = req.result;
           if (!db.objectStoreNames.contains(BEATMAP_STORE)) {
             db.createObjectStore(BEATMAP_STORE, { keyPath: 'contentHash' });
+          } else if (event.oldVersion > 0 && event.oldVersion < 4) {
+            const store = req.transaction?.objectStore(BEATMAP_STORE);
+            if (store && typeof store.openCursor === 'function') {
+              const cursorReq = store.openCursor();
+              cursorReq.onsuccess = () => {
+                const cursor = cursorReq.result;
+                if (!cursor) return;
+                const val = cursor.value as Partial<BeatMap> | undefined;
+                if (val && val.source === 'analysis' && val.barBrightness === undefined) {
+                  cursor.delete();
+                }
+                cursor.continue();
+              };
+            }
           }
           if (!db.objectStoreNames.contains(SCORE_STORE)) {
             db.createObjectStore(SCORE_STORE, { keyPath: 'contentHash' });

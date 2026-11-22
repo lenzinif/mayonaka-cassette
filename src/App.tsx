@@ -159,6 +159,7 @@ export function App() {
     setTrackLoaderOpen(false);
     wasPausedBeforeModalRef.current = false;
     audio.restartFromBeginning();
+    gameRef.current?.resetPerfBenchmark();
     gameRef.current?.setPaused(false);
     void audio.unlock().then(() => {
       setAudioUnlocked(true);

@@ -44,7 +44,9 @@ export type PropKind =
 
 export type SegmentEnvironment =
   | 'standard'
-  | 'bridge';
+  | 'bridge'
+  | 'viaduct'
+  | 'tunnel';
 
 /**
  * Depth bands for roadside props (docs/DESIGN.md §2 Fase 1):
@@ -115,6 +117,8 @@ export interface RoadSegment {
   /** Per-frame: fog factor, 1 = clear (near), → 0 = fully fogged (far). */
   fog: number;
   env?: SegmentEnvironment;
+  /** Beat-synced ceiling fluorescent light bar inside `env === 'tunnel'` spans (S1). */
+  tunnelLight?: boolean;
 }
 
 export interface Track {

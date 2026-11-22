@@ -45,8 +45,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 ├── docs/
 │   ├── DESIGN.md              # Mechanic specs & design decisions (source of truth for gameplay)
 │   ├── ROADMAP.md             # Development roadmap and task checklists
-│   ├── SPACETIME_SYNC_PLAN.md # A1 micro-elastic pacing + A2 horizon phase stitching
-│   └── OUTRO_EXTENSION_PROPOSALS.md # Stage 1 Tape Drag + Stage 2 Dub Delay Wash
+│   └── MECHANICS_POLISH_AUDIT.md # Gameplay & mechanics polish audit work packages
 ├── public/
 │   ├── audio/                 # Companion BeatMap .json (audio uses procedural synth fallback or user files)
 │   └── sprites/               # Sprite sheets and SVG atlases
@@ -156,18 +155,3 @@ Every performance optimization or runtime bug investigation **must** follow an e
    - Before declaring any fix complete, run `npm run check` (`eslint .`, `vitest run`, `tsc --noEmit && vite build`) **and** re-verify live full-song 60 FPS telemetry (`sessionAvgFps >= 59`, `p95FrameMs <= 16.7 ms`, `pct60Fps >= 98%`) in the browser on a real corpus track (e.g. `Stellae`) after the final edit.
    - If the agent environment blocks running Node, builds, or the browser, stop immediately rather than shipping unverified optimizations, and report the exact commands the user needs to run locally.
 
----
-
-## 6. Phased Development Milestones
-
-- **M0 (Foundations):** Vite + React + TS strict + Tailwind v4, ESLint layer boundaries, `FixedStepper`, `GameLoop`, `TelemetryBridge`, `CanvasStage`.
-- **M1 (Pseudo-3D Road):** `RoadSegment`, `RoadProjection`, `TrackBuilder`, `RoadRenderer`, `RoadsideProps`, `Background`, looping test track.
-- **M2 (Driving Feel):** `PlayerCar` (tapered acceleration, speed-dependent steering, centrifugal pull, drift with clean exit boost), `DebugPanel` live tuning sliders (`?debug` / `F2`).
-- **M3 (Reactive Audio & Track Import):**
-  - **M3a — Analysis spike (gate):** `BeatMap`, `TrackAnalyzer` + `analysis.worker.ts`, `BeatMapInspector` (`?analyze`) run against the local `test-tracks/` corpus. **Exit criteria** in `docs/DESIGN.md` §2.4. If unmet, fall back to tap-tempo-first import before continuing.
-  - **M3b — Audio engine:** `FunkAudioEngine`, `BeatClock` (audio clock + latency compensation), `TrackLibrary` (hashing, IndexedDB cache, playlists), `TrackLoader` UI with BPM correction, synthesized fallback loop + bundled royalty-free track JSON, speed-linked low-pass sweep, turntable pitch dip, BPM road/sky pulse.
-- **M4 (Song-Driven Road):** `SeededRandom`, `RoadChunks` vocabulary, section-aware `SongRoadGenerator` (build-ups → climbs cresting on the drop, drops → fast straights/sweepers, breakdowns → technical curves), road length = song length.
-- **M5 (Groove & Rhythm Driving):** 4 Groove tiers (`LOW`, `MEDIUM`, `HIGH`, `OVERDRIVE`) with hysteresis, `Gearbox` 6-speed beat-shift (+ auto-shift assist), `MelonSoda` liquid meniscus physics & spill dynamics in Tofu Mode, roadside & kei-truck collisions (flow-preserving), cassette Groove HUD with gear gate 1..6 / RPM, `CRTOverlay`.
-- **M6 (Playlist Run & Forks):** Playlist = sequence of stages; forks choose the next playlist track via `RadioSelector`; 4-bar DJ crossfade; end-of-run grade screen; local per-song best scores keyed by content hash.
-- **M7 (Art & Atmosphere):** Pixel-art sprites for car, props, traffic, melon soda glass, drift smoke / collision particles, overpasses and suspension bridges.
-- **M8 (Polish & Release):** W3C Gamepad API polling, asset preloader with non-blocking greybox fallbacks, tab-visibility pause, 60+ FPS zero-GC optimization, static deployment.

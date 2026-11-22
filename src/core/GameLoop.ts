@@ -4,7 +4,7 @@ export interface GameLoopOptions {
   step: number;
   maxFrameDt: number;
   update: (dt: number) => void;
-  render: (alpha: number, fps: number) => void;
+  render: (alpha: number, fps: number, rafNow?: number) => void;
 }
 
 /**
@@ -55,7 +55,9 @@ export class GameLoop {
     this.lastTime = now;
     const frameDt = Math.min(rawDt, this.options.maxFrameDt);
 
-    this.fpsFrames++;
+    if (rawDt > 0) {
+      this.fpsFrames++;
+    }
     this.fpsTimer += frameDt;
     if (this.fpsTimer >= 0.5) {
       this.fps = Math.round(this.fpsFrames / this.fpsTimer);
@@ -64,7 +66,7 @@ export class GameLoop {
     }
 
     const alpha = this.stepper.advance(frameDt, this.options.update);
-    this.options.render(alpha, this.fps);
+    this.options.render(alpha, this.fps, now);
     this.rafId = requestAnimationFrame(this.tick);
   };
 }

@@ -9,7 +9,7 @@ import {
   type PropKind,
   type Track,
 } from '@src/road/RoadSegment';
-import { isSongTrack } from '@src/road/SongRoadGenerator';
+import { isSongTrack, type SongTrack } from '@src/road/SongRoadGenerator';
 
 export interface KeiTruck {
   id: number;
@@ -61,6 +61,83 @@ export type CollisionEvent =
     };
 
 const LANE_OFFSETS = [-0.58, 0, 0.58] as const;
+const SAFE_SPAWN_PROBES = [0, 4, -4, 8, -8, 12, -12] as const;
+
+function isSafeTrafficSpawnSegment(
+  track: SongTrack,
+  segIdx: number,
+  spawnedTrucks: readonly KeiTruck[],
+  laneOffset: number,
+): boolean {
+  const segCount = track.segments.length;
+  if (segIdx < 2 || segIdx >= segCount - 2) return false;
+
+  const seg = track.segments[segIdx]!;
+  const baseEnv = seg.env ?? 'standard';
+
+  // 1. Reject structure boundaries (±8 segments of tunnel portals, bridge/viaduct transitions)
+  const envLo = Math.max(0, segIdx - 8);
+  const envHi = Math.min(segCount - 1, segIdx + 8);
+  for (let i = envLo; i <= envHi; i++) {
+    if ((track.segments[i]?.env ?? 'standard') !== baseEnv) {
+      return false;
+    }
+  }
+
+  // 2. Reject drop-marker threshold windows (-6..+16 segments covering crest lip & post-crest plunge)
+  for (let i = 0; i < track.dropMarkers.length; i++) {
+    const dmSeg = track.dropMarkers[i]!.segmentIndex;
+    if (segIdx >= dmSeg - 6 && segIdx <= dmSeg + 16) {
+      return false;
+    }
+  }
+
+  // 3. Reject tight curve apexes (|curve| >= 4.2 within ±2 segments)
+  const curveLo = Math.max(0, segIdx - 2);
+  const curveHi = Math.min(segCount - 1, segIdx + 2);
+  for (let i = curveLo; i <= curveHi; i++) {
+    if (Math.abs(track.segments[i]!.curve) >= 4.2) {
+      return false;
+    }
+  }
+
+  // 4. Reject blind hill crests (sudden convex slope reversal + rolling span convexity scaled to segmentsPerBar)
+  const prevSeg = track.segments[segIdx - 1]!;
+  const nextSeg = track.segments[segIdx + 1]!;
+  const farPrevSeg = track.segments[Math.max(0, segIdx - 2)]!;
+  const farNextSeg = track.segments[Math.min(segCount - 1, segIdx + 2)]!;
+  const sPrev = prevSeg.p2.worldY - prevSeg.p1.worldY;
+  const sNext = nextSeg.p2.worldY - nextSeg.p1.worldY;
+  const farPrevSlope = farPrevSeg.p2.worldY - farPrevSeg.p1.worldY;
+  const farNextSlope = farNextSeg.p2.worldY - farNextSeg.p1.worldY;
+  const crestConvexity =
+    seg.p1.worldY - 0.5 * (farPrevSeg.p1.worldY + farNextSeg.p2.worldY);
+
+  const span = Math.max(4, Math.round(track.segmentsPerBar * 0.1));
+  const backSeg = track.segments[Math.max(0, segIdx - span)]!;
+  const fwdSeg = track.segments[Math.min(segCount - 1, segIdx + span)]!;
+  const riseIn = seg.p1.worldY - backSeg.p1.worldY;
+  const riseOut = fwdSeg.p2.worldY - seg.p1.worldY;
+  const chordDrop = (riseIn - riseOut) * 0.5;
+  if (
+    sPrev - sNext > 18 ||
+    farPrevSlope - farNextSlope > 22 ||
+    crestConvexity > 45 ||
+    (riseIn > 40 && chordDrop > 140)
+  ) {
+    return false;
+  }
+
+  // 5. Reject crowded overlapping spawns
+  for (let i = 0; i < spawnedTrucks.length; i++) {
+    const other = spawnedTrucks[i]!;
+    const distSegs = Math.abs(other.segmentIndex - segIdx);
+    if (distSegs < 6) return false;
+    if (other.baseLaneOffset === laneOffset && distSegs < 12) return false;
+  }
+
+  return true;
+}
 
 function propHitHalfWidth(kind: PropKind): number {
   switch (kind) {
@@ -163,25 +240,48 @@ export class TrafficManager {
     let nextId = 1;
 
     if (isSongTrack(track)) {
+      const weavingLaneStart = rng.rangeInt(0, LANE_OFFSETS.length - 1);
       for (const chunk of track.chunks) {
-        const roleBase =
-          chunk.role === 'drop'
-            ? 2.2
-            : chunk.role === 'build' || chunk.role === 'breakdown'
-              ? 1.3
-              : 0.7;
-        const expected = roleBase * (0.65 + chunk.avgEnergy * 0.7) * density * (chunk.bars / 8);
+        if (chunk.trafficProfile === 'clear') continue;
+
+        const profileBase =
+          chunk.trafficProfile === 'weaving'
+            ? 2.6
+            : chunk.trafficProfile === 'normal'
+              ? 1.4
+              : 0.65;
+        const expected =
+          profileBase * (0.65 + chunk.avgEnergy * 0.7) * density * (chunk.bars / 8);
         const count = Math.floor(expected + (rng.next() < expected % 1 ? 1 : 0));
 
+        const chunkEndSeg = Math.min(segCount, chunk.startSegment + chunk.segmentCount);
         for (let i = 0; i < count; i++) {
           const frac = (i + rng.range(0.15, 0.85)) / Math.max(1, count);
-          const segIdx =
-            (chunk.startSegment + Math.floor(frac * chunk.segmentCount)) % segCount;
-          const z = segIdx * track.segmentLength;
-          if (z < safeStartZ) continue;
+          const candidateSegIdx = Math.min(
+            chunkEndSeg - 1,
+            chunk.startSegment + Math.floor(frac * chunk.segmentCount),
+          );
 
-          const laneIdx = rng.rangeInt(0, LANE_OFFSETS.length - 1);
+          const laneIdx =
+            chunk.trafficProfile === 'weaving'
+              ? (weavingLaneStart + i * 2) % LANE_OFFSETS.length
+              : rng.rangeInt(0, LANE_OFFSETS.length - 1);
           const laneOffset = LANE_OFFSETS[laneIdx]!;
+
+          let resolvedSegIdx = -1;
+          for (let p = 0; p < SAFE_SPAWN_PROBES.length; p++) {
+            const probeSeg = candidateSegIdx + SAFE_SPAWN_PROBES[p]!;
+            if (probeSeg < chunk.startSegment || probeSeg >= chunkEndSeg) continue;
+            const probeZ = probeSeg * track.segmentLength;
+            if (probeZ < safeStartZ) continue;
+            if (isSafeTrafficSpawnSegment(track, probeSeg, this.trucks, laneOffset)) {
+              resolvedSegIdx = probeSeg;
+              break;
+            }
+          }
+          if (resolvedSegIdx === -1) continue;
+
+          const z = resolvedSegIdx * track.segmentLength;
           const speedRatio = rng.range(0.36, 0.52);
           const variant = rng.rangeInt(0, 2);
           const truckId = nextId++;
@@ -196,7 +296,7 @@ export class TrafficManager {
               laneOffset,
               speedRatio,
               variant,
-              segIdx,
+              resolvedSegIdx,
               forkBranch,
             ),
           );
@@ -316,10 +416,11 @@ export class TrafficManager {
     const trackLen = track.length;
     if (trackLen <= 0 || this.trucks.length === 0) return;
 
-    const srcStart = fromZ;
-    const srcEnd = fromZ + windowWorldSpan;
-    const destStart = fromZ + deltaZ;
-    const destEnd = fromZ + deltaZ + windowWorldSpan;
+    const segLen = track.segmentLength > 0 ? track.segmentLength : 200;
+    const srcStart = Math.floor(fromZ / segLen) * segLen;
+    const srcEnd = srcStart + windowWorldSpan;
+    const destStart = srcStart + deltaZ;
+    const destEnd = destStart + windowWorldSpan;
 
     for (let i = 0; i < this.trucks.length; i++) {
       const t = this.trucks[i]!;

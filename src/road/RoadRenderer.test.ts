@@ -357,14 +357,14 @@ describe('RoadRenderer — Rendering Environments', () => {
     const renderer = new RoadRenderer();
     const track = createTestTrack('standard');
 
-    // Create a gentle crest below horizon (crestTop seg 4 at worldY=300, seg 8 dips to 0)
+    // Create a genuine crest below horizon peaking across segs 4..5 (worldY=420) and dipping behind it to seg 8 (-480)
     // and place a tall building behind crest + two linked pylons so both crest clip & wire span trigger
+    const yAt = (idx: number) =>
+      idx <= 4 ? (idx / 4) * 420 : idx === 5 ? 420 : idx <= 8 ? 420 - (idx - 5) * 300 : -480;
     for (let i = 0; i < track.segments.length; i++) {
       const seg = track.segments[i]!;
-      const y = i <= 4 ? (i / 4) * 320 : i <= 8 ? 320 - (i - 4) * 160 : -320;
-      const y2 = i + 1 <= 4 ? ((i + 1) / 4) * 320 : i + 1 <= 8 ? 320 - (i + 1 - 4) * 160 : -320;
-      seg.p1.worldY = y;
-      seg.p2.worldY = y2;
+      seg.p1.worldY = yAt(i);
+      seg.p2.worldY = yAt(i + 1);
     }
     track.segments[8]!.sprites.push({ kind: 'building', offset: 2.0, variant: 0 });
     track.segments[6]!.sprites.push({ kind: 'pylon', offset: 3.2, variant: 0, chainId: 1 });
@@ -550,6 +550,92 @@ describe('RoadRenderer — Rendering Environments', () => {
     renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
     expect(renderer.stats.crestClips).toBeGreaterThan(0);
     expect(clipCalls).toBeGreaterThan(0);
+  });
+
+  it('skips ctx.clip() on a continuous rising bridge ramp without an occluding crest', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('bridge');
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      seg.p1.worldY = i * 250;
+      seg.p2.worldY = (i + 1) * 250;
+    }
+    track.segments[15]!.sprites.push({ kind: 'suspension-tower', offset: 0, variant: 0 });
+
+    let clipCalls = 0;
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      clip: () => {
+        clipCalls++;
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+    expect(renderer.stats.crestClips).toBe(0);
+    expect(clipCalls).toBe(0);
+  });
+
+  it('skips ctx.clip() when a standard ground hill crest precedes lower bridge segments', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('standard');
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      seg.env = i >= 6 ? 'bridge' : 'standard';
+      const yOf = (idx: number) => {
+        if (idx <= 5) return Math.sin((idx / 5) * Math.PI * 0.5) * 2200;
+        if (idx <= 16) return 2200 - (idx - 5) * 700;
+        return 2200 - 11 * 700;
+      };
+      seg.p1.worldY = yOf(i);
+      seg.p2.worldY = yOf(i + 1);
+    }
+    track.segments[10]!.sprites.push({ kind: 'suspension-tower', offset: 0, variant: 0 });
+
+    let clipCalls = 0;
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      clip: () => {
+        clipCalls++;
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+    expect(renderer.stats.crestClips).toBe(0);
+    expect(clipCalls).toBe(0);
   });
 
   describe('Fase 1 — Local Prop Category Fade-In', () => {
@@ -911,6 +997,197 @@ describe('RoadRenderer — Rendering Environments', () => {
       // Distant Phase 2/3 fast-rect slices must still draw the golden lane guide (#ffd319) as thin rects
       const thinGoldLaneRects = rects.filter((r) => r.fillStyle === '#ffd319' && r.w > 0 && r.w <= 6);
       expect(thinGoldLaneRects.length).toBeGreaterThan(5);
+    });
+  });
+
+  describe('Phase B & Phase C — Viaduct & Tunnel Zero-GC Rendering', () => {
+    it('renders viaduct segments with Shuto sound-barrier parapets and zero bay water fill', () => {
+      const renderer = new RoadRenderer();
+      const mock = createMockCanvas();
+      const track = createTestTrack('viaduct');
+
+      renderer.render(mock.ctx, track, defaultView, PALETTE_AKIBA_NIGHT);
+
+      expect(renderer.stats.drawnSegments).toBeGreaterThan(0);
+      expect(mock.fills).not.toContain(PALETTE_AKIBA_NIGHT.water![0]);
+      expect(mock.fills).toContain('#2c2740'); // Shuto sound-barrier concrete
+      expect(mock.fills).toContain('#474063'); // Viaduct expansion joint
+    });
+
+    it('renders tunnel entrance portal, interior bore, ceiling lights, and exit aperture with zero ctx.clip()', () => {
+      const renderer = new RoadRenderer();
+      let clipCalls = 0;
+      const fills: string[] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        clip: () => {
+          clipCalls++;
+        },
+        fill: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        stroke: noop,
+        fillRect: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 80; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 12 && i < 40 ? 'tunnel' : 'standard',
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // 1. Approaching tunnel from outside (position = 0): draws entrance portal & bore walls
+      renderer.render(ctx, track, { ...defaultView, position: 0, drawDistance: 60 }, PALETTE_NIGHT_FUNK);
+      expect(clipCalls).toBe(0);
+      expect(fills).toContain('#1b172c'); // Tunnel interior wall
+      expect(fills).toContain('#100c1e'); // Tunnel ceiling vault
+      expect(fills).toContain('#2d2645'); // Entrance portal concrete arch
+      expect(fills).toContain('#ffd166'); // Portal hazard chevron bar
+
+      // 2. Driving inside tunnel (position = 16 * segmentLength): masks surround without ctx.clip()
+      fills.length = 0;
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 16 * segmentLength, drawDistance: 60, beatPulse: 0.7 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(clipCalls).toBe(0);
+      expect(fills).toContain('#070510'); // Dark surround outside exit aperture
+      expect(fills).toContain(PALETTE_NIGHT_FUNK.horizonGlow!); // Exit portal sky rim
+    });
+
+    it('bounds inside-tunnel surround masks to <= 8 rects/frame, smooths exterior casing, uses seg.tunnelLight, and preserves multi-tunnel gaps', () => {
+      const renderer = new RoadRenderer();
+      let clipCalls = 0;
+      const darkMaskRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const ceilingLightRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const outerPathVertices: Array<{ x: number; y: number }> = [];
+      const noop = () => {};
+
+      let inPath = false;
+      let currentPts: Array<{ x: number; y: number }> = [];
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: () => {
+          inPath = true;
+          currentPts = [];
+        },
+        closePath: noop,
+        moveTo: (x: number, y: number) => {
+          if (inPath) currentPts.push({ x, y });
+        },
+        lineTo: (x: number, y: number) => {
+          if (inPath) currentPts.push({ x, y });
+        },
+        quadraticCurveTo: noop,
+        arc: noop,
+        clip: () => {
+          clipCalls++;
+        },
+        fill: () => {
+          if (ctx.fillStyle === '#1b162e' || ctx.fillStyle === '#151126') {
+            outerPathVertices.push(...currentPts);
+          }
+          inPath = false;
+        },
+        stroke: noop,
+        fillRect: (x: number, y: number, w: number, h: number) => {
+          if (ctx.fillStyle === '#070510') {
+            darkMaskRects.push({ x, y, w, h });
+          } else if (ctx.fillStyle === '#ffffff') {
+            ceilingLightRects.push({ x, y, w, h });
+          }
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      // Two tunnels: Tunnel 1 at [2..25] (straight/curved), open gap [25..45], Tunnel 2 at [45..70]
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 120; i++) {
+        const inT1 = i >= 6 && i < 25;
+        const inT2 = i >= 45 && i < 70;
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: inT1 ? 2.5 : 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: inT1 || inT2 ? 'tunnel' : 'standard',
+          tunnelLight: (inT1 || inT2) && i % 16 === 0,
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // A. Exterior approach (position = 0 -> approaching Tunnel 1 at seg 6):
+      // Verify outer casing vertices stay outside inner bore (non-pinching C2: roof & flank spans)
+      renderer.render(ctx, track, { ...defaultView, position: 0, drawDistance: 40 }, PALETTE_NIGHT_FUNK);
+      const outerSpanWidths: number[] = [];
+      for (let i = 0; i + 3 < outerPathVertices.length; i += 4) {
+        const p0 = outerPathVertices[i]!;
+        const p2 = outerPathVertices[i + 2]!;
+        const p3 = outerPathVertices[i + 3]!;
+        outerSpanWidths.push(Math.abs(p2.x - p3.x) + Math.abs(p0.x - p3.x));
+      }
+      expect(clipCalls).toBe(0);
+      expect(outerPathVertices.length).toBeGreaterThanOrEqual(12); // Left flank, right flank, top roof quads
+      expect(outerSpanWidths.some((w) => w > 10)).toBe(true);
+
+      // B. Straight single tunnel interior -> at most 4-8 dark surround fillRects total (down from ~800)
+      // plus beat-synced ceiling lights only where seg.tunnelLight === true (not % 4)
+      for (const s of segments) s.curve = 0;
+      darkMaskRects.length = 0;
+      ceilingLightRects.length = 0;
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 8 * segmentLength, drawDistance: 80, beatPulse: 0.8 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(clipCalls).toBe(0);
+      // 4 initial surround rects + at most 0..2 tightening rects (far below 200*4=800), AND ceiling lights only on tunnelLight segments (segs 16 in T1, 48 & 64 in T2)
+      expect(darkMaskRects.length).toBeLessThanOrEqual(8);
+      expect(darkMaskRects.length).toBeGreaterThanOrEqual(3);
+      expect(ceilingLightRects.length).toBe(3);
+
+      // Specifically check Tunnel 2 (at n >= 37 while Tunnel 1 ends at n = 16) did NOT re-paint full-screen #070510 over the open sky gap!
+      const secondFullTopMasks = darkMaskRects.filter((r) => r.x === 0 && r.y === 0 && r.w === 640);
+      expect(secondFullTopMasks.length).toBe(1);
     });
   });
 });

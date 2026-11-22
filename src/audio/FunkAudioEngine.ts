@@ -36,6 +36,7 @@ export const BUNDLED_WANGAN_BEATMAP: BeatMap = createBundledTrackBeatMap({
     { startBar: 48, bars: 12, role: 'drop' },
     { startBar: 60, bars: 4, role: 'outro' },
   ],
+  muffledSpans: [[40, 48]],
 });
 
 /**
@@ -78,6 +79,7 @@ function createDefaultSynthBeatMap(): BeatMap {
       { startBar: 44, bars: 16, role: 'drop' },
       { startBar: 60, bars: 4, role: 'outro' },
     ],
+    muffledSpans: [[40, 44]],
   });
 }
 
@@ -87,8 +89,9 @@ function createBundledTrackBeatMap(params: {
   artist: string;
   bpm: number;
   sections: BeatSection[];
+  muffledSpans?: readonly (readonly [number, number])[];
 }): BeatMap {
-  const { contentHash, title, artist, bpm, sections } = params;
+  const { contentHash, title, artist, bpm, sections, muffledSpans } = params;
   const beatsPerBar = 4;
   const totalBars = sections.reduce((sum, s) => sum + s.bars, 0);
   const durationSec = Math.round(totalBars * ((60 / bpm) * beatsPerBar) * 1000) / 1000;
@@ -100,14 +103,37 @@ function createBundledTrackBeatMap(params: {
     breakdown: 0.42,
     outro: 0.3,
   };
+  const roleBrightness: Record<BeatSection['role'], number> = {
+    intro: 0.56,
+    build: 0.66,
+    drop: 0.88,
+    breakdown: 0.55,
+    outro: 0.52,
+  };
 
   const barEnergy: number[] = new Array<number>(totalBars).fill(0.5);
+  const barBrightness: number[] = new Array<number>(totalBars).fill(0.65);
   for (const sec of sections) {
     for (let i = 0; i < sec.bars; i++) {
       const b = sec.startBar + i;
       if (b < totalBars) {
         const ramp = sec.role === 'build' ? (i / Math.max(1, sec.bars - 1)) * 0.25 : 0;
         barEnergy[b] = Math.min(1, Math.round((roleEnergy[sec.role] + ramp) * 100) / 100);
+        const brightRamp = sec.role === 'drop' ? 0.04 * (i % 2) : 0;
+        barBrightness[b] = Math.min(
+          1,
+          Math.round((roleBrightness[sec.role] + brightRamp) * 100) / 100,
+        );
+      }
+    }
+  }
+
+  if (muffledSpans) {
+    for (const [startBar, endBar] of muffledSpans) {
+      const lo = Math.max(0, startBar);
+      const hi = Math.min(totalBars, endBar);
+      for (let b = lo; b < hi; b++) {
+        barBrightness[b] = 0.15;
       }
     }
   }
@@ -122,6 +148,7 @@ function createBundledTrackBeatMap(params: {
     firstBeatOffsetSec: 0,
     beatsPerBar,
     barEnergy,
+    barBrightness,
     sections,
     confidence: {
       tempo: 0.99,
@@ -312,6 +339,8 @@ export interface DrivingAudioParams {
    * Used when `holdOutroLoop === true` to modulate Tape Drag (Stage 1).
    */
   roadBeatsRemaining?: number;
+  /** True when camera/player is driving inside an enclosed `env === 'tunnel'` span. */
+  inTunnel?: boolean;
 }
 
 export interface PreviewSample {
@@ -384,6 +413,16 @@ export class FunkAudioEngine {
   private lastAppliedDubFilterHz = -1;
   private outroSourceFaded = false;
 
+  /** Subtle acoustic slapback resonance inside `env === 'tunnel'` spans (opens cleanly on exit). */
+  private tunnelSendGain: GainNode | null = null;
+  private tunnelDelayNode: DelayNode | null = null;
+  private tunnelFeedbackGain: GainNode | null = null;
+  private tunnelFilterNode: BiquadFilterNode | null = null;
+  private currentTunnelSend = 0;
+  private lastAppliedTunnelSend = 0;
+  private tunnelEnvelope = 0;
+  private wasInTunnel = false;
+
   /** Progressive attack/release envelope for turntable pitch dips (collisions/shocks). */
   private pitchDipTarget = 0;
   private pitchDipEnvelope = 0;
@@ -434,6 +473,10 @@ export class FunkAudioEngine {
 
   get playbackRate(): number {
     return this.currentPlaybackRate;
+  }
+
+  get tunnelResonance(): number {
+    return this.tunnelEnvelope;
   }
 
   /** True while a 4-bar DJ crossfade to the next stage track is in progress (M6). */
@@ -584,6 +627,29 @@ export class FunkAudioEngine {
         this.dubDelayNode = dubDelay;
         this.dubFilterNode = dubFilter;
         this.dubFeedbackGain = dubFeedback;
+
+        const tunnelSend = ctx.createGain();
+        tunnelSend.gain.value = 0;
+        const tunnelDelay = ctx.createDelay(0.5);
+        tunnelDelay.delayTime.value = 0.045;
+        const tunnelFilter = ctx.createBiquadFilter();
+        tunnelFilter.type = 'bandpass';
+        tunnelFilter.frequency.value = 1150;
+        tunnelFilter.Q.value = 0.9;
+        const tunnelFeedback = ctx.createGain();
+        tunnelFeedback.gain.value = 0.22;
+
+        filter.connect(tunnelSend);
+        tunnelSend.connect(tunnelDelay);
+        tunnelDelay.connect(tunnelFilter);
+        tunnelFilter.connect(tunnelFeedback);
+        tunnelFeedback.connect(tunnelDelay);
+        tunnelFilter.connect(gain);
+
+        this.tunnelSendGain = tunnelSend;
+        this.tunnelDelayNode = tunnelDelay;
+        this.tunnelFilterNode = tunnelFilter;
+        this.tunnelFeedbackGain = tunnelFeedback;
       }
     }
 
@@ -645,6 +711,7 @@ export class FunkAudioEngine {
 
     this.stopOutgoingSource();
     this.resetDubState();
+    this.resetTunnelState();
     this.applyPreviewFilterAndRate();
     this.beatClock.resetCrossingState();
 
@@ -841,6 +908,7 @@ export class FunkAudioEngine {
     this.crossfadeRemainingSec = 0;
     this.crossfadeTotalSec = 0;
     this.resetDubState();
+    this.resetTunnelState();
     this.virtualTrackSec = clamped;
     this.beatClock.resetCrossingState();
     if (this.ctx && this.ctx.state === 'running' && !this.isPaused) {
@@ -869,6 +937,7 @@ export class FunkAudioEngine {
     this.crossfadeTotalSec = 0;
     this.virtualTrackSec = 0;
     this.resetDubState();
+    this.resetTunnelState();
     this.beatClock.resetCrossingState();
     if (this.ctx) {
       this.lastAudioTimeSec = this.ctx.currentTime;
@@ -891,6 +960,7 @@ export class FunkAudioEngine {
     this.crossfadeRemainingSec = 0;
     this.crossfadeTotalSec = 0;
     this.resetDubState();
+    this.resetTunnelState();
     this.beatClock.setBeatMap(beatMap);
     this.updateDubDelayTime();
     this.currentBuffer =
@@ -941,6 +1011,7 @@ export class FunkAudioEngine {
       this.crossfadeRemainingSec = 0;
       this.crossfadeTotalSec = 0;
       this.resetDubState();
+      this.resetTunnelState();
       this.beatClock.resetCrossingState();
       this.triggerFilterBlip(0.5);
       return 0;
@@ -955,6 +1026,7 @@ export class FunkAudioEngine {
     this.crossfadeTotalSec = fadeDurSec;
     this.crossfadeRemainingSec = fadeDurSec;
     this.resetDubState();
+    this.resetTunnelState();
 
     this.beatClock.setBeatMap(beatMap);
     this.updateDubDelayTime();
@@ -1067,6 +1139,16 @@ export class FunkAudioEngine {
     }
   }
 
+  private resetTunnelState(): void {
+    this.wasInTunnel = false;
+    this.tunnelEnvelope = 0;
+    this.currentTunnelSend = 0;
+    this.lastAppliedTunnelSend = 0;
+    if (this.tunnelSendGain) {
+      this.tunnelSendGain.gain.value = 0;
+    }
+  }
+
   /**
    * Triggers a progressive turntable pitch sag and filter muffle (used on collisions, AGENTS.md §1 Pillar 2 & 3).
    */
@@ -1118,7 +1200,19 @@ export class FunkAudioEngine {
     this.pitchDipEnvelope +=
       (this.pitchDipTarget - this.pitchDipEnvelope) * (1 - Math.exp(-pitchEnvRate * dt));
 
-    // 3. Progressive filter muffle & blip envelopes
+    // 3. Progressive filter muffle, tunnel acoustic color & blip envelopes
+    const inTunnel = driving.inTunnel === true;
+    if (this.wasInTunnel && !inTunnel) {
+      this.triggerFilterBlip(0.85);
+    }
+    this.wasInTunnel = inTunnel;
+    const tunnelTarget = inTunnel ? 1 : 0;
+    const tunnelRate = inTunnel ? 5.0 : 12.0;
+    this.tunnelEnvelope += (tunnelTarget - this.tunnelEnvelope) * (1 - Math.exp(-tunnelRate * dt));
+    if (!inTunnel && this.tunnelEnvelope < 0.002) {
+      this.tunnelEnvelope = 0;
+    }
+
     this.filterMuffleTarget *= Math.exp(-2.5 * dt);
     if (this.filterMuffleTarget < 0.002) this.filterMuffleTarget = 0;
     const muffleEnvRate = this.filterMuffleTarget > this.filterMuffleEnvelope ? 6.5 : 2.4;
@@ -1189,6 +1283,15 @@ export class FunkAudioEngine {
         this.dubFilterNode.frequency.value = tuning.outroDubFilterHz;
         this.lastAppliedDubFilterHz = tuning.outroDubFilterHz;
       }
+      this.currentTunnelSend = 0.14 * this.tunnelEnvelope;
+      if (
+        this.tunnelSendGain &&
+        (Math.abs(this.currentTunnelSend - this.lastAppliedTunnelSend) >= 0.002 ||
+          (this.currentTunnelSend === 0 && this.lastAppliedTunnelSend !== 0))
+      ) {
+        this.tunnelSendGain.gain.value = this.currentTunnelSend;
+        this.lastAppliedTunnelSend = this.currentTunnelSend;
+      }
     }
 
     // 5. Advance track time from AudioContext clock (with output latency compensation)
@@ -1232,12 +1335,16 @@ export class FunkAudioEngine {
     const driftBoost = driving.isDrifting ? 0.24 : 0;
     const offRoadMuffle = -0.32 * this.offRoadEnvelope;
     const impactMuffle = -this.filterMuffleEnvelope;
+    const tunnelMuffle = -0.07 * this.tunnelEnvelope;
     const introMuffle = clockState.sectionRole === 'intro' ? -0.18 : 0;
     const blip = this.filterBlipBoost * 0.3;
 
     const openness = Math.max(
       0,
-      Math.min(1, speedCurve + driftBoost + offRoadMuffle + impactMuffle + introMuffle + blip),
+      Math.min(
+        1,
+        speedCurve + driftBoost + offRoadMuffle + impactMuffle + tunnelMuffle + introMuffle + blip,
+      ),
     );
     let targetCutoff = minHz * Math.pow(maxHz / Math.max(100, minHz), openness);
     if (this.outroLoopHolding) {
@@ -1254,7 +1361,8 @@ export class FunkAudioEngine {
 
     this.currentCutoffHz +=
       (targetCutoff - this.currentCutoffHz) * (1 - Math.exp(-5.5 * dt));
-    const targetQ = driving.isDrifting ? tuning.audioFilterDriftQ : 1.6;
+    const targetQ =
+      (driving.isDrifting ? tuning.audioFilterDriftQ : 1.6) + 0.85 * this.tunnelEnvelope;
     this.currentQ += (targetQ - this.currentQ) * (1 - Math.exp(-8.0 * dt));
 
     // 7. Apply already-smoothed parameters to Web Audio nodes via direct `.value` assignment
@@ -1304,6 +1412,7 @@ export class FunkAudioEngine {
   dispose(): void {
     this.stopOutgoingSource();
     this.stopSourceNode();
+    this.resetTunnelState();
     if (this.dubSendGain) {
       try { this.dubSendGain.disconnect(); } catch { /* ignore */ }
       this.dubSendGain = null;
@@ -1319,6 +1428,22 @@ export class FunkAudioEngine {
     if (this.dubFeedbackGain) {
       try { this.dubFeedbackGain.disconnect(); } catch { /* ignore */ }
       this.dubFeedbackGain = null;
+    }
+    if (this.tunnelSendGain) {
+      try { this.tunnelSendGain.disconnect(); } catch { /* ignore */ }
+      this.tunnelSendGain = null;
+    }
+    if (this.tunnelDelayNode) {
+      try { this.tunnelDelayNode.disconnect(); } catch { /* ignore */ }
+      this.tunnelDelayNode = null;
+    }
+    if (this.tunnelFilterNode) {
+      try { this.tunnelFilterNode.disconnect(); } catch { /* ignore */ }
+      this.tunnelFilterNode = null;
+    }
+    if (this.tunnelFeedbackGain) {
+      try { this.tunnelFeedbackGain.disconnect(); } catch { /* ignore */ }
+      this.tunnelFeedbackGain = null;
     }
     if (this.ctx) {
       void this.ctx.close();
