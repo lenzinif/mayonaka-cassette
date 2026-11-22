@@ -402,6 +402,7 @@ export class FunkAudioEngine {
   private previewMode = false;
   private previewPlaying = false;
   private previewClickEnabled = false;
+  private previewStartToken = 0;
   private savedGameplayState: { contentHash: string; trackSec: number } | null = null;
   private lastPreviewSampleTimeMs = 0;
   private readonly previewSample: PreviewSample = {
@@ -594,7 +595,11 @@ export class FunkAudioEngine {
       this.lastAudioTimeSec = this.ctx.currentTime;
     }
 
-    if (!this.isPaused && (this.pendingTrackStart || (!this.isPlaying && this.ctx.state === 'running'))) {
+    if (
+      !this.isPaused &&
+      !this.previewMode &&
+      (this.pendingTrackStart || (!this.isPlaying && this.ctx.state === 'running'))
+    ) {
       this.startSourceNode(this.virtualTrackSec, 0);
       this.pendingTrackStart = false;
     }
@@ -605,6 +610,7 @@ export class FunkAudioEngine {
    * gameplay is paused (`AGENTS.md` §4.5: called inside a user click/keydown gesture).
    */
   async startPreview(offsetSec?: number): Promise<void> {
+    const startToken = ++this.previewStartToken;
     if (!this.previewMode) {
       this.previewMode = true;
       this.savedGameplayState = {
@@ -618,8 +624,13 @@ export class FunkAudioEngine {
       this.virtualTrackSec = Math.max(0, Math.min(dur - 0.02, offsetSec));
     }
 
+    this.previewPlaying = true;
+    this.lastPreviewSampleTimeMs = typeof performance !== 'undefined' ? performance.now() : 0;
+
     await this.unlock();
-    if (!this.previewMode) return;
+    if (!this.previewMode || !this.previewPlaying || this.previewStartToken !== startToken) {
+      return;
+    }
 
     if (this.ctx && this.ctx.state === 'suspended') {
       try {
@@ -628,7 +639,9 @@ export class FunkAudioEngine {
         // Ignore resume failure in restricted/mock environments
       }
     }
-    if (!this.previewMode) return;
+    if (!this.previewMode || !this.previewPlaying || this.previewStartToken !== startToken) {
+      return;
+    }
 
     this.stopOutgoingSource();
     this.resetDubState();
@@ -646,7 +659,6 @@ export class FunkAudioEngine {
       }
     }
 
-    this.previewPlaying = true;
     this.lastPreviewSampleTimeMs = typeof performance !== 'undefined' ? performance.now() : 0;
   }
 
@@ -654,6 +666,7 @@ export class FunkAudioEngine {
    * Pauses Cassette Deck preview playback while preserving the current scrub timestamp.
    */
   pausePreview(): void {
+    this.previewStartToken++;
     if (!this.previewPlaying) return;
     if (this.ctx && this.ctx.state === 'running') {
       const nowAudio = this.ctx.currentTime;
@@ -697,6 +710,7 @@ export class FunkAudioEngine {
    * playing before preview started, restores the saved gameplay track timestamp.
    */
   stopPreview(restoreIfSameTrack = false): void {
+    this.previewStartToken++;
     if (!this.previewMode) return;
     this.previewMode = false;
     this.previewPlaying = false;
@@ -986,12 +1000,22 @@ export class FunkAudioEngine {
   }
 
   /**
-   * Updates the BeatMap metadata (e.g. after user `×2`/`÷2`/nudge correction) without
-   * restarting the audio buffer playback.
+   * Updates the BeatMap metadata (e.g. after user `×2`/`÷2`/nudge correction) and
+   * rebuilds the procedural synth loop buffer when its BPM changes.
    */
   updateBeatMap(beatMap: BeatMap): void {
+    const prevBpm = this.beatClock.map.bpm;
     this.beatClock.setBeatMap(beatMap);
     this.updateDubDelayTime();
+    if (this.isSynthLoopBuffer && this.ctx && Math.abs(beatMap.bpm - prevBpm) > 0.01) {
+      this.currentBuffer = this.buildSynthFallbackBuffer(this.ctx, beatMap.bpm);
+      const dur = Math.max(0.1, beatMap.durationSec);
+      this.virtualTrackSec = this.virtualTrackSec % dur;
+      this.beatClock.resetCrossingState();
+      if ((this.isPlaying || this.previewPlaying) && this.ctx.state === 'running') {
+        this.startSourceNode(this.virtualTrackSec, 0.015);
+      }
+    }
   }
 
   private updateDubDelayTime(): void {

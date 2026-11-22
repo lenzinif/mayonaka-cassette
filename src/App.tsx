@@ -69,6 +69,8 @@ export function App() {
   const [isInitialSelect, setIsInitialSelect] = useState(false);
   const gameRef = useRef<Game | null>(null);
   const wasPausedBeforeModalRef = useRef(false);
+  const wasModalOpenRef = useRef(false);
+  const trackLoaderOpeningRef = useRef(false);
 
   // Quick settings state
   const [crtEnabled, setCrtEnabled] = useState(() => {
@@ -130,6 +132,20 @@ export function App() {
     };
   }, [audio, audioUnlocked]);
 
+  const openTrackLoader = useCallback(
+    (initialSelect: boolean) => {
+      wasPausedBeforeModalRef.current = gameRef.current?.paused ?? false;
+      trackLoaderOpeningRef.current = true;
+      gameRef.current?.setPaused(true);
+      setIsInitialSelect(initialSelect);
+      setTrackLoaderOpen(true);
+      void audio.startPreview(initialSelect ? 0 : undefined).then(() => {
+        if (audio.unlocked) setAudioUnlocked(true);
+      });
+    },
+    [audio],
+  );
+
   const closeTrackLoader = useCallback(() => {
     audio.stopPreview(gameStarted);
     setIsInitialSelect(false);
@@ -171,12 +187,27 @@ export function App() {
   };
 
   useEffect(() => {
-    if (trackLoaderOpen || inspectorOpen) {
-      wasPausedBeforeModalRef.current = gameRef.current?.paused ?? false;
-      gameRef.current?.setPaused(true);
-    } else if (preloadReady && gameStarted && !isInitialSelect) {
-      if (!wasPausedBeforeModalRef.current) {
-        gameRef.current?.setPaused(false);
+    const isModalOpen = trackLoaderOpen || inspectorOpen;
+    if (isModalOpen) {
+      if (!wasModalOpenRef.current) {
+        if (trackLoaderOpeningRef.current) {
+          trackLoaderOpeningRef.current = false;
+        } else {
+          wasPausedBeforeModalRef.current = gameRef.current?.paused ?? false;
+          if (!gameRef.current?.paused) {
+            gameRef.current?.setPaused(true);
+          }
+        }
+      }
+      wasModalOpenRef.current = true;
+    } else {
+      const wasOpen = wasModalOpenRef.current;
+      wasModalOpenRef.current = false;
+      trackLoaderOpeningRef.current = false;
+      if (wasOpen && preloadReady && gameStarted && !isInitialSelect) {
+        if (!wasPausedBeforeModalRef.current) {
+          gameRef.current?.setPaused(false);
+        }
       }
     }
   }, [trackLoaderOpen, inspectorOpen, preloadReady, gameStarted, isInitialSelect]);
@@ -250,8 +281,7 @@ export function App() {
         if (trackLoaderOpen) {
           closeTrackLoader();
         } else {
-          setIsInitialSelect(false);
-          setTrackLoaderOpen(true);
+          openTrackLoader(false);
         }
       } else if (e.code === 'F4') {
         e.preventDefault();
@@ -274,7 +304,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, closeTrackLoader]);
+  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, openTrackLoader, closeTrackLoader]);
 
   const handleSelectTrack = (item: PlaylistItem) => {
     void audio.unlock().then(() => setAudioUnlocked(true));
@@ -286,6 +316,7 @@ export function App() {
     void library.updateBeatMap(contentHash, updated);
     if (audio.beatMap.contentHash === contentHash) {
       audio.updateBeatMap(updated);
+      gameRef.current?.loadBeatMapRoad(updated, !gameStarted);
     }
   };
 
@@ -387,10 +418,7 @@ export function App() {
           onCycleSodaSkin={() => gameRef.current?.cycleSodaSkin()}
           onToggleAutopilot={() => gameRef.current?.toggleAutopilot()}
           onToggleDebug={() => setDebugOpen((prev) => !prev)}
-          onOpenTrackLoader={() => {
-            setIsInitialSelect(false);
-            setTrackLoaderOpen(true);
-          }}
+          onOpenTrackLoader={() => openTrackLoader(false)}
           onOpenInspector={() => setInspectorOpen(true)}
           onRestartRun={() => gameRef.current?.restartPlaylistRun()}
           onReturnToMainMenu={handleReturnToMainMenu}
@@ -399,10 +427,7 @@ export function App() {
           bridge={bridge}
           library={library}
           onRestartRun={() => gameRef.current?.restartPlaylistRun()}
-          onOpenTrackLoader={() => {
-            setIsInitialSelect(false);
-            setTrackLoaderOpen(true);
-          }}
+          onOpenTrackLoader={() => openTrackLoader(false)}
           onSelectForkBranch={(branch) => gameRef.current?.selectForkBranch(branch)}
         />
         <CRTOverlay enabled={crtEnabled} />
@@ -427,7 +452,7 @@ export function App() {
           onClose={closeTrackLoader}
         />
         {inspectorOpen && <BeatMapInspector onClose={() => setInspectorOpen(false)} />}
-        {!gameStarted && !inspectorOpen && (
+        {!gameStarted && !inspectorOpen && !trackLoaderOpen && (
           <MainMenu
             progress={preloadProgress}
             ready={preloadReady}
@@ -436,11 +461,7 @@ export function App() {
             currentTrackArtist={audio.beatMap.artist}
             currentTrackBpm={audio.beatMap.bpm}
             onStartDrive={handleStartDrive}
-            onOpenCassetteDeck={() => {
-              void audio.unlock().then(() => setAudioUnlocked(true));
-              setIsInitialSelect(true);
-              setTrackLoaderOpen(true);
-            }}
+            onOpenCassetteDeck={() => openTrackLoader(true)}
             onUnlockAudio={() => {
               void audio.unlock().then(() => setAudioUnlocked(true));
             }}

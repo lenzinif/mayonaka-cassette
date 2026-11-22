@@ -101,3 +101,181 @@ dialog::backdrop {
 .ff-spin-slow {
   animation: ffSpinReel 5.5s linear infinite;
 }
+
+.ff-scroll {
+  --scrollbar-thumb: var(--ff-muted);
+  --scrollbar-track: var(--ff-ink);
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: auto;
+}
+
+@supports not (scrollbar-color: auto) {
+  .ff-scroll {
+    scrollbar-width: auto;
+  }
+
+  .ff-scroll::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  .ff-scroll::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+  }
+
+  .ff-scroll::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+}
+
+.ff-range {
+  appearance: none;
+  width: 100%;
+  height: 16px;
+  background: transparent;
+  cursor: pointer;
+  accent-color: var(--ff-mint);
+}
+
+.ff-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--ff-panel-hi);
+  border-radius: 1px;
+}
+
+.ff-range::-moz-range-track {
+  height: 2px;
+  background: var(--ff-panel-hi);
+  border-radius: 1px;
+}
+
+.ff-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  margin-top: -4px;
+  border-radius: 1px;
+  background: var(--ff-cream);
+  border: 1px solid var(--ff-ink);
+}
+
+.ff-range::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--ff-cream);
+  border: 1px solid var(--ff-ink);
+}
+
+.ff-range[data-modified='true']::-webkit-slider-thumb {
+  background: var(--ff-mint);
+}
+
+.ff-range[data-modified='true']::-moz-range-thumb {
+  background: var(--ff-mint);
+}
+
+.ff-range:focus-visible {
+  outline: 1px solid var(--ff-mint);
+  outline-offset: 2px;
+}
+
+.ff-scrubber {
+  --scrubber-track-size: 12px;
+  --scrubber-thumb-width: 8px;
+  --scrubber-thumb-height: 20px;
+  --scrubber-thumb-color: var(--ff-cream);
+
+  appearance: none;
+  inline-size: 100%;
+  block-size: 28px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ff-scrubber::-webkit-slider-runnable-track {
+  block-size: var(--scrubber-track-size);
+  border: 0;
+  background: transparent;
+}
+
+.ff-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  inline-size: var(--scrubber-thumb-width);
+  block-size: var(--scrubber-thumb-height);
+  margin-block-start: calc(
+    (var(--scrubber-track-size) - var(--scrubber-thumb-height)) / 2
+  );
+  border: 2px solid var(--ff-ink);
+  border-radius: 2px;
+  background: var(--scrubber-thumb-color);
+  box-shadow:
+    0 0 0 1px var(--ff-pink),
+    0 0 10px rgba(255, 59, 127, 0.55);
+}
+
+.ff-scrubber::-moz-range-track {
+  block-size: var(--scrubber-track-size);
+  border: 0;
+  background: transparent;
+}
+
+.ff-scrubber::-moz-range-progress {
+  block-size: var(--scrubber-track-size);
+  background: transparent;
+}
+
+.ff-scrubber::-moz-range-thumb {
+  inline-size: var(--scrubber-thumb-width);
+  block-size: var(--scrubber-thumb-height);
+  border: 2px solid var(--ff-ink);
+  border-radius: 2px;
+  background: var(--scrubber-thumb-color);
+  box-shadow:
+    0 0 0 1px var(--ff-pink),
+    0 0 10px rgba(255, 59, 127, 0.55);
+}
+
+.ff-scrubber:focus-visible {
+  outline: 2px solid var(--ff-mint);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.ff-details > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  cursor: pointer;
+}
+
+.ff-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ff-details > summary::before {
+  content: '';
+  inline-size: 0.6rem;
+  block-size: 0.6rem;
+  flex-shrink: 0;
+  background-color: currentColor;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' fill='none' stroke='black' stroke-width='2' stroke-linecap='square'/%3E%3C/svg%3E")
+    no-repeat center / contain;
+  rotate: -90deg;
+}
+
+.ff-details[open] > summary::before {
+  rotate: 0deg;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ff-details > summary::before {
+    transition: rotate 0.15s ease;
+  }
+}

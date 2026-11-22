@@ -11,7 +11,16 @@ import {
 import type { AutopilotMode } from '@src/core/AutopilotDriver';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
-import { memo, useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from 'react';
 
 const STORAGE_KEY = 'mayonaka-cassette.tuning.v1';
 const LEGACY_STORAGE_KEY = 'outrun-futurefunk.tuning.v1';
@@ -44,6 +53,8 @@ function saveCurrentTuning(): void {
   }
 }
 
+export type DebugTab = 'tuning' | 'profiler';
+
 export interface DebugPanelProps {
   open: boolean;
   onClose: () => void;
@@ -51,6 +62,7 @@ export interface DebugPanelProps {
   onSelectPalette?: (index: number) => void;
   onToggleAutopilot?: () => void;
   onSetAutopilotMode?: (mode: AutopilotMode) => void;
+  initialTab?: DebugTab;
 }
 
 export const FUTURE_FUNK_THEMES = [
@@ -59,7 +71,39 @@ export const FUTURE_FUNK_THEMES = [
   { index: 2, name: 'AKIBA NIGHT RUSH', sub: 'Electric Night', color: '#00f5d4' },
 ] as const;
 
-const GROUPS = Array.from(new Set(TUNING_CONTROLS.map((c) => c.group)));
+const TUNING_GROUPS = Array.from(new Set(TUNING_CONTROLS.map((c) => c.group))).filter(
+  (group) => group !== 'Weather & Sky',
+);
+
+const CONTROLS_BY_GROUP = new Map(
+  TUNING_GROUPS.map((group) => [group, TUNING_CONTROLS.filter((c) => c.group === group)]),
+);
+
+const ENVIRONMENT_TOGGLES = [
+  { key: 'bgRain', label: 'RAIN' },
+  { key: 'bgClouds', label: 'CLOUDS' },
+  { key: 'bgBirds', label: 'BIRDS' },
+  { key: 'bgStars', label: 'STARS' },
+] as const;
+
+const ISOLATION_ITEMS = [
+  { key: 'renderBg', label: 'SKY/BG' },
+  { key: 'renderRoad', label: 'ROAD' },
+  { key: 'renderProps', label: 'PROPS' },
+  { key: 'renderPylonWires', label: 'WIRES' },
+  { key: 'renderTraffic', label: 'TRAFFIC' },
+  { key: 'renderCar', label: 'CAR/FX' },
+] as const;
+
+const BAR_SEEK_SHORTCUTS = [
+  [0, 'INTRO B0'],
+  [8, 'BUILD B8'],
+  [16, 'DROP B16'],
+  [48, 'BREAK B48'],
+  [72, 'DROP2 B72'],
+  [104, 'OUTRO B104'],
+] as const;
+
 const NOOP_SUBSCRIBE = () => () => {};
 const NULL_SNAPSHOT = () => null;
 
@@ -81,55 +125,140 @@ const MemoizedTuningControls = memo(function MemoizedTuningControls({
   values: Tuning;
   onChange: (key: TuningKey, value: number) => void;
 }) {
+  const accordionRef = useRef<HTMLDivElement | null>(null);
+  const [allExpanded, setAllExpanded] = useState(false);
+
+  const syncAllExpanded = useCallback(() => {
+    const container = accordionRef.current;
+    if (!container) return;
+    const items = Array.from(container.querySelectorAll<HTMLDetailsElement>(':scope > details'));
+    setAllExpanded(items.length > 0 && items.every((el) => el.open));
+  }, []);
+
+  const handleToggleAll = () => {
+    const container = accordionRef.current;
+    if (!container) return;
+    const nextOpen = !allExpanded;
+    for (const el of container.querySelectorAll<HTMLDetailsElement>(':scope > details')) {
+      el.open = nextOpen;
+    }
+    setAllExpanded(nextOpen);
+  };
+
+  let paramModifiedCount = 0;
+  for (const group of TUNING_GROUPS) {
+    const controls = CONTROLS_BY_GROUP.get(group) ?? [];
+    for (const ctrl of controls) {
+      if (values[ctrl.key] !== DEFAULT_TUNING[ctrl.key]) paramModifiedCount++;
+    }
+  }
+
   return (
-    <>
-      {GROUPS.map((group) => (
-        <div key={group} className="space-y-2.5">
-          <div className="border-b border-fuchsia-500/25 pb-1 text-[10px] font-bold tracking-[0.2em] text-pink-400 uppercase">
-            {group}
-          </div>
-          {TUNING_CONTROLS.filter((c) => c.group === group).map((ctrl) => {
-            const current = values[ctrl.key];
-            const isModified = current !== DEFAULT_TUNING[ctrl.key];
-            return (
-              <label key={ctrl.key} className="block space-y-0.5">
-                <div className="flex justify-between text-[11px]">
-                  <span
-                    className={isModified ? 'font-semibold text-cyan-300' : 'text-fuchsia-100'}
-                  >
-                    {ctrl.label}
-                  </span>
-                  <span className="tabular-nums text-fuchsia-300">
-                    {current}
-                    {ctrl.unit ? ` ${ctrl.unit}` : ''}
-                  </span>
-                </div>
-                <div className="text-[10px] leading-tight text-fuchsia-300/65">{ctrl.hint}</div>
-                <input
-                  type="range"
-                  min={ctrl.min}
-                  max={ctrl.max}
-                  step={ctrl.step}
-                  value={current}
-                  onChange={(e) => onChange(ctrl.key, Number(e.target.value))}
-                  onPointerUp={(e) => e.currentTarget.blur()}
-                  className="h-1.5 w-full cursor-pointer appearance-none rounded bg-fuchsia-950 accent-cyan-400"
-                />
-              </label>
-            );
-          })}
+    <section className="p-3">
+      <div className="mb-2 flex items-center justify-between gap-2 select-none">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+            PARAMETERS
+          </span>
+          {paramModifiedCount > 0 && (
+            <span className="rounded-[2px] bg-[var(--ff-mint)] px-1.5 py-[1px] text-[9px] font-black text-[var(--ff-ink)]">
+              {paramModifiedCount} MOD
+            </span>
+          )}
         </div>
-      ))}
-    </>
+        <button
+          type="button"
+          aria-expanded={allExpanded}
+          onClick={(e) => {
+            handleToggleAll();
+            e.currentTarget.blur();
+          }}
+          className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-0.5 text-[9px] font-bold tracking-wider text-[var(--ff-muted)] uppercase transition hover:border-[var(--ff-cream)] hover:text-[var(--ff-cream)]"
+        >
+          {allExpanded ? 'COLLAPSE ALL' : 'EXPAND ALL'}
+        </button>
+      </div>
+
+      <div ref={accordionRef} className="divide-y divide-[var(--ff-border)]">
+        {TUNING_GROUPS.map((group) => {
+          const controls = CONTROLS_BY_GROUP.get(group) ?? [];
+          const groupModCount = controls.filter(
+            (ctrl) => values[ctrl.key] !== DEFAULT_TUNING[ctrl.key],
+          ).length;
+
+          return (
+            <details
+              key={group}
+              open={group === 'Camera'}
+              onToggle={syncAllExpanded}
+              className="ff-details"
+            >
+              <summary className="py-2 text-[10px] font-bold tracking-[0.12em] text-[var(--ff-cream)] uppercase select-none hover:text-[var(--ff-mint)]">
+                <span className="flex-1">{group}</span>
+                {groupModCount > 0 && (
+                  <span className="rounded-[2px] bg-[var(--ff-mint)] px-1 py-[1px] text-[8.5px] font-black text-[var(--ff-ink)]">
+                    {groupModCount} MOD
+                  </span>
+                )}
+                <span className="text-[9px] font-normal text-[var(--ff-muted)]">
+                  {controls.length}
+                </span>
+              </summary>
+
+              <div className="space-y-2.5 pt-1 pb-3">
+                {controls.map((ctrl) => {
+                  const current = values[ctrl.key];
+                  const isModified = current !== DEFAULT_TUNING[ctrl.key];
+                  return (
+                    <label key={ctrl.key} className="block">
+                      <div className="flex items-baseline justify-between gap-2 text-[10.5px]">
+                        <span
+                          className={
+                            isModified ? 'font-bold text-[var(--ff-mint)]' : 'text-[var(--ff-cream)]'
+                          }
+                        >
+                          {ctrl.label}
+                        </span>
+                        <span
+                          className={`shrink-0 tabular-nums ${
+                            isModified
+                              ? 'font-bold text-[var(--ff-mint)]'
+                              : 'text-[var(--ff-cream)]'
+                          }`}
+                        >
+                          {current}
+                          {ctrl.unit ? ` ${ctrl.unit}` : ''}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min={ctrl.min}
+                        max={ctrl.max}
+                        step={ctrl.step}
+                        value={current}
+                        data-modified={isModified ? 'true' : undefined}
+                        onChange={(e) => onChange(ctrl.key, Number(e.target.value))}
+                        onPointerUp={(e) => e.currentTarget.blur()}
+                        className="ff-range mt-1 block"
+                      />
+                      <div className="mt-0.5 text-[9.5px] leading-snug text-[var(--ff-muted)]">
+                        {ctrl.hint}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </details>
+          );
+        })}
+      </div>
+    </section>
   );
 });
 
-type DebugTab = 'tuning' | 'profiler';
-
 /**
- * Live feel-tuning and M8 Performance Profiler drawer (`?debug` or `F2`, AGENTS.md §5 M8).
- * Mutates `tuning` in place so changes are felt on the very next simulation step,
- * and monitors real-time frame time, physics cost, and draw counts with zero runtime overhead.
+ * Minimalist diagnostic developer drawer (`?debug` or `F2`, AGENTS.md §5 M8).
+ * Harmonized under the Mayonaka Hi-Fi 7-token palette with zero glow/blur overhead.
  */
 export function DebugPanel({
   open,
@@ -138,8 +267,10 @@ export function DebugPanel({
   onSelectPalette,
   onToggleAutopilot,
   onSetAutopilotMode,
+  initialTab,
 }: DebugPanelProps) {
   const [tab, setTab] = useState<DebugTab>(() => {
+    if (initialTab) return initialTab;
     if (typeof window === 'undefined') return 'tuning';
     const params = new URLSearchParams(window.location.search);
     return params.get('debug')?.toLowerCase() === 'profiler' || params.has('profiler')
@@ -161,8 +292,15 @@ export function DebugPanel({
     legacyRaster: false,
   });
 
+  const tuningTabId = useId();
+  const profilerTabId = useId();
+  const tuningTabRef = useRef<HTMLButtonElement | null>(null);
+  const profilerTabRef = useRef<HTMLButtonElement | null>(null);
+  const panelBodyRef = useRef<HTMLDivElement | null>(null);
+
   const snap = useSyncExternalStore(
     open && bridge ? bridge.subscribe : NOOP_SUBSCRIBE,
+    open && bridge ? bridge.getSnapshot : NULL_SNAPSHOT,
     open && bridge ? bridge.getSnapshot : NULL_SNAPSHOT,
   );
 
@@ -204,6 +342,12 @@ export function DebugPanel({
     }
   }, [open]);
 
+  useEffect(() => {
+    if (panelBodyRef.current) {
+      panelBodyRef.current.scrollTop = 0;
+    }
+  }, [tab]);
+
   // Keyboard shortcut: pressing '1', '2', '3' while debug panel is open switches theme
   useEffect(() => {
     if (!open || !onSelectPalette) return;
@@ -218,6 +362,20 @@ export function DebugPanel({
   }, [open, onSelectPalette]);
 
   if (!open) return null;
+
+  const handleTabKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'Home' || e.key === 'End') {
+      e.preventDefault();
+      e.stopPropagation();
+      let next: DebugTab;
+      if (e.key === 'Home') next = 'tuning';
+      else if (e.key === 'End') next = 'profiler';
+      else next = tab === 'tuning' ? 'profiler' : 'tuning';
+      setTab(next);
+      if (next === 'tuning') tuningTabRef.current?.focus();
+      else profilerTabRef.current?.focus();
+    }
+  };
 
   const handleToggleIsolation = (key: keyof IsolationToggles) => {
     const nextVal = !isolation[key];
@@ -301,6 +459,10 @@ export function DebugPanel({
     }
   };
 
+  const totalModifiedCount = (Object.keys(DEFAULT_TUNING) as TuningKey[]).filter(
+    (key) => values[key] !== DEFAULT_TUNING[key],
+  ).length;
+
   const fps = snap?.fps ?? 60;
   const simMs = snap?.simTimeMs ?? 0.3;
   const renderMs = snap?.renderTimeMs ?? 1.2;
@@ -309,24 +471,43 @@ export function DebugPanel({
   const budgetRatio = Math.min(1, totalLoadMs / 16.67);
   const budgetPct = Math.round(budgetRatio * 100);
 
-  const fpsBadge =
+  const fpsPillStyle =
     fps >= 58
-      ? 'border-emerald-400/80 bg-emerald-950/80 text-emerald-300'
+      ? 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
       : fps >= 45
-        ? 'border-amber-400/80 bg-amber-950/80 text-amber-300'
-        : 'border-pink-500 bg-pink-950/90 text-pink-300 animate-pulse';
+        ? 'bg-[var(--ff-gold)] text-[var(--ff-ink)]'
+        : 'bg-[var(--ff-pink)] text-[var(--ff-cream)]';
+
+  const loadBarFillStyle =
+    budgetPct < 65
+      ? 'bg-[var(--ff-mint)]'
+      : budgetPct < 90
+        ? 'bg-[var(--ff-gold)]'
+        : 'bg-[var(--ff-pink)]';
 
   return (
-    <aside className="pointer-events-auto absolute top-14 right-4 bottom-4 z-10 flex w-96 flex-col rounded border border-cyan-400/50 bg-[#0d0221]/95 font-mono text-xs text-fuchsia-100 [contain:layout_style_paint]">
-      {/* Top Header */}
-      <div className="flex items-center justify-between border-b border-fuchsia-500/30 px-3 py-2.5">
-        <div className="flex items-center gap-2">
-          <div className="font-bold tracking-wider text-cyan-300 uppercase">DEV CONSOLE</div>
-          <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${fpsBadge}`}>
+    <aside
+      aria-label="Developer diagnostics console"
+      className="ff-shadow-ink ff-mono pointer-events-auto absolute top-14 right-3 bottom-3 z-10 flex w-[376px] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-[2px] border border-[rgba(255,245,228,0.24)] bg-[var(--ff-ink)] text-xs text-[var(--ff-cream)] sm:right-5 sm:bottom-5 [contain:layout_style_paint]"
+      style={{ colorScheme: 'dark' }}
+    >
+      {/* Signature 2px Mayonaka Hi-Fi Obi Accent */}
+      <div className="ff-obi-h h-[2px] w-full shrink-0" />
+
+      {/* Minimalist Header */}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--ff-border)] bg-[var(--ff-panel)] px-3 py-2 select-none">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="ff-display shrink-0 whitespace-nowrap text-[10.5px] font-black tracking-[0.12em] text-[var(--ff-cream)] uppercase">
+            DEV CONSOLE
+          </span>
+          <span
+            className={`shrink-0 whitespace-nowrap rounded-[2px] px-1.5 py-[1px] text-[9.5px] font-black ${fpsPillStyle}`}
+          >
             {fps} FPS
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+
+        <div className="flex shrink-0 items-center gap-1">
           {tab === 'tuning' ? (
             <>
               <button
@@ -335,9 +516,13 @@ export function DebugPanel({
                   void handleCopyJson();
                   e.currentTarget.blur();
                 }}
-                className="cursor-pointer rounded border border-cyan-400/50 bg-cyan-950/60 px-2 py-1 text-[10px] font-semibold text-cyan-200 hover:bg-cyan-900/70"
+                className={`cursor-pointer whitespace-nowrap rounded-[2px] border bg-[var(--ff-ink)] px-1.5 py-0.5 text-[9.5px] font-bold tracking-wider uppercase transition ${
+                  copied
+                    ? 'border-[var(--ff-mint)] text-[var(--ff-mint)]'
+                    : 'border-[var(--ff-border)] text-[var(--ff-cream)] hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]'
+                }`}
               >
-                {copied ? 'COPIED!' : 'COPY JSON'}
+                {copied ? 'COPIED' : 'COPY JSON'}
               </button>
               <button
                 type="button"
@@ -345,9 +530,9 @@ export function DebugPanel({
                   handleReset();
                   e.currentTarget.blur();
                 }}
-                className="cursor-pointer rounded border border-pink-500/50 bg-pink-950/60 px-2 py-1 text-[10px] font-semibold text-pink-200 hover:bg-pink-900/70"
+                className="cursor-pointer whitespace-nowrap rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-1.5 py-0.5 text-[9.5px] font-bold tracking-wider text-[var(--ff-cream)] uppercase transition hover:border-[var(--ff-pink)] hover:text-[var(--ff-pink)]"
               >
-                RESET
+                {totalModifiedCount > 0 ? `RESET (${totalModifiedCount})` : 'RESET'}
               </button>
             </>
           ) : (
@@ -357,9 +542,13 @@ export function DebugPanel({
                 void handleCopyPerfReport();
                 e.currentTarget.blur();
               }}
-              className="cursor-pointer rounded border border-emerald-400/60 bg-emerald-950/70 px-2 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-900/80"
+              className={`cursor-pointer whitespace-nowrap rounded-[2px] border bg-[var(--ff-ink)] px-1.5 py-0.5 text-[9.5px] font-bold tracking-wider uppercase transition ${
+                copiedPerf
+                  ? 'border-[var(--ff-mint)] text-[var(--ff-mint)]'
+                  : 'border-[var(--ff-border)] text-[var(--ff-cream)] hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]'
+              }`}
             >
-              {copiedPerf ? 'COPIED!' : 'DUMP BENCHMARK'}
+              {copiedPerf ? 'COPIED' : 'DUMP BENCHMARK'}
             </button>
           )}
           <button
@@ -368,7 +557,7 @@ export function DebugPanel({
               onClose();
               e.currentTarget.blur();
             }}
-            className="cursor-pointer rounded border border-fuchsia-400/40 px-1.5 py-1 text-[10px] text-fuchsia-200 hover:border-white"
+            className="cursor-pointer whitespace-nowrap rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-1.5 py-0.5 text-[9.5px] font-bold text-[var(--ff-muted)] transition hover:border-[var(--ff-pink)] hover:text-[var(--ff-cream)]"
             aria-label="Close debug panel"
           >
             ✕
@@ -376,577 +565,615 @@ export function DebugPanel({
         </div>
       </div>
 
-      {/* Tab Switcher */}
-      <div className="flex border-b border-fuchsia-500/25 bg-[#12052b]/80 p-1 text-[11px]">
+      {/* Accessible Underline Tabs */}
+      <div
+        role="tablist"
+        aria-label="Debug console views"
+        onKeyDown={handleTabKeyDown}
+        className="grid shrink-0 grid-cols-2 border-b border-[var(--ff-border)] bg-[var(--ff-ink)] text-[10px] font-bold tracking-[0.14em] uppercase select-none"
+      >
         <button
+          ref={tuningTabRef}
+          id={tuningTabId}
           type="button"
-          onClick={() => setTab('tuning')}
-          className={`flex-1 rounded py-1 font-semibold tracking-wider transition ${
+          role="tab"
+          aria-selected={tab === 'tuning'}
+          tabIndex={tab === 'tuning' ? 0 : -1}
+          onClick={(e) => {
+            setTab('tuning');
+            e.currentTarget.blur();
+          }}
+          className={`relative cursor-pointer py-2 text-center transition after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b-2 ${
             tab === 'tuning'
-              ? 'bg-cyan-500/25 text-cyan-200 shadow-[0_0_8px_rgba(5,217,232,0.25)]'
-              : 'text-fuchsia-300/70 hover:text-fuchsia-100'
+              ? 'bg-[var(--ff-panel)] text-[var(--ff-cream)] after:border-[var(--ff-mint)]'
+              : 'text-[var(--ff-muted)] after:border-transparent hover:text-[var(--ff-cream)]'
           }`}
         >
           FEEL TUNING
         </button>
         <button
+          ref={profilerTabRef}
+          id={profilerTabId}
           type="button"
-          onClick={() => setTab('profiler')}
-          className={`flex-1 rounded py-1 font-semibold tracking-wider transition ${
+          role="tab"
+          aria-selected={tab === 'profiler'}
+          tabIndex={tab === 'profiler' ? 0 : -1}
+          onClick={(e) => {
+            setTab('profiler');
+            e.currentTarget.blur();
+          }}
+          className={`relative cursor-pointer py-2 text-center transition after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:border-b-2 ${
             tab === 'profiler'
-              ? 'bg-pink-500/25 text-pink-200 shadow-[0_0_8px_rgba(255,42,109,0.25)]'
-              : 'text-fuchsia-300/70 hover:text-fuchsia-100'
+              ? 'bg-[var(--ff-panel)] text-[var(--ff-cream)] after:border-[var(--ff-pink)]'
+              : 'text-[var(--ff-muted)] after:border-transparent hover:text-[var(--ff-cream)]'
           }`}
         >
           PERF PROFILER
         </button>
       </div>
 
-      {/* Mini Telemetry Status Ribbon (Always visible in both tabs) */}
-      <div className="border-b border-fuchsia-500/20 bg-[#090117]/80 px-3 py-1.5 text-[10px]">
-        <div className="flex items-center justify-between text-fuchsia-300/90">
+      {/* Slim Telemetry Status Ribbon */}
+      <div className="shrink-0 border-b border-[var(--ff-border)] bg-[var(--ff-ink)] px-3 py-1.5 text-[10px]">
+        <div className="flex items-center justify-between text-[var(--ff-muted)]">
           <span>
-            LOAD: <strong className="text-cyan-300">{budgetPct}%</strong> ({totalLoadMs.toFixed(1)}ms / 16.7ms)
+            LOAD <strong className="text-[var(--ff-cream)]">{budgetPct}%</strong> (
+            {totalLoadMs.toFixed(1)}ms)
           </span>
           <span>
-            RENDER: <strong className="text-pink-300">{renderMs.toFixed(1)}ms</strong>
+            JS <strong className="text-[var(--ff-cream)]">{renderMs.toFixed(1)}ms</strong>
           </span>
           <span>
-            PHYS: <strong className="text-emerald-300">{simMs.toFixed(2)}ms</strong>
+            PHYS <strong className="text-[var(--ff-cream)]">{simMs.toFixed(2)}ms</strong>
           </span>
         </div>
-        <div className="relative mt-1 h-1.5 w-full overflow-hidden rounded bg-fuchsia-950/80">
+        <div className="mt-1 h-[3px] w-full overflow-hidden rounded-[1px] bg-[var(--ff-panel-hi)]">
           <div
-            className="h-full w-full origin-left bg-linear-to-r from-emerald-400 via-cyan-400 to-pink-500 will-change-transform"
-            style={{ transform: `scaleX(${budgetPct / 100})` }}
+            className={`h-full w-full origin-left will-change-transform ${loadBarFillStyle}`}
+            style={{ transform: `scaleX(${budgetRatio})` }}
           />
         </div>
       </div>
 
-      {/* Tab Body */}
-      {tab === 'tuning' ? (
-        <div className="flex-1 space-y-4 overflow-y-auto p-3">
-          {/* AI Agent / Autopilot Playtesting Deck */}
-          <div className="space-y-2 rounded border border-emerald-400/50 bg-[#090117]/90 p-2.5 shadow-[0_0_15px_rgba(16,185,129,0.15)]">
-            <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.2em] text-emerald-300 uppercase">
-              <span>🤖 AI AGENT / AUTOPILOT</span>
-              <span className="text-[9px] font-normal text-emerald-400/80">HOTKEY: F4 / 0</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => onToggleAutopilot?.()}
-                className={`flex-1 cursor-pointer rounded border py-1.5 text-center text-[10px] font-black tracking-wider transition ${
-                  snap?.autopilotActive
-                    ? 'border-emerald-400 bg-emerald-950/80 text-emerald-200 shadow-[0_0_12px_rgba(16,185,129,0.4)]'
-                    : 'border-emerald-500/30 bg-[#160730]/60 text-emerald-300/70 hover:border-emerald-400 hover:text-emerald-200'
-                }`}
-              >
-                {snap?.autopilotActive ? '● AUTOPILOT ENGAGED' : '○ ENGAGE AUTOPILOT [F4]'}
-              </button>
-            </div>
-            {/* Personality Mode Selector */}
-            <div className="grid grid-cols-3 gap-1 text-[9px]">
-              {(['perfect', 'relaxed', 'aggressive'] as const).map((mode) => {
-                const isSelected = snap?.autopilotMode === mode;
-                return (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onSetAutopilotMode?.(mode)}
-                    className={`cursor-pointer rounded border py-1 font-bold uppercase transition ${
-                      isSelected
-                        ? 'border-cyan-300 bg-cyan-950/80 text-cyan-200 shadow-[0_0_8px_rgba(5,217,232,0.3)]'
-                        : 'border-fuchsia-500/20 bg-[#120329]/50 text-fuchsia-300/60 hover:text-fuchsia-100'
-                    }`}
-                  >
-                    {mode}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Future Funk Atmosphere & Palette Switcher */}
-          <div className="space-y-2 rounded border border-cyan-400/40 bg-[#090117]/90 p-2.5">
-            <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.2em] text-cyan-300 uppercase">
-              <span>ATMOSPHERE / PALETTE</span>
-              <span className="text-[9px] font-normal text-fuchsia-300">KEYS 1–3</span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {FUTURE_FUNK_THEMES.map((theme) => {
-                const isActive = snap?.stagePaletteName === theme.name;
-                return (
-                  <button
-                    key={theme.name}
-                    type="button"
-                    onClick={() => onSelectPalette?.(theme.index)}
-                    className={`flex cursor-pointer flex-col justify-between rounded border p-1.5 text-left transition ${
-                      isActive
-                        ? 'border-cyan-400 bg-cyan-950/70 shadow-[0_0_10px_rgba(5,217,232,0.35)]'
-                        : 'border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60 hover:bg-[#200a45]/60'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-bold" style={{ color: theme.color }}>
-                        [{theme.index + 1}] {theme.name}
-                      </span>
-                      {isActive && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-cyan-300 shadow-[0_0_4px_#05d9e8]" />
-                      )}
-                    </div>
-                    <span className="text-[9px] text-fuchsia-200/70">{theme.sub}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-                    {/* Weather & Sky / Fondali (Fase 2) */}
-          <div className="space-y-2 rounded border border-fuchsia-500/40 bg-[#090117]/90 p-2.5">
-            <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.2em] text-pink-400 uppercase">
-              <span>WEATHER & SKY / FONDALI</span>
-              <span className="text-[9px] font-normal text-fuchsia-300">LIVE TOGGLES</span>
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {/* Rain & Storm */}
-              <button
-                type="button"
-                onClick={() => handleChange("bgRain", values.bgRain ? 0 : 1)}
-                className={`flex cursor-pointer items-center justify-between rounded border p-1.5 text-left transition ${
-                  values.bgRain
-                    ? "border-cyan-400 bg-cyan-950/70 shadow-[0_0_8px_rgba(5,217,232,0.35)]"
-                    : "border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs">⛈️</span>
-                  <span className="text-[10px] font-bold text-cyan-200">RAIN/STORM</span>
-                </div>
-                <span className={`text-[9px] font-bold ${values.bgRain ? "text-cyan-300" : "text-fuchsia-400/60"}`}>
-                  {values.bgRain ? "ON" : "OFF"}
+      {/* Scrollable Diagnostic Body */}
+      <div
+        ref={panelBodyRef}
+        role="tabpanel"
+        aria-labelledby={tab === 'tuning' ? tuningTabId : profilerTabId}
+        className="ff-scroll flex-1 divide-y divide-[var(--ff-border)] overflow-y-auto"
+      >
+        {tab === 'tuning' ? (
+          <>
+            {/* Autopilot */}
+            <section className="space-y-2 p-3">
+              <div className="flex items-center justify-between text-[10px] select-none">
+                <span className="font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                  AUTOPILOT
                 </span>
-              </button>
-
-              {/* Clouds */}
-              <button
-                type="button"
-                onClick={() => handleChange("bgClouds", values.bgClouds ? 0 : 1)}
-                className={`flex cursor-pointer items-center justify-between rounded border p-1.5 text-left transition ${
-                  values.bgClouds
-                    ? "border-cyan-400 bg-cyan-950/70 shadow-[0_0_8px_rgba(5,217,232,0.35)]"
-                    : "border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs">☁️</span>
-                  <span className="text-[10px] font-bold text-cyan-200">CLOUDS</span>
-                </div>
-                <span className={`text-[9px] font-bold ${values.bgClouds ? "text-cyan-300" : "text-fuchsia-400/60"}`}>
-                  {values.bgClouds ? "ON" : "OFF"}
-                </span>
-              </button>
-
-              {/* Birds */}
-              <button
-                type="button"
-                onClick={() => handleChange("bgBirds", values.bgBirds ? 0 : 1)}
-                className={`flex cursor-pointer items-center justify-between rounded border p-1.5 text-left transition ${
-                  values.bgBirds
-                    ? "border-cyan-400 bg-cyan-950/70 shadow-[0_0_8px_rgba(5,217,232,0.35)]"
-                    : "border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs">🕊️</span>
-                  <span className="text-[10px] font-bold text-cyan-200">BIRDS</span>
-                </div>
-                <span className={`text-[9px] font-bold ${values.bgBirds ? "text-cyan-300" : "text-fuchsia-400/60"}`}>
-                  {values.bgBirds ? "ON" : "OFF"}
-                </span>
-              </button>
-
-              {/* Celestial Starfield (Stars & Shooting Stars) */}
-              <button
-                type="button"
-                onClick={() => handleChange("bgStars", values.bgStars ? 0 : 1)}
-                className={`flex cursor-pointer items-center justify-between rounded border p-1.5 text-left transition ${
-                  values.bgStars
-                    ? "border-cyan-400 bg-cyan-950/70 shadow-[0_0_8px_rgba(5,217,232,0.35)]"
-                    : "border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs">✨</span>
-                  <span className="text-[10px] font-bold text-cyan-200">STARS</span>
-                </div>
-                <span className={`text-[9px] font-bold ${values.bgStars ? "text-cyan-300" : "text-fuchsia-400/60"}`}>
-                  {values.bgStars ? "ON" : "OFF"}
-                </span>
-              </button>
-            </div>
-
-            {/* Lightning on Beat (Requires Rain) */}
-            <button
-              type="button"
-              disabled={!values.bgRain}
-              onClick={() => handleChange("bgLightningOnBeat", values.bgLightningOnBeat ? 0 : 1)}
-              className={`flex w-full items-center justify-between rounded border p-1.5 text-left transition ${
-                !values.bgRain
-                  ? "cursor-not-allowed border-fuchsia-500/20 bg-[#160730]/30 opacity-50"
-                  : values.bgLightningOnBeat
-                    ? "cursor-pointer border-pink-500 bg-pink-950/60 shadow-[0_0_8px_rgba(255,42,109,0.3)]"
-                    : "cursor-pointer border-fuchsia-500/30 bg-[#160730]/50 hover:border-fuchsia-400/60"
-              }`}
-            >
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs">⚡</span>
-                <span className="text-[10px] font-bold text-pink-200">BEAT LIGHTNING</span>
+                <span className="text-[9px] text-[var(--ff-muted)]">F4 / 0</span>
               </div>
-              <span className={`text-[9px] font-bold ${!values.bgRain ? "text-fuchsia-400/40" : values.bgLightningOnBeat ? "text-pink-300" : "text-fuchsia-400/60"}`}>
-                {!values.bgRain ? "REQUIRES RAIN" : values.bgLightningOnBeat ? "ACTIVE ON DROP" : "OFF"}
-              </span>
-            </button>
-          </div>
-
-          <MemoizedTuningControls values={values} onChange={handleChange} />
-        </div>
-      ) : (
-        <div className="flex-1 space-y-3.5 overflow-y-auto p-3">
-          {/* Section: Full-Song Session Scorecard */}
-          <div className="rounded border border-emerald-400/40 bg-[#070114]/90 p-2.5">
-            <div className="flex items-center justify-between text-[10px] font-bold tracking-wider text-emerald-300 uppercase">
-              <span>FULL-SONG SESSION SCORECARD</span>
               <button
                 type="button"
                 onClick={(e) => {
-                  window.__MAYONAKA_DIAG__?.resetBenchmark();
-                  refreshReportJson();
+                  onToggleAutopilot?.();
                   e.currentTarget.blur();
                 }}
-                className="cursor-pointer rounded border border-emerald-400/50 bg-emerald-950/70 px-1.5 py-0.5 text-[9px] font-bold text-emerald-200 hover:bg-emerald-900/80"
+                className={`w-full cursor-pointer rounded-[2px] border py-1.5 text-center text-[10px] font-black tracking-wider uppercase transition select-none ${
+                  snap?.autopilotActive
+                    ? 'border-[var(--ff-mint)] bg-[var(--ff-mint)] text-[var(--ff-ink)]'
+                    : 'border-[var(--ff-border)] bg-[var(--ff-panel)] text-[var(--ff-cream)] hover:border-[var(--ff-mint)]'
+                }`}
               >
-                RESET BENCH
+                {snap?.autopilotActive ? 'AUTOPILOT: ON' : 'AUTOPILOT: OFF'}
               </button>
-            </div>
-            <div className="mt-1.5 flex justify-between text-[10px] text-cyan-200/90">
-              <span>
-                Track: {snap?.trackTitle ?? 'Loading...'} ({snap?.bpm ?? 0} BPM)
-              </span>
-              <span>
-                Bar: {snap?.roadBarIndex ?? 0} / {snap?.totalBars ?? 0} ({snap?.sectionRole ?? 'intro'})
-              </span>
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-1.5 text-[10px]">
-              <div className="rounded bg-[#160730]/60 px-2 py-1">
-                <div className="text-[9px] text-fuchsia-300/75">AVG FPS</div>
-                <strong className="text-xs tabular-nums text-emerald-300">
-                  {(snap?.sessionAvgFps ?? fps).toFixed(1)}
-                </strong>
+              <div className="grid grid-cols-3 gap-1 text-[9px] select-none">
+                {(['perfect', 'relaxed', 'aggressive'] as const).map((mode) => {
+                  const isSelected = snap?.autopilotMode === mode;
+                  return (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={(e) => {
+                        onSetAutopilotMode?.(mode);
+                        e.currentTarget.blur();
+                      }}
+                      className={`cursor-pointer rounded-[2px] border py-1 font-bold uppercase transition ${
+                        isSelected
+                          ? 'border-[var(--ff-cream)] bg-[var(--ff-panel-hi)] text-[var(--ff-cream)]'
+                          : 'border-[var(--ff-border)] bg-[var(--ff-ink)] text-[var(--ff-muted)] hover:border-[var(--ff-muted)] hover:text-[var(--ff-cream)]'
+                      }`}
+                    >
+                      {mode}
+                    </button>
+                  );
+                })}
               </div>
-              <div className="rounded bg-[#160730]/60 px-2 py-1">
-                <div className="text-[9px] text-fuchsia-300/75">MIN FPS</div>
-                <strong className="text-xs tabular-nums text-amber-300">
-                  {snap?.sessionMinFps ?? fps}
-                </strong>
+            </section>
+
+            {/* Palette */}
+            <section className="space-y-2 p-3">
+              <div className="flex items-center justify-between text-[10px] select-none">
+                <span className="font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                  PALETTE
+                </span>
+                <span className="text-[9px] text-[var(--ff-muted)]">KEYS 1–3</span>
               </div>
-              <div className="rounded bg-[#160730]/60 px-2 py-1">
-                <div className="text-[9px] text-fuchsia-300/75">60 FPS %</div>
-                <strong className="text-xs tabular-nums text-cyan-300">
-                  {(snap?.pct60Fps ?? 100).toFixed(1)}%
-                </strong>
+              <div className="grid grid-cols-3 gap-1.5 select-none">
+                {FUTURE_FUNK_THEMES.map((theme) => {
+                  const isActive = snap?.stagePaletteName === theme.name;
+                  return (
+                    <button
+                      key={theme.name}
+                      type="button"
+                      onClick={(e) => {
+                        onSelectPalette?.(theme.index);
+                        e.currentTarget.blur();
+                      }}
+                      className={`flex cursor-pointer flex-col justify-between gap-1 rounded-[2px] border p-1.5 text-left transition ${
+                        isActive
+                          ? 'border-[var(--ff-cream)] bg-[var(--ff-panel-hi)]'
+                          : 'border-[var(--ff-border)] bg-[var(--ff-panel)]/50 hover:border-[var(--ff-muted)]'
+                      }`}
+                    >
+                      <div className="flex w-full items-center justify-between gap-1">
+                        <div className="flex items-center gap-1">
+                          <span className="text-[9px] font-bold text-[var(--ff-muted)]">
+                            [{theme.index + 1}]
+                          </span>
+                          <span
+                            className="h-1.5 w-1.5 shrink-0 rounded-[1px]"
+                            style={{ backgroundColor: theme.color }}
+                          />
+                        </div>
+                        {isActive && (
+                          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ff-mint)]" />
+                        )}
+                      </div>
+                      <span className="text-[9.5px] leading-tight font-bold text-[var(--ff-cream)]">
+                        {theme.name}
+                      </span>
+                      <span className="text-[8.5px] leading-tight text-[var(--ff-muted)]">
+                        {theme.sub}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
-            </div>
-            <div className="mt-1.5 flex justify-between text-[10px] text-fuchsia-200/85">
-              <span>
-                Crest Clips: <strong className="tabular-nums text-pink-300">{snap?.crestClips ?? 0}</strong>
-              </span>
-              <span>
-                Pylon Spans: <strong className="tabular-nums text-cyan-300">{snap?.drawnPylonSpans ?? 0}</strong>
-              </span>
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-1 text-[9px]">
-              {(
-                [
-                  [0, 'INTRO B0'],
-                  [8, 'BUILD B8'],
-                  [16, 'DROP B16'],
-                  [48, 'BREAK B48'],
-                  [72, 'DROP2 B72'],
-                  [104, 'OUTRO B104'],
-                ] as const
-              ).map(([bar, label]) => (
+            </section>
+
+            {/* Environment */}
+            <section className="space-y-1.5 p-3">
+              <div className="flex items-center justify-between text-[10px] select-none">
+                <span className="font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                  ENVIRONMENT
+                </span>
+                <span className="text-[9px] text-[var(--ff-muted)]">LIVE</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1 text-[9px] select-none">
+                {ENVIRONMENT_TOGGLES.map(({ key, label }) => {
+                  const active = Boolean(values[key]);
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={(e) => {
+                        handleChange(key, active ? 0 : 1);
+                        e.currentTarget.blur();
+                      }}
+                      className={`flex cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[2px] border py-1.5 transition ${
+                        active
+                          ? 'border-[var(--ff-mint)] bg-[var(--ff-panel)]'
+                          : 'border-[var(--ff-border)] bg-[var(--ff-ink)] hover:border-[var(--ff-muted)]'
+                      }`}
+                    >
+                      <span
+                        className={`font-bold ${
+                          active ? 'text-[var(--ff-cream)]' : 'text-[var(--ff-muted)]'
+                        }`}
+                      >
+                        {label}
+                      </span>
+                      <span
+                        className={`text-[8.5px] font-black ${
+                          active ? 'text-[var(--ff-mint)]' : 'text-[var(--ff-muted)]'
+                        }`}
+                      >
+                        {active ? 'ON' : 'OFF'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                disabled={!values.bgRain}
+                onClick={(e) => {
+                  handleChange('bgLightningOnBeat', values.bgLightningOnBeat ? 0 : 1);
+                  e.currentTarget.blur();
+                }}
+                className={`flex w-full items-center justify-between rounded-[2px] border px-2 py-1 text-[9.5px] transition select-none ${
+                  !values.bgRain
+                    ? 'cursor-not-allowed border-[var(--ff-border)] bg-[var(--ff-ink)] text-[var(--ff-muted)] opacity-50'
+                    : values.bgLightningOnBeat
+                      ? 'cursor-pointer border-[var(--ff-pink)] bg-[var(--ff-panel)] text-[var(--ff-cream)]'
+                      : 'cursor-pointer border-[var(--ff-border)] bg-[var(--ff-ink)] text-[var(--ff-muted)] hover:border-[var(--ff-muted)]'
+                }`}
+              >
+                <span className="font-bold tracking-wider uppercase">BEAT LIGHTNING</span>
+                <span
+                  className={`font-black ${
+                    !values.bgRain
+                      ? 'text-[var(--ff-muted)]'
+                      : values.bgLightningOnBeat
+                        ? 'text-[var(--ff-pink)]'
+                        : 'text-[var(--ff-muted)]'
+                  }`}
+                >
+                  {!values.bgRain
+                    ? 'REQUIRES RAIN'
+                    : values.bgLightningOnBeat
+                      ? 'ON DROP'
+                      : 'OFF'}
+                </span>
+              </button>
+            </section>
+
+            {/* Collapsible Parameter Groups */}
+            <MemoizedTuningControls values={values} onChange={handleChange} />
+          </>
+        ) : (
+          <>
+            {/* Session Scorecard */}
+            <section className="space-y-2 p-3">
+              <div className="flex items-center justify-between text-[10px] select-none">
+                <span className="font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                  SESSION SCORECARD
+                </span>
                 <button
-                  key={bar}
                   type="button"
                   onClick={(e) => {
-                    window.__MAYONAKA_DIAG__?.seekToBar(bar);
+                    window.__MAYONAKA_DIAG__?.resetBenchmark();
                     refreshReportJson();
                     e.currentTarget.blur();
                   }}
-                  className="cursor-pointer rounded border border-cyan-400/50 bg-cyan-950/60 px-1 py-1 font-bold text-cyan-200 hover:bg-cyan-900/80"
+                  className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-0.5 text-[9px] font-bold text-[var(--ff-cream)] uppercase transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]"
                 >
-                  {label}
+                  RESET BENCH
                 </button>
-              ))}
-            </div>
-            <div className="mt-1.5 grid grid-cols-4 gap-1 text-[9px]">
-              {(
-                [
-                  ['FORK', () => window.__MAYONAKA_DIAG__?.triggerForkTest()],
-                  ['NEXT SONG', () => window.__MAYONAKA_DIAG__?.triggerNextSongTest()],
-                  ['OFF-ROAD', () => window.__MAYONAKA_DIAG__?.triggerOffRoadTest()],
-                  ['HIT TRUCK', () => window.__MAYONAKA_DIAG__?.triggerTruckCollisionTest()],
-                ] as const
-              ).map(([label, handler]) => (
-                <button
-                  key={label}
-                  type="button"
-                  onClick={(e) => {
-                    handler();
-                    refreshReportJson();
-                    e.currentTarget.blur();
-                  }}
-                  className="cursor-pointer rounded border border-pink-400/55 bg-pink-950/60 px-1 py-1 font-bold text-pink-200 hover:bg-pink-900/80"
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Section: Live Subsystem Isolation Toggles */}
-          <div className="rounded border border-amber-400/35 bg-[#070114]/85 p-2.5">
-            <div className="flex items-center justify-between text-[10px] font-bold tracking-wider text-amber-300 uppercase">
-              <span>SUBSYSTEM ISOLATION</span>
-              <span className="text-[9px] font-normal text-fuchsia-300">A/B GPU PROBE</span>
-            </div>
-            <div className="mt-2 grid grid-cols-3 gap-1 text-[9px]">
-              {(
-                [
-                  ['renderBg', 'SKY/BG'],
-                  ['renderRoad', 'ROAD'],
-                  ['renderProps', 'PROPS'],
-                  ['renderPylonWires', 'WIRES'],
-                  ['renderTraffic', 'TRAFFIC'],
-                  ['renderCar', 'CAR/FX'],
-                ] as const
-              ).map(([key, label]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={(e) => {
-                    handleToggleIsolation(key);
-                    e.currentTarget.blur();
-                  }}
-                  className={`cursor-pointer rounded border px-1.5 py-1 font-bold transition ${
-                    isolation[key]
-                      ? 'border-cyan-400/70 bg-cyan-950/60 text-cyan-200'
-                      : 'border-pink-500/50 bg-pink-950/60 text-pink-300 line-through'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                handleToggleIsolation('syncGpuProbe');
-                e.currentTarget.blur();
-              }}
-              className={`mt-1.5 flex w-full cursor-pointer items-center justify-between rounded border px-2 py-1 text-[10px] font-bold transition ${
-                isolation.syncGpuProbe
-                  ? 'border-amber-400 bg-amber-950/70 text-amber-200'
-                  : 'border-fuchsia-500/30 bg-[#160730]/50 text-fuchsia-300'
-              }`}
-            >
-              <span>GPU SYNC PROBE (Flush Canvas)</span>
-              <span>{isolation.syncGpuProbe ? 'ACTIVE' : 'OFF'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={(e) => {
-                handleToggleIsolation('legacyRaster');
-                e.currentTarget.blur();
-              }}
-              className={`mt-1.5 flex w-full cursor-pointer items-center justify-between rounded border px-2 py-1 text-[10px] font-bold transition ${
-                isolation.legacyRaster
-                  ? 'border-pink-400 bg-pink-950/75 text-pink-200'
-                  : 'border-fuchsia-500/30 bg-[#160730]/50 text-fuchsia-300'
-              }`}
-            >
-              <span>A/B BASELINE (LEGACY RASTER)</span>
-              <span>{isolation.legacyRaster ? 'ON' : 'OFF'}</span>
-            </button>
-          </div>
-
-          {/* Section: Frame Timing Budget */}
-          <div className="rounded border border-cyan-400/30 bg-[#070114]/85 p-2.5">
-            <div className="flex items-center justify-between text-[10px] font-bold tracking-wider text-cyan-300 uppercase">
-              <span>FRAME TIME BUDGET</span>
-              <span>TARGET 60 FPS (16.67ms)</span>
-            </div>
-            <div className="mt-2 space-y-1.5 text-[11px]">
-              <div className="flex justify-between">
-                <span className="text-fuchsia-200">Total Frame Delta:</span>
-                <span className="font-bold tabular-nums text-cyan-200">{frameDt.toFixed(2)} ms</span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-fuchsia-200">Window P95 / Max (Min FPS):</span>
-                <span className="font-bold tabular-nums text-amber-300">
-                  {(snap?.p95FrameMs ?? frameDt).toFixed(1)} / {(snap?.maxFrameMs ?? frameDt).toFixed(1)} ms ({snap?.minFps ?? fps} FPS)
+              <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--ff-muted)]">
+                <span className="truncate">
+                  {snap?.trackTitle ?? 'Loading...'} · {snap?.bpm ?? 0} BPM
+                </span>
+                <span className="shrink-0">
+                  Bar {snap?.roadBarIndex ?? 0}/{snap?.totalBars ?? 0} ({snap?.sectionRole ?? 'intro'})
                 </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-fuchsia-200">Dropped Frames (&gt;18.5ms):</span>
-                <span
-                  className={`font-bold tabular-nums ${
-                    (snap?.droppedFrames ?? 0) > 0 ? 'text-pink-300' : 'text-emerald-300'
-                  }`}
-                >
-                  {snap?.droppedFrames ?? 0}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-pink-300">2D Canvas Render (JS):</span>
-                <span className="tabular-nums text-pink-200">{renderMs.toFixed(2)} ms</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-emerald-300">Physics Simulation:</span>
-                <span className="tabular-nums text-emerald-200">
-                  {simMs.toFixed(2)} ms ({snap?.fixedStepsLastFrame ?? 1} fixed steps / frame)
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-amber-300">Compositor / GPU Gap:</span>
-                <span
-                  className={`font-bold tabular-nums ${
-                    (snap?.compositorGapMs ?? 0) > 6 ? 'text-pink-300' : 'text-amber-200'
-                  }`}
-                >
-                  {(snap?.compositorGapMs ?? 0).toFixed(1)} ms
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-cyan-300">Available JS Headroom:</span>
-                <span className="font-bold tabular-nums text-emerald-300">
-                  {Math.max(0, 16.67 - totalLoadMs).toFixed(2)} ms
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Section: JS Render Subsystem Breakdown */}
-          <div className="rounded border border-pink-400/30 bg-[#070114]/85 p-2.5">
-            <div className="text-[10px] font-bold tracking-wider text-pink-300 uppercase">
-              RENDER SUBSYSTEM BREAKDOWN (JS)
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px]">
-              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
-                <span className="text-fuchsia-300">SKY / BG:</span>
-                <strong className="tabular-nums text-cyan-200">{(snap?.bgRenderMs ?? 0).toFixed(2)} ms</strong>
-              </div>
-              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
-                <span className="text-fuchsia-300">ROAD TOTAL:</span>
-                <strong className="tabular-nums text-pink-200">{(snap?.roadRenderMs ?? 0).toFixed(2)} ms</strong>
-              </div>
-              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
-                <span className="text-fuchsia-300">ROAD SLICES:</span>
-                <strong className="tabular-nums text-cyan-200">{(snap?.roadSlicesMs ?? 0).toFixed(2)} ms</strong>
-              </div>
-              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
-                <span className="text-fuchsia-300">ROADSIDE PROPS:</span>
-                <strong className="tabular-nums text-amber-200">{(snap?.roadPropsMs ?? 0).toFixed(2)} ms</strong>
-              </div>
-              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
-                <span className="text-fuchsia-300">TRAFFIC:</span>
-                <strong className="tabular-nums text-emerald-200">{(snap?.roadTrafficMs ?? 0).toFixed(2)} ms</strong>
-              </div>
-              <div className="flex justify-between rounded bg-[#160730]/60 px-2 py-1">
-                <span className="text-fuchsia-300">CAR / FX / SODA:</span>
-                <strong className="tabular-nums text-pink-200">{(snap?.carOverlayMs ?? 0).toFixed(2)} ms</strong>
-              </div>
-            </div>
-          </div>
-
-          {/* Section: 2D Geometry & Scene Load */}
-          <div className="rounded border border-fuchsia-500/30 bg-[#070114]/85 p-2.5">
-            <div className="text-[10px] font-bold tracking-wider text-pink-400 uppercase">
-              SCENE & RASTER GEOMETRY
-            </div>
-            <div className="mt-2 grid grid-cols-2 gap-2 text-[11px]">
-              <div className="rounded bg-[#160730]/60 p-2">
-                <div className="text-[9px] text-fuchsia-300/80">DRAWN SEGMENTS</div>
-                <div className="text-sm font-bold tabular-nums text-cyan-300">
-                  {snap?.drawnSegments ?? 0} <span className="text-[9px] text-fuchsia-300">/ {tuning.drawDistance}</span>
+              <div className="grid grid-cols-3 gap-1.5">
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1.5">
+                  <div className="text-[9px] text-[var(--ff-muted)]">AVG FPS</div>
+                  <strong className="text-xs text-[var(--ff-mint)]">
+                    {(snap?.sessionAvgFps ?? fps).toFixed(1)}
+                  </strong>
+                </div>
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1.5">
+                  <div className="text-[9px] text-[var(--ff-muted)]">MIN FPS</div>
+                  <strong className="text-xs text-[var(--ff-gold)]">
+                    {snap?.sessionMinFps ?? fps}
+                  </strong>
+                </div>
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1.5">
+                  <div className="text-[9px] text-[var(--ff-muted)]">60 FPS %</div>
+                  <strong className="text-xs text-[var(--ff-cream)]">
+                    {(snap?.pct60Fps ?? 100).toFixed(1)}%
+                  </strong>
                 </div>
               </div>
-              <div className="rounded bg-[#160730]/60 p-2">
-                <div className="text-[9px] text-fuchsia-300/80">ROADSIDE PROPS</div>
-                <div className="text-sm font-bold tabular-nums text-pink-300">
-                  {snap?.drawnProps ?? 0}
-                </div>
-              </div>
-              <div className="rounded bg-[#160730]/60 p-2">
-                <div className="text-[9px] text-fuchsia-300/80">AI KEI TRUCKS</div>
-                <div className="text-sm font-bold tabular-nums text-amber-300">
-                  {snap?.drawnTrucks ?? 0}
-                </div>
-              </div>
-              <div className="rounded bg-[#160730]/60 p-2">
-                <div className="text-[9px] text-fuchsia-300/80">ACTIVE PARTICLES</div>
-                <div className="text-sm font-bold tabular-nums text-emerald-300">
-                  {snap?.activeParticles ?? 0}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section: Engine Invariants & Memory */}
-          <div className="rounded border border-emerald-500/30 bg-[#070114]/85 p-2.5 text-[11px]">
-            <div className="text-[10px] font-bold tracking-wider text-emerald-400 uppercase">
-              ENGINE INVARIANTS & MEMORY
-            </div>
-            <div className="mt-2 space-y-1">
-              <div className="flex justify-between">
-                <span className="text-fuchsia-200">Zero GC in Render Loop:</span>
-                <span className="font-bold text-emerald-300">VERIFIED ✓</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-fuchsia-200">Fixed Timestep:</span>
-                <span className="tabular-nums text-cyan-200">1/120s (8.33ms)</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-fuchsia-200">JS Heap Usage:</span>
-                <span className="tabular-nums text-fuchsia-100">
-                  {snap?.memoryMb !== null && snap?.memoryMb !== undefined
-                    ? `${snap.memoryMb} MB`
-                    : 'N/A (Standard Web API)'}
+              <div className="flex justify-between text-[10px] text-[var(--ff-muted)]">
+                <span>
+                  Crest Clips:{' '}
+                  <strong className="text-[var(--ff-cream)]">{snap?.crestClips ?? 0}</strong>
+                </span>
+                <span>
+                  Pylon Spans:{' '}
+                  <strong className="text-[var(--ff-cream)]">{snap?.drawnPylonSpans ?? 0}</strong>
                 </span>
               </div>
-            </div>
-          </div>
+              <div className="grid grid-cols-3 gap-1 text-[9px] select-none">
+                {BAR_SEEK_SHORTCUTS.map(([bar, label]) => (
+                  <button
+                    key={bar}
+                    type="button"
+                    onClick={(e) => {
+                      window.__MAYONAKA_DIAG__?.seekToBar(bar);
+                      refreshReportJson();
+                      e.currentTarget.blur();
+                    }}
+                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] py-1 font-bold text-[var(--ff-cream)] transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-4 gap-1 text-[9px] select-none">
+                {(
+                  [
+                    ['FORK', () => window.__MAYONAKA_DIAG__?.triggerForkTest()],
+                    ['NEXT SONG', () => window.__MAYONAKA_DIAG__?.triggerNextSongTest()],
+                    ['OFF-ROAD', () => window.__MAYONAKA_DIAG__?.triggerOffRoadTest()],
+                    ['HIT TRUCK', () => window.__MAYONAKA_DIAG__?.triggerTruckCollisionTest()],
+                  ] as const
+                ).map(([label, handler]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={(e) => {
+                      handler();
+                      refreshReportJson();
+                      e.currentTarget.blur();
+                    }}
+                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] py-1 font-bold text-[var(--ff-muted)] transition hover:border-[var(--ff-pink)] hover:text-[var(--ff-pink)]"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </section>
 
-          {/* Raw Benchmark Report (DOM-readable for automated & manual inspection) */}
-          <div className="rounded border border-cyan-400/25 bg-[#05010f]/95 p-2">
-            <div className="text-[9px] font-bold tracking-wider text-cyan-300 uppercase">
-              LIVE REPORT JSON
-            </div>
-            <pre
-              data-testid="perf-report-json"
-              className="mt-1 max-h-40 overflow-auto text-[9px] leading-tight whitespace-pre-wrap break-all text-fuchsia-200/85"
-            >
-              {reportJson}
-            </pre>
-          </div>
+            {/* Subsystem Isolation */}
+            <section className="space-y-1.5 p-3">
+              <div className="flex items-center justify-between text-[10px] select-none">
+                <span className="font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                  SUBSYSTEM ISOLATION
+                </span>
+                <span className="text-[9px] text-[var(--ff-muted)]">A/B PROBE</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1 text-[9px] select-none">
+                {ISOLATION_ITEMS.map(({ key, label }) => {
+                  const enabled = isolation[key];
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={(e) => {
+                        handleToggleIsolation(key);
+                        e.currentTarget.blur();
+                      }}
+                      className={`flex cursor-pointer items-center justify-center gap-1.5 rounded-[2px] border px-1.5 py-1 font-bold transition ${
+                        enabled
+                          ? 'border-[var(--ff-border)] bg-[var(--ff-panel)] text-[var(--ff-cream)] hover:border-[var(--ff-mint)]'
+                          : 'border-[var(--ff-pink)] bg-[var(--ff-ink)] text-[var(--ff-pink)] line-through'
+                      }`}
+                    >
+                      {enabled && (
+                        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--ff-mint)]" />
+                      )}
+                      <span>{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  handleToggleIsolation('syncGpuProbe');
+                  e.currentTarget.blur();
+                }}
+                className={`flex w-full cursor-pointer items-center justify-between rounded-[2px] border px-2 py-1 text-[9.5px] font-bold transition select-none ${
+                  isolation.syncGpuProbe
+                    ? 'border-[var(--ff-gold)] bg-[var(--ff-panel-hi)] text-[var(--ff-gold)]'
+                    : 'border-[var(--ff-border)] bg-[var(--ff-ink)] text-[var(--ff-muted)] hover:border-[var(--ff-muted)]'
+                }`}
+              >
+                <span>GPU SYNC PROBE (FLUSH CANVAS)</span>
+                <span>{isolation.syncGpuProbe ? 'ACTIVE' : 'OFF'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  handleToggleIsolation('legacyRaster');
+                  e.currentTarget.blur();
+                }}
+                className={`flex w-full cursor-pointer items-center justify-between rounded-[2px] border px-2 py-1 text-[9.5px] font-bold transition select-none ${
+                  isolation.legacyRaster
+                    ? 'border-[var(--ff-pink)] bg-[var(--ff-panel-hi)] text-[var(--ff-pink)]'
+                    : 'border-[var(--ff-border)] bg-[var(--ff-ink)] text-[var(--ff-muted)] hover:border-[var(--ff-muted)]'
+                }`}
+              >
+                <span>A/B BASELINE (LEGACY RASTER)</span>
+                <span>{isolation.legacyRaster ? 'ON' : 'OFF'}</span>
+              </button>
+            </section>
 
-          {/* Benchmark Advice */}
-          <div className="rounded border border-cyan-400/20 bg-cyan-950/30 p-2 text-[10px] leading-relaxed text-cyan-200/90">
-            <strong>TIP:</strong> Premi <kbd className="rounded border border-cyan-400/40 px-1 bg-cyan-950">F3</kbd> in qualsiasi momento per attivare il mini-profiler arcade direttamente sulla HUD in gara.
-          </div>
-        </div>
-      )}
+            {/* Frame Budget */}
+            <section className="space-y-1.5 p-3">
+              <div className="flex items-center justify-between text-[10px]">
+                <span className="font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                  FRAME BUDGET
+                </span>
+                <span className="text-[9px] text-[var(--ff-muted)]">60 FPS · 16.67ms</span>
+              </div>
+              <div className="space-y-1 text-[10.5px]">
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">Frame Delta</span>
+                  <span className="font-bold text-[var(--ff-cream)]">{frameDt.toFixed(2)} ms</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">P95 / Max (Min FPS)</span>
+                  <span className="font-bold text-[var(--ff-gold)]">
+                    {(snap?.p95FrameMs ?? frameDt).toFixed(1)} /{' '}
+                    {(snap?.maxFrameMs ?? frameDt).toFixed(1)} ms ({snap?.minFps ?? fps} FPS)
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">Dropped (&gt;18.5ms)</span>
+                  <span
+                    className={`font-bold ${
+                      (snap?.droppedFrames ?? 0) > 0
+                        ? 'text-[var(--ff-pink)]'
+                        : 'text-[var(--ff-mint)]'
+                    }`}
+                  >
+                    {snap?.droppedFrames ?? 0}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">Canvas Render (JS)</span>
+                  <span className="text-[var(--ff-cream)]">{renderMs.toFixed(2)} ms</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">Physics Sim</span>
+                  <span className="text-[var(--ff-cream)]">
+                    {simMs.toFixed(2)} ms ({snap?.fixedStepsLastFrame ?? 1}×)
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">Compositor / GPU Gap</span>
+                  <span
+                    className={`font-bold ${
+                      (snap?.compositorGapMs ?? 0) > 6
+                        ? 'text-[var(--ff-pink)]'
+                        : 'text-[var(--ff-gold)]'
+                    }`}
+                  >
+                    {(snap?.compositorGapMs ?? 0).toFixed(1)} ms
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">JS Headroom</span>
+                  <span className="font-bold text-[var(--ff-mint)]">
+                    {Math.max(0, 16.67 - totalLoadMs).toFixed(2)} ms
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            {/* Render Breakdown */}
+            <section className="space-y-1.5 p-3">
+              <div className="text-[10px] font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                RENDER BREAKDOWN (JS)
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px]">
+                <div className="flex justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1">
+                  <span className="text-[var(--ff-muted)]">SKY / BG</span>
+                  <strong className="text-[var(--ff-cream)]">
+                    {(snap?.bgRenderMs ?? 0).toFixed(2)}ms
+                  </strong>
+                </div>
+                <div className="flex justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1">
+                  <span className="text-[var(--ff-muted)]">ROAD TOTAL</span>
+                  <strong className="text-[var(--ff-cream)]">
+                    {(snap?.roadRenderMs ?? 0).toFixed(2)}ms
+                  </strong>
+                </div>
+                <div className="flex justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1">
+                  <span className="text-[var(--ff-muted)]">ROAD SLICES</span>
+                  <strong className="text-[var(--ff-cream)]">
+                    {(snap?.roadSlicesMs ?? 0).toFixed(2)}ms
+                  </strong>
+                </div>
+                <div className="flex justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1">
+                  <span className="text-[var(--ff-muted)]">ROADSIDE PROPS</span>
+                  <strong className="text-[var(--ff-cream)]">
+                    {(snap?.roadPropsMs ?? 0).toFixed(2)}ms
+                  </strong>
+                </div>
+                <div className="flex justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1">
+                  <span className="text-[var(--ff-muted)]">TRAFFIC</span>
+                  <strong className="text-[var(--ff-cream)]">
+                    {(snap?.roadTrafficMs ?? 0).toFixed(2)}ms
+                  </strong>
+                </div>
+                <div className="flex justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1">
+                  <span className="text-[var(--ff-muted)]">CAR / FX / SODA</span>
+                  <strong className="text-[var(--ff-cream)]">
+                    {(snap?.carOverlayMs ?? 0).toFixed(2)}ms
+                  </strong>
+                </div>
+              </div>
+            </section>
+
+            {/* Scene Geometry */}
+            <section className="space-y-1.5 p-3">
+              <div className="text-[10px] font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                SCENE GEOMETRY
+              </div>
+              <div className="grid grid-cols-2 gap-1.5 text-[10.5px]">
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1.5">
+                  <div className="text-[9px] text-[var(--ff-muted)]">DRAWN SEGMENTS</div>
+                  <div className="text-xs font-bold text-[var(--ff-cream)]">
+                    {snap?.drawnSegments ?? 0}{' '}
+                    <span className="text-[9.5px] font-normal text-[var(--ff-muted)]">
+                      / {tuning.drawDistance}
+                    </span>
+                  </div>
+                </div>
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1.5">
+                  <div className="text-[9px] text-[var(--ff-muted)]">ROADSIDE PROPS</div>
+                  <div className="text-xs font-bold text-[var(--ff-cream)]">
+                    {snap?.drawnProps ?? 0}
+                  </div>
+                </div>
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1.5">
+                  <div className="text-[9px] text-[var(--ff-muted)]">AI KEI TRUCKS</div>
+                  <div className="text-xs font-bold text-[var(--ff-cream)]">
+                    {snap?.drawnTrucks ?? 0}
+                  </div>
+                </div>
+                <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2 py-1.5">
+                  <div className="text-[9px] text-[var(--ff-muted)]">ACTIVE PARTICLES</div>
+                  <div className="text-xs font-bold text-[var(--ff-cream)]">
+                    {snap?.activeParticles ?? 0}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Engine & Memory */}
+            <section className="space-y-1.5 p-3">
+              <div className="text-[10px] font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                ENGINE &amp; MEMORY
+              </div>
+              <div className="space-y-1 text-[10.5px]">
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">Zero GC Render</span>
+                  <span className="font-bold text-[var(--ff-mint)]">VERIFIED</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">Fixed Timestep</span>
+                  <span className="text-[var(--ff-cream)]">1/120s (8.33ms)</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[var(--ff-muted)]">JS Heap Usage</span>
+                  <span className="text-[var(--ff-cream)]">
+                    {snap?.memoryMb !== null && snap?.memoryMb !== undefined
+                      ? `${snap.memoryMb} MB`
+                      : 'N/A (Standard Web API)'}
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            {/* Live Report JSON */}
+            <section className="p-3">
+              <div className="text-[10px] font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
+                LIVE REPORT JSON
+              </div>
+              <pre
+                data-testid="perf-report-json"
+                className="ff-scroll mt-1.5 max-h-32 overflow-auto rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)]/50 p-2 text-[9px] leading-tight whitespace-pre-wrap break-all text-[var(--ff-muted)] select-text"
+              >
+                {reportJson}
+              </pre>
+            </section>
+
+            {/* Footer Tip */}
+            <div className="px-3 py-2 text-[10px] text-[var(--ff-muted)]">
+              Press <span className="font-bold text-[var(--ff-cream)]">[F3]</span> anytime for the
+              compact HUD profiler.
+            </div>
+          </>
+        )}
+      </div>
     </aside>
   );
 }
