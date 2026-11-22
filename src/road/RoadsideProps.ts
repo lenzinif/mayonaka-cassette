@@ -1442,6 +1442,14 @@ function drawPhonebooth(
   const left = Math.round(x - w * 0.5);
   const topY = Math.round(y - h);
 
+  if (ppu < 0.006) {
+    ctx.fillStyle = '#181b29';
+    ctx.fillRect(left, topY, w, h);
+    ctx.fillStyle = 'rgba(0, 245, 212, 0.45)';
+    ctx.fillRect(left + 1, topY + 1, Math.max(1, w - 2), Math.max(2, Math.round(h * 0.65)));
+    return;
+  }
+
   // Ground shadow
   ctx.fillStyle = 'rgba(8, 2, 20, 0.45)';
   ctx.fillRect(left - 1, y - 1, w + 2, Math.max(2, Math.round(h * 0.05)));
@@ -1812,6 +1820,21 @@ function drawSuspensionTower(
       : isCyberTitanium
         ? '#2c254d'
         : '#4a1572';
+
+  // Distant Low LOD: compact 2-tower + 2-beam + 2-beacon silhouette
+  if (spanW < 48) {
+    ctx.fillStyle = colPrimary;
+    ctx.fillRect(leftX, topY, legW, towerH);
+    ctx.fillRect(rightX, topY, legW, towerH);
+    ctx.fillStyle = colTruss;
+    const beamH = Math.max(1, Math.round(towerH * 0.08));
+    ctx.fillRect(leftX, topY + Math.round(towerH * 0.14), spanW, beamH);
+    ctx.fillRect(leftX, topY + Math.round(towerH * 0.5), spanW, beamH);
+    ctx.fillStyle = colSecondary;
+    ctx.fillRect(leftX, topY, Math.max(2, legW), 2);
+    ctx.fillRect(rightX, topY, Math.max(2, legW), 2);
+    return;
+  }
 
   // 1. Dual Vertical Tapered Towers (Left & Right legs)
   // Drawn with 5 alternating horizontal safety/aviation bands
@@ -2204,7 +2227,7 @@ function drawPylon(
   const isAtmospheric = fogFactor >= 0.55;
 
   // Distant Low LOD: compact 3-rect tower silhouette
-  if (h < 38) {
+  if (h < 56) {
     ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : PYLON_STEEL;
     ctx.fillRect(rx - 1, topY + Math.round(h * 0.2), 2, Math.round(h * 0.8));
     ctx.fillStyle = isAtmospheric ? activeAtmosphereSilhouette : PYLON_STEEL_LIGHT;
@@ -2313,6 +2336,15 @@ function drawPylon(
   ctx.lineTo(rightHornX, hornTipY + trussH);
   ctx.lineTo(Math.round(rx + vTopW * 0.5), vTopY);
   ctx.fill();
+
+  // Mid-LOD: skip fine insulator strings and clamps when mid-distance
+  if (h < 85) {
+    ctx.fillStyle = PYLON_BEACON;
+    ctx.fillRect(rx - 1, topY, 2, 2);
+    ctx.fillRect(leftHornX - 1, hornTipY - 1, 2, 2);
+    ctx.fillRect(rightHornX - 1, hornTipY - 1, 2, 2);
+    return;
+  }
 
   // --- INSULATOR STRINGS (5 attachment points) ---
   const insH = Math.max(3, Math.round(h * 0.08));
@@ -2655,6 +2687,14 @@ function drawKiosk(
   const topY = Math.round(y - h);
   const v = Math.abs(variant) % 3;
 
+  if (ppu < 0.006) {
+    ctx.fillStyle = '#181326';
+    ctx.fillRect(left, topY, w, h);
+    ctx.fillStyle = v === 0 ? '#ffd166' : v === 1 ? '#00f5d4' : '#ff4d6d';
+    ctx.fillRect(left, topY, w, Math.max(2, Math.round(h * 0.28)));
+    return;
+  }
+
   // Warm ground light pool
   if (w >= 8) {
     ctx.fillStyle = 'rgba(255, 200, 100, 0.25)';
@@ -2734,6 +2774,14 @@ function drawBench(
   const topY = Math.round(y - h);
   const v = Math.abs(variant) % 3;
 
+  if (ppu < 0.006) {
+    ctx.fillStyle = v === 1 ? '#0077b6' : v === 2 ? '#2a9d8f' : '#8d5b4c';
+    ctx.fillRect(left, topY, w, h);
+    ctx.fillStyle = '#100d1c';
+    ctx.fillRect(left + 1, y - 1, Math.max(1, w - 2), 1);
+    return;
+  }
+
   // Ground shadow
   ctx.fillStyle = 'rgba(8, 2, 20, 0.45)';
   ctx.fillRect(left - 1, y - 1, w + 2, Math.max(1, Math.round(h * 0.18)));
@@ -2775,6 +2823,14 @@ function drawBusStop(
   const h = Math.max(8, Math.round(2800 * ppu));
   const left = Math.round(x - w * 0.5);
   const topY = Math.round(y - h);
+
+  if (ppu < 0.006) {
+    ctx.fillStyle = '#151224';
+    ctx.fillRect(left, topY, w, h);
+    ctx.fillStyle = 'rgba(0, 245, 212, 0.55)';
+    ctx.fillRect(left, topY, w, Math.max(2, Math.round(h * 0.16)));
+    return;
+  }
 
   // Ground shadow & illuminated pool
   ctx.fillStyle = 'rgba(0, 245, 212, 0.22)';
@@ -2854,6 +2910,18 @@ function drawCanopy(
   const topY = Math.round(y - h);
   const v = Math.abs(variant) % 3;
 
+  if (ppu < 0.006) {
+    const roofH = Math.max(3, Math.round(h * 0.22));
+    ctx.fillStyle = '#251c3a';
+    ctx.fillRect(left, topY, w, roofH);
+    ctx.fillStyle = v === 0 ? '#00f5d4' : v === 1 ? '#ff007f' : '#ffd166';
+    ctx.fillRect(left, topY, w, Math.max(1, Math.round(roofH * 0.45)));
+    ctx.fillStyle = '#181326';
+    ctx.fillRect(left + Math.round(w * 0.12), topY + roofH, Math.max(1, Math.round(w * 0.05)), h - roofH);
+    ctx.fillRect(left + Math.round(w * 0.83), topY + roofH, Math.max(1, Math.round(w * 0.05)), h - roofH);
+    return;
+  }
+
   // Illuminated bay under canopy
   ctx.fillStyle = 'rgba(255, 255, 240, 0.18)';
   ctx.fillRect(left, y - 2, w, Math.max(2, Math.round(h * 0.14)));
@@ -2896,6 +2964,15 @@ function drawTorii(
   const h = Math.max(8, Math.round(3400 * ppu));
   const left = Math.round(x - w * 0.5);
   const topY = Math.round(y - h);
+
+  if (ppu < 0.006) {
+    const pillarW = Math.max(1, Math.round(w * 0.14));
+    ctx.fillStyle = Math.abs(variant) % 2 === 0 ? '#d90429' : '#e63946';
+    ctx.fillRect(left, topY, w, Math.max(2, Math.round(h * 0.14)));
+    ctx.fillRect(left + Math.round(w * 0.18), topY + 1, pillarW, h - 1);
+    ctx.fillRect(left + Math.round(w * 0.82) - pillarW, topY + 1, pillarW, h - 1);
+    return;
+  }
 
   // Ground shadow
   ctx.fillStyle = 'rgba(8, 2, 20, 0.45)';
@@ -2960,6 +3037,19 @@ function drawToro(
   const stoneDark = isSlate ? '#1e1c28' : '#272233';
   const stoneMed = isSlate ? '#383247' : '#443c54';
   const stoneLight = isSlate ? '#564f69' : '#685f7d';
+
+  if (ppu < 0.006) {
+    ctx.fillStyle = stoneMed;
+    ctx.fillRect(left, y - h, w, h);
+    ctx.fillStyle = '#ffbe0b';
+    ctx.fillRect(
+      left + Math.floor(w * 0.25),
+      y - Math.round(h * 0.72),
+      Math.max(1, Math.round(w * 0.5)),
+      Math.max(1, Math.round(h * 0.22)),
+    );
+    return;
+  }
 
   // Warm candle light pool on ground
   if (w >= 4) {

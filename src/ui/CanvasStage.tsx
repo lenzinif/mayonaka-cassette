@@ -48,7 +48,7 @@ export function CanvasStage({
       step: SIM_STEP,
       maxFrameDt: MAX_FRAME_DT,
       update: game.update,
-      render: (alpha, fps) => game.render(ctx, alpha, fps),
+      render: (alpha, fps, rafNow) => game.render(ctx, alpha, fps, rafNow),
     });
 
     game.onTimingReset = () => {

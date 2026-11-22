@@ -357,14 +357,14 @@ describe('RoadRenderer — Rendering Environments', () => {
     const renderer = new RoadRenderer();
     const track = createTestTrack('standard');
 
-    // Create a gentle crest below horizon (crestTop seg 4 at worldY=300, seg 8 dips to 0)
+    // Create a genuine crest below horizon peaking across segs 4..5 (worldY=420) and dipping behind it to seg 8 (-480)
     // and place a tall building behind crest + two linked pylons so both crest clip & wire span trigger
+    const yAt = (idx: number) =>
+      idx <= 4 ? (idx / 4) * 420 : idx === 5 ? 420 : idx <= 8 ? 420 - (idx - 5) * 300 : -480;
     for (let i = 0; i < track.segments.length; i++) {
       const seg = track.segments[i]!;
-      const y = i <= 4 ? (i / 4) * 320 : i <= 8 ? 320 - (i - 4) * 160 : -320;
-      const y2 = i + 1 <= 4 ? ((i + 1) / 4) * 320 : i + 1 <= 8 ? 320 - (i + 1 - 4) * 160 : -320;
-      seg.p1.worldY = y;
-      seg.p2.worldY = y2;
+      seg.p1.worldY = yAt(i);
+      seg.p2.worldY = yAt(i + 1);
     }
     track.segments[8]!.sprites.push({ kind: 'building', offset: 2.0, variant: 0 });
     track.segments[6]!.sprites.push({ kind: 'pylon', offset: 3.2, variant: 0, chainId: 1 });
@@ -550,6 +550,92 @@ describe('RoadRenderer — Rendering Environments', () => {
     renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
     expect(renderer.stats.crestClips).toBeGreaterThan(0);
     expect(clipCalls).toBeGreaterThan(0);
+  });
+
+  it('skips ctx.clip() on a continuous rising bridge ramp without an occluding crest', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('bridge');
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      seg.p1.worldY = i * 250;
+      seg.p2.worldY = (i + 1) * 250;
+    }
+    track.segments[15]!.sprites.push({ kind: 'suspension-tower', offset: 0, variant: 0 });
+
+    let clipCalls = 0;
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      clip: () => {
+        clipCalls++;
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+    expect(renderer.stats.crestClips).toBe(0);
+    expect(clipCalls).toBe(0);
+  });
+
+  it('skips ctx.clip() when a standard ground hill crest precedes lower bridge segments', () => {
+    const renderer = new RoadRenderer();
+    const track = createTestTrack('standard');
+    for (let i = 0; i < track.segments.length; i++) {
+      const seg = track.segments[i]!;
+      seg.env = i >= 6 ? 'bridge' : 'standard';
+      const yOf = (idx: number) => {
+        if (idx <= 5) return Math.sin((idx / 5) * Math.PI * 0.5) * 2200;
+        if (idx <= 16) return 2200 - (idx - 5) * 700;
+        return 2200 - 11 * 700;
+      };
+      seg.p1.worldY = yOf(i);
+      seg.p2.worldY = yOf(i + 1);
+    }
+    track.segments[10]!.sprites.push({ kind: 'suspension-tower', offset: 0, variant: 0 });
+
+    let clipCalls = 0;
+    const noop = () => {};
+    const ctx = {
+      canvas: { width: 640, height: 360 },
+      fillStyle: '#000',
+      strokeStyle: '#000',
+      lineWidth: 1,
+      globalAlpha: 1,
+      save: noop,
+      restore: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      fill: noop,
+      stroke: noop,
+      fillRect: noop,
+      clip: () => {
+        clipCalls++;
+      },
+      createLinearGradient: () => ({ addColorStop: noop }),
+    } as unknown as CanvasRenderingContext2D;
+
+    renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+    expect(renderer.stats.crestClips).toBe(0);
+    expect(clipCalls).toBe(0);
   });
 
   describe('Fase 1 — Local Prop Category Fade-In', () => {

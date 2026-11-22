@@ -67,9 +67,11 @@ export class SongRoadSyncController {
       return carSpeed;
     }
 
+    const roadBarFloat =
+      track.barLengthWorld > 0 ? position / track.barLengthWorld : this.roadBarIndex;
     const paceFactor = getSectionPaceFactor(
       track,
-      this.roadBarIndex,
+      roadBarFloat,
       sectionRole,
       this.rollingStart,
     );
@@ -112,6 +114,11 @@ export class SongRoadSyncController {
 
     const baseMinScale = 1 - tuning.syncMaxSlowdown;
     const baseMaxScale = 1 + tuning.syncMaxSpeedup;
+    const roadBeat = worldZToBeat(track, position);
+    const lagBeats = audioBeatIndex - roadBeat;
+    const paceInv = paceFactor > 0 ? 1 / paceFactor : 1;
+    const rawScale = paceInv + lagBeats * tuning.syncElasticGain;
+    const continuousScale = Math.max(baseMinScale, Math.min(baseMaxScale, rawScale));
 
     if (hasNextAnchor) {
       const safeBpm = bpm > 0 ? bpm : 120;
@@ -131,19 +138,17 @@ export class SongRoadSyncController {
           minScale = baseMinScale * (1 - lockProximity) + 0.42 * lockProximity;
           maxScale = baseMaxScale * (1 - lockProximity) + 1.45 * lockProximity;
         }
-        const scale = Math.max(minScale, Math.min(maxScale, ratio));
-        return carSpeed * scale;
+        const anchorScale = Math.max(minScale, Math.min(maxScale, ratio));
+        if (this.anchorScratch.beatsRemaining > 28) {
+          const blend = Math.max(0, Math.min(1, (32 - this.anchorScratch.beatsRemaining) / 4));
+          return carSpeed * (continuousScale * (1 - blend) + anchorScale * blend);
+        }
+        return carSpeed * anchorScale;
       }
     }
 
     // 2. Continuous alignment between anchors
-    const roadBeat = worldZToBeat(track, position);
-    const lagBeats = audioBeatIndex - roadBeat;
-    const paceInv = paceFactor > 0 ? 1 / paceFactor : 1;
-    const rawScale = paceInv + lagBeats * tuning.syncElasticGain;
-    const scale = Math.max(baseMinScale, Math.min(baseMaxScale, rawScale));
-
-    return carSpeed * scale;
+    return carSpeed * continuousScale;
   }
 
   /**

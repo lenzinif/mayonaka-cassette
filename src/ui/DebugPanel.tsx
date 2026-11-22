@@ -313,8 +313,6 @@ export function DebugPanel({
   useEffect(() => {
     if (!open || tab !== 'profiler') return;
     refreshReportJson();
-    const id = window.setInterval(refreshReportJson, 1000);
-    return () => window.clearInterval(id);
   }, [open, tab, refreshReportJson]);
 
   const handleChange = useCallback((key: TuningKey, value: number) => {

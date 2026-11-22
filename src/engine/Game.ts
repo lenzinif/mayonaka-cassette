@@ -478,6 +478,7 @@ export class Game {
       void this.audio.pause();
     } else {
       void this.audio.resume();
+      this.benchmarkWarmupFrames = Math.max(this.benchmarkWarmupFrames, 2);
       this.lastRenderTimestamp = 0;
       this.onTimingReset?.();
     }
@@ -783,6 +784,7 @@ export class Game {
     for (let i = 0; i < 3; i++) {
       this.background.prewarmPalette(getStagePalette(i));
     }
+    this.prewarmNextLookaheadTrack();
     this.updateRoadProgressTelemetry();
   }
 
@@ -947,6 +949,7 @@ export class Game {
     }
 
     this.renderDirty = true;
+    this.prewarmNextLookaheadTrack();
     this.updateRoadProgressTelemetry();
     this.bridge.emit({
       type: 'songRoadGenerated',
@@ -988,6 +991,7 @@ export class Game {
     this.benchmarkWarmupFrames = 2;
     this.lastRenderTimestamp = 0;
     this.renderDirty = true;
+    this.prewarmNextLookaheadTrack();
     this.updateRoadProgressTelemetry();
     this.bridge.emit({
       type: 'songRoadGenerated',
@@ -1414,8 +1418,9 @@ export class Game {
     this.simTimeAccumMs += elapsed;
   };
 
-  render = (ctx: CanvasRenderingContext2D, alpha = 1, fps = 0): void => {
+  render = (ctx: CanvasRenderingContext2D, alpha = 1, fps = 0, rafNow?: number): void => {
     const t0 = performance.now();
+    const frameStamp = rafNow !== undefined && rafNow > 0 ? rafNow : t0;
     const isFirstRender = this.lastRenderTimestamp <= 0;
     this.lastFps = fps;
     if (!this.isPaused && this.lastRenderTimestamp > 0) {
@@ -1423,7 +1428,7 @@ export class Game {
         this.benchmarkWarmupFrames--;
         this.frameTimeMs = 16.67;
       } else {
-        const dt = Math.min(t0 - this.lastRenderTimestamp, 100);
+        const dt = Math.max(0, Math.min(frameStamp - this.lastRenderTimestamp, 100));
         this.frameTimeMs = this.frameTimeMs * 0.85 + dt * 0.15;
         this.frameDtHistory[this.frameDtCursor] = dt;
         this.frameDtCursor = (this.frameDtCursor + 1) % this.frameDtHistory.length;
@@ -1462,7 +1467,7 @@ export class Game {
     } else if (fps > 0 && this.lastRenderTimestamp <= 0) {
       this.frameTimeMs = 1000 / fps;
     }
-    this.lastRenderTimestamp = t0;
+    this.lastRenderTimestamp = frameStamp;
 
     // While paused, render once to paint the frozen scene + pause overlay, then skip redundant redraws
     if (this.isPaused && !this.renderDirty && this.lastRenderCtx === ctx) {
@@ -1640,6 +1645,24 @@ export class Game {
     this.bridge.emit({ type: 'forkChoiceChanged', choice, source });
   };
 
+  private prewarmNextLookaheadTrack(): void {
+    if (
+      this.hasCustomTrack ||
+      !this.library.hasNextTrack ||
+      !isSongTrack(this.track)
+    ) {
+      return;
+    }
+    const nextItem = this.library.nextTrackItem;
+    if (!nextItem) return;
+    if (!this.nextTrackCache || this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash) {
+      const nextTrack = generateSongRoad(nextItem.beatMap);
+      this.nextTrackCache = { contentHash: nextItem.beatMap.contentHash, track: nextTrack };
+      const nextPalette = getStagePalette(this.runManager.stageNumber);
+      this.background.prewarmPalette(nextPalette);
+    }
+  }
+
   private getNextLookaheadTrack(): SongTrack | undefined {
     if (
       this.hasCustomTrack ||
@@ -1660,12 +1683,11 @@ export class Game {
     }
 
     if (!this.nextTrackCache || this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash) {
-      const nextTrack = generateSongRoad(nextItem.beatMap);
-      this.nextTrackCache = { contentHash: nextItem.beatMap.contentHash, track: nextTrack };
-      const nextPalette = getStagePalette(this.runManager.stageNumber);
-      this.background.prewarmPalette(nextPalette);
+      this.prewarmNextLookaheadTrack();
     }
-    return this.nextTrackCache.track;
+    return this.nextTrackCache?.contentHash === nextItem.beatMap.contentHash
+      ? this.nextTrackCache.track
+      : undefined;
   }
 
   private updateForkState(): void {
@@ -1983,8 +2005,10 @@ export class Game {
   } {
     if (this.sessionFrames > 0 && this.sessionElapsedMs > 0) {
       const avgMs = this.sessionElapsedMs / this.sessionFrames;
+      const rawFps = 1000 / avgMs;
       return {
-        sessionAvgFps: Math.round((1000 / avgMs) * 10) / 10,
+        sessionAvgFps:
+          rawFps >= 59.85 && rawFps <= 60.15 ? 60 : Math.round(rawFps * 10) / 10,
         sessionMinFps:
           this.sessionFrames > 30 ? Math.round(this.sessionMinWindowFps) : this.lastFps || 60,
         sessionAvgFrameMs: avgMs,

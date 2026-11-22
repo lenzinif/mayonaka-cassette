@@ -1968,8 +1968,8 @@ export class Background {
       const layerAlpha = isNear ? 0.94 : 0.70;
 
       // Fast path: single GPU blit per cloud when pre-rendered offscreen canvas is available
-      if (offscreen && !isFlashing) {
-        ctx.globalAlpha = 0.88 * layerAlpha;
+      if (offscreen) {
+        ctx.globalAlpha = (isFlashing ? 0.96 : 0.88) * layerAlpha;
         ctx.drawImage(offscreen, drawX, drawY);
         ctx.globalAlpha = 1;
         continue;

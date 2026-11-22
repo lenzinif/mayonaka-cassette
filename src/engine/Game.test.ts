@@ -956,37 +956,38 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
     game.render(mockCtx, 1, 60);
   });
 
+  function createSimpleMockCtx(): CanvasRenderingContext2D {
+    const noop = () => {};
+    return {
+      canvas: { width: 640, height: 360 },
+      save: noop,
+      restore: noop,
+      fillRect: noop,
+      strokeRect: noop,
+      fillText: noop,
+      beginPath: noop,
+      closePath: noop,
+      moveTo: noop,
+      lineTo: noop,
+      quadraticCurveTo: noop,
+      arc: noop,
+      ellipse: noop,
+      rect: noop,
+      clip: noop,
+      fill: noop,
+      stroke: noop,
+      translate: noop,
+      rotate: noop,
+      scale: noop,
+      setTransform: noop,
+      setLineDash: noop,
+      createLinearGradient: () => ({ addColorStop: noop }),
+      createRadialGradient: () => ({ addColorStop: noop }),
+      drawImage: noop,
+    } as unknown as CanvasRenderingContext2D;
+  }
+
   describe('Fase 6 — Micro-FOV Dinamico', () => {
-    function createSimpleMockCtx(): CanvasRenderingContext2D {
-      const noop = () => {};
-      return {
-        canvas: { width: 640, height: 360 },
-        save: noop,
-        restore: noop,
-        fillRect: noop,
-        strokeRect: noop,
-        fillText: noop,
-        beginPath: noop,
-        closePath: noop,
-        moveTo: noop,
-        lineTo: noop,
-        quadraticCurveTo: noop,
-        arc: noop,
-        ellipse: noop,
-        rect: noop,
-        clip: noop,
-        fill: noop,
-        stroke: noop,
-        translate: noop,
-        rotate: noop,
-        scale: noop,
-        setTransform: noop,
-        setLineDash: noop,
-        createLinearGradient: () => ({ addColorStop: noop }),
-        createRadialGradient: () => ({ addColorStop: noop }),
-        drawImage: noop,
-      } as unknown as CanvasRenderingContext2D;
-    }
 
     it('keeps rendered FOV equal to tuning.fieldOfView at rest (speed = 0, LOW groove)', () => {
       tuning.fieldOfView = 100;
@@ -1100,6 +1101,68 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
       tuning.dynamicFovSpeedBonus = 4.0;
       tuning.dynamicFovOverdriveBonus = 3.5;
       tuning.dynamicFovBoostKick = 3.0;
+    });
+  });
+
+  describe('Frame pacing & lookahead prewarming', () => {
+    it('prewarms the next-track lookahead road on init and reuses it without mid-stage regeneration', () => {
+      const library = new TrackLibrary();
+      const game = new Game({ input: new FakeInput(), library });
+      const gameAcc = game as unknown as {
+        position: number;
+        nextTrackCache: { contentHash: string; track: unknown } | null;
+        activeNextTrackLookahead?: unknown;
+      };
+
+      expect(gameAcc.nextTrackCache).not.toBeNull();
+      expect(gameAcc.nextTrackCache!.contentHash).toBe(library.nextTrackItem!.beatMap.contentHash);
+      const prewarmedTrack = gameAcc.nextTrackCache!.track;
+
+      gameAcc.position = game.track.length - 10000;
+      game.update(1 / 60);
+      expect(gameAcc.activeNextTrackLookahead).toBe(prewarmedTrack);
+    });
+
+    it('uses rafNow timestamps, skips resume warmup frames, and normalizes 59.94 Hz avgFps to 60', () => {
+      const game = new Game({ input: new FakeInput() });
+      const ctx = createSimpleMockCtx();
+      const step5994Ms = 1000 / (60000 / 1001);
+
+      // Initial timestamp establishment + 5 frames at 59.94 Hz (16.6833 ms)
+      let t = 1000;
+      game.render(ctx, 1, 60, t);
+      for (let i = 0; i < 5; i++) {
+        t += step5994Ms;
+        game.render(ctx, 1, 60, t);
+      }
+
+      const initialReport = game.getBenchmarkReport();
+      expect(initialReport.session.frames).toBe(5);
+      expect(initialReport.session.avgFps).toBe(60);
+
+      // Pausing and resuming must discard the resume gap + 2 warmup frames
+      game.setPaused(true);
+      game.setPaused(false);
+      game.render(ctx, 1, 60, 5000);
+      game.render(ctx, 1, 60, 5050);
+      game.render(ctx, 1, 60, 5100);
+      game.render(ctx, 1, 60, 5100 + step5994Ms);
+
+      const postResumeReport = game.getBenchmarkReport();
+      expect(postResumeReport.session.frames).toBe(6);
+      expect(postResumeReport.session.maxFrameMs).toBeLessThan(18);
+      expect(postResumeReport.session.avgFps).toBe(60);
+
+      // Genuine sub-60 frame rates remain faithfully reported (reset sets 2 warmup frames)
+      game.resetPerfBenchmark();
+      game.render(ctx, 1, 48, 6000);
+      game.render(ctx, 1, 48, 6020.83);
+      game.render(ctx, 1, 48, 6041.66);
+      game.render(ctx, 1, 48, 6062.49);
+
+      const dropReport = game.getBenchmarkReport();
+      expect(dropReport.session.frames).toBe(1);
+      expect(dropReport.session.avgFps).toBeCloseTo(48, 1);
     });
   });
 });

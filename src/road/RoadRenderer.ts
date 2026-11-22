@@ -89,8 +89,8 @@ export interface RoadRenderStats {
  */
 export class RoadRenderer {
   private readonly visible: RoadSegment[] = new Array<RoadSegment>(MAX_DRAW_DISTANCE);
-  private readonly clipY = new Float32Array(MAX_DRAW_DISTANCE);
-  /** 1 when any nearer segment between camera and index `n` is a bridge (requiring stencil clip behind crests). */
+  private readonly clipY = new Float64Array(MAX_DRAW_DISTANCE);
+  /** 1 when the occluding horizon crest at index `n` is a bridge segment (requiring stencil clip behind crests). */
   private readonly clipNeedsStencil = new Uint8Array(MAX_DRAW_DISTANCE);
 
   // --- Phase 3 Power Line Chain State (Zero GC) ---
@@ -270,7 +270,7 @@ export class RoadRenderer {
     let x = 0;
     let dx = -(base.curve * basePercent);
     let maxy = height;
-    let seenBridge = isCameraOnBridge;
+    let crestIsBridge = isCameraOnBridge;
     for (let n = 0; n < drawDistance; n++) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
       const seg = isNextSeg
@@ -294,12 +294,9 @@ export class RoadRenderer {
       );
       x += dx;
       dx += seg.curve;
-      if (seg.env === 'bridge') {
-        seenBridge = true;
-      }
       this.visible[n] = seg;
       this.clipY[n] = maxy;
-      this.clipNeedsStencil[n] = seenBridge ? 1 : 0;
+      this.clipNeedsStencil[n] = crestIsBridge ? 1 : 0;
 
       if (
         seg.p1.cameraZ > cameraDepth &&
@@ -307,6 +304,7 @@ export class RoadRenderer {
         seg.p2.screenY < maxy
       ) {
         maxy = seg.p2.screenY;
+        crestIsBridge = seg.env === 'bridge';
       }
     }
 
@@ -535,6 +533,11 @@ export class RoadRenderer {
             fadeRatioSpan = 0.12;
             minRefPpu = 0.0095;
             fadePpuSpan = 0.004;
+          } else if (resolvedKind === 'building' && absOff >= 3.0 && absOff < 6.0) {
+            maxRatio = 0.78;
+            fadeRatioSpan = 0.14;
+            minRefPpu = 0.0055;
+            fadePpuSpan = 0.003;
           } else if (
             resolvedKind === 'sign' ||
             resolvedKind === 'lamp' ||
@@ -586,6 +589,10 @@ export class RoadRenderer {
         // Phase 3: Always register every visible pylon in the longitudinal wire chain regardless of lateral cull,
         // so catenary spans never pop off when the near tower slides past the viewport edge.
         if (resolvedKind === 'pylon' && s.chainId !== undefined && !view.skipPylonWires) {
+          if (!legacy && activeAlpha !== 1) {
+            ctx.globalAlpha = 1;
+            activeAlpha = 1;
+          }
           this.handlePylonChainWires(
             ctx,
             s,
@@ -626,7 +633,7 @@ export class RoadRenderer {
         if (
           !crestClipActive &&
           segClipY < height &&
-          p1.screenY > segClipY &&
+          p1.screenY > segClipY + 0.5 &&
           needsStencilClip &&
           typeof ctx.clip === 'function'
         ) {
@@ -741,7 +748,7 @@ export class RoadRenderer {
                   !truckClipActive &&
                   needsStencilClip &&
                   segClipY < height &&
-                  truckScreenY > segClipY &&
+                  truckScreenY > segClipY + 0.5 &&
                   typeof ctx.clip === 'function'
                 ) {
                   ctx.save();
@@ -842,98 +849,100 @@ export class RoadRenderer {
 
       // Connect all consecutive towers belonging to the same corridor run
       if (isCrossing || segDelta <= 200) {
-        ctx.strokeStyle = '#2d1c4a';
-        ctx.lineWidth = 1;
+        if (legacy || propPpu >= 0.0055) {
+          ctx.strokeStyle = '#2d1c4a';
+          ctx.lineWidth = 1;
 
-        const pOffset = slot * 10;
-        let drewAnyWire = false;
-        if (legacy) {
-          for (let k = 0; k < 5; k++) {
-            const xNear = this.currentPylonPoints[k * 2]!;
-            const yNear = this.currentPylonPoints[k * 2 + 1]!;
-            const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
-
-            drewAnyWire = true;
-            const dx = xFar - xNear;
-            const dy = yFar - yNear;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-
-            const sagRatio = isCrossing ? 0.05 : 0.09;
-            const sag = Math.max(1.5, dist * sagRatio);
-            const midX = (xNear + xFar) * 0.5;
-            const midY = (yNear + yFar) * 0.5 + sag;
-
-            ctx.beginPath();
-            ctx.moveTo(xNear, yNear);
-            ctx.quadraticCurveTo(midX, midY, xFar, yFar);
-            ctx.stroke();
-          }
-
-          if (drewAnyWire) {
-            this.stats.drawnPylonSpans++;
-          }
-
-          if (drewAnyWire && propPpu > 0.0035) {
-            ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+          const pOffset = slot * 10;
+          let drewAnyWire = false;
+          if (legacy) {
             for (let k = 0; k < 5; k++) {
               const xNear = this.currentPylonPoints[k * 2]!;
-              const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+              const yNear = this.currentPylonPoints[k * 2 + 1]!;
               const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
+              drewAnyWire = true;
               const dx = xFar - xNear;
               const dy = yFar - yNear;
               const dist = Math.sqrt(dx * dx + dy * dy);
+
               const sagRatio = isCrossing ? 0.05 : 0.09;
               const sag = Math.max(1.5, dist * sagRatio);
+              const midX = (xNear + xFar) * 0.5;
+              const midY = (yNear + yFar) * 0.5 + sag;
+
               ctx.beginPath();
               ctx.moveTo(xNear, yNear);
-              ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+              ctx.quadraticCurveTo(midX, midY, xFar, yFar);
               ctx.stroke();
             }
-          }
-        } else {
-          // Batched catenary wire draw: 1 beginPath + 5 quadratic curves + 1 stroke
-          ctx.beginPath();
-          for (let k = 0; k < 5; k++) {
-            const xNear = this.currentPylonPoints[k * 2]!;
-            const yNear = this.currentPylonPoints[k * 2 + 1]!;
-            const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-            const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
-            const dx = xFar - xNear;
-            const dy = yFar - yNear;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const sagRatio = isCrossing ? 0.05 : 0.09;
-            const sag = Math.max(1.5, dist * sagRatio);
-            const midX = (xNear + xFar) * 0.5;
-            const midY = (yNear + yFar) * 0.5 + sag;
+            if (drewAnyWire) {
+              this.stats.drawnPylonSpans++;
+            }
 
-            ctx.moveTo(xNear, yNear);
-            ctx.quadraticCurveTo(midX, midY, xFar, yFar);
-          }
-          ctx.stroke();
-          this.stats.drawnPylonSpans++;
+            if (drewAnyWire && propPpu > 0.0035) {
+              ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+              for (let k = 0; k < 5; k++) {
+                const xNear = this.currentPylonPoints[k * 2]!;
+                const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+                const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+                const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
 
-          if (propPpu > 0.018) {
-            ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+                const dx = xFar - xNear;
+                const dy = yFar - yNear;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const sagRatio = isCrossing ? 0.05 : 0.09;
+                const sag = Math.max(1.5, dist * sagRatio);
+                ctx.beginPath();
+                ctx.moveTo(xNear, yNear);
+                ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+                ctx.stroke();
+              }
+            }
+          } else {
+            // Batched catenary wire draw: 1 beginPath + 5 quadratic curves + 1 stroke
             ctx.beginPath();
             for (let k = 0; k < 5; k++) {
               const xNear = this.currentPylonPoints[k * 2]!;
-              const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+              const yNear = this.currentPylonPoints[k * 2 + 1]!;
               const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
               const dx = xFar - xNear;
               const dy = yFar - yNear;
               const dist = Math.sqrt(dx * dx + dy * dy);
               const sagRatio = isCrossing ? 0.05 : 0.09;
               const sag = Math.max(1.5, dist * sagRatio);
+              const midX = (xNear + xFar) * 0.5;
+              const midY = (yNear + yFar) * 0.5 + sag;
+
               ctx.moveTo(xNear, yNear);
-              ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+              ctx.quadraticCurveTo(midX, midY, xFar, yFar);
             }
             ctx.stroke();
+            this.stats.drawnPylonSpans++;
+
+            if (propPpu > 0.018) {
+              ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+              ctx.beginPath();
+              for (let k = 0; k < 5; k++) {
+                const xNear = this.currentPylonPoints[k * 2]!;
+                const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+                const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+                const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
+
+                const dx = xFar - xNear;
+                const dy = yFar - yNear;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                const sagRatio = isCrossing ? 0.05 : 0.09;
+                const sag = Math.max(1.5, dist * sagRatio);
+                ctx.moveTo(xNear, yNear);
+                ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+              }
+              ctx.stroke();
+            }
           }
         }
 

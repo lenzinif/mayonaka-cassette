@@ -316,10 +316,11 @@ export class TrafficManager {
     const trackLen = track.length;
     if (trackLen <= 0 || this.trucks.length === 0) return;
 
-    const srcStart = fromZ;
-    const srcEnd = fromZ + windowWorldSpan;
-    const destStart = fromZ + deltaZ;
-    const destEnd = fromZ + deltaZ + windowWorldSpan;
+    const segLen = track.segmentLength > 0 ? track.segmentLength : 200;
+    const srcStart = Math.floor(fromZ / segLen) * segLen;
+    const srcEnd = srcStart + windowWorldSpan;
+    const destStart = srcStart + deltaZ;
+    const destEnd = destStart + windowWorldSpan;
 
     for (let i = 0; i < this.trucks.length; i++) {
       const t = this.trucks[i]!;
