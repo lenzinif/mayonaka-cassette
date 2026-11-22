@@ -34,7 +34,7 @@ export interface BeatMap {
   beatsPerBar: 4;
   /** Smoothed normalised energy in [0, 1], one entry per bar. */
   barEnergy: number[];
-  /** Structural sections snapped to 4-bar boundaries. */
+  /** Structural sections with bar-exact drop onsets. */
   sections: BeatSection[];
   confidence: BeatConfidence;
   source: BeatMapSource;
@@ -184,8 +184,8 @@ export function withAdjustedBpm(map: BeatMap, newBpm: number): BeatMap {
     const sec = map.sections[i]!;
     const isLast = i === map.sections.length - 1;
     const scaledBars = isLast
-      ? Math.max(4, newBars - cursor)
-      : Math.max(4, Math.round((sec.bars * ratio) / 4) * 4);
+      ? Math.max(1, newBars - cursor)
+      : Math.max(1, Math.round(sec.bars * ratio));
     if (cursor < newBars) {
       const bars = Math.min(scaledBars, newBars - cursor);
       if (bars > 0) {

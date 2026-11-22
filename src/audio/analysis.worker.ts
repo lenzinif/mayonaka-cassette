@@ -1233,23 +1233,30 @@ function computeBarEnergyAndSections(
       );
     };
 
-    let bestBar = nominalBar;
-    let bestScore = transientScore(nominalBar);
+    const nominalScore =
+      transientScore(nominalBar) +
+      (isFirstDropSection && nominalBar === exactFirstDropBar ? 0.10 : 0);
+
+    let bestCandBar = nominalBar;
+    let bestCandScore = -Infinity;
 
     for (let b = minCandidate; b <= maxCandidate; b++) {
+      if (b === nominalBar) continue;
+      const rawStep =
+        Math.max(0, unsmoothedEnergy[b]! - unsmoothedEnergy[b - 1]!) +
+        0.50 * Math.max(0, normHigh[b]! - normHigh[b - 1]!);
+      if (rawStep < 0.16) continue;
       let s = transientScore(b);
       if (isFirstDropSection && b === exactFirstDropBar) {
         s += 0.10;
       }
-      const rawStep =
-        Math.max(0, unsmoothedEnergy[b]! - unsmoothedEnergy[b - 1]!) +
-        0.50 * Math.max(0, normHigh[b]! - normHigh[b - 1]!);
-      const margin = b === nominalBar ? 0 : 0.07;
-      if (b !== nominalBar && rawStep >= 0.16 && s > bestScore + margin) {
-        bestScore = s;
-        bestBar = b;
+      if (s > bestCandScore) {
+        bestCandScore = s;
+        bestCandBar = b;
       }
     }
+
+    const bestBar = bestCandScore > nominalScore + 0.07 ? bestCandBar : nominalBar;
 
     if (bestBar !== nominalBar) {
       const delta = bestBar - nominalBar;

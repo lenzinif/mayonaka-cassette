@@ -363,6 +363,7 @@ export class Game {
   private sectionRole: SectionRole = 'intro';
   private barEnergy = 0.5;
   private barsSinceLastLightning = 99;
+  private lastLightningWasDropEntry = false;
 
   readonly syncController = new SongRoadSyncController();
   readonly forkController = new StageForkController();
@@ -940,6 +941,8 @@ export class Game {
       this.dynamicFov = tuning.fieldOfView;
       this.prevDynamicFov = tuning.fieldOfView;
       this.fovBoostPulse = 0;
+      this.barsSinceLastLightning = 99;
+      this.lastLightningWasDropEntry = false;
       this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
       this.resetPerfBenchmark();
     } else if (prevLength > 0) {
@@ -1364,6 +1367,7 @@ export class Game {
         this.barEnergy - prevBarEnergy >= 0.28 &&
         (this.barsSinceLastLightning >= 8 ||
           (this.sectionRole === 'drop' &&
+            this.lastLightningWasDropEntry &&
             this.barsSinceLastLightning <= 2 &&
             prevBarEnergy < 0.48 &&
             this.barEnergy >= 0.60));
@@ -1371,6 +1375,7 @@ export class Game {
       if (isDropEntry || isExtremeSpectralPeak || isSpectralSurge) {
         triggerExtremeLightning = true;
         this.barsSinceLastLightning = 0;
+        this.lastLightningWasDropEntry = isDropEntry && !isSpectralSurge;
       }
     }
 

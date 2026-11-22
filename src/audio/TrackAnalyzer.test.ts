@@ -168,6 +168,7 @@ describe('BeatMap helpers', () => {
     expect(sectionAtBar(map1, 0)?.role).toBe('intro');
     expect(sectionAtBar(map1, 1)?.role).toBe('drop');
     expect(map1.barEnergy[1]! - map1.barEnergy[0]!).toBeGreaterThanOrEqual(0.35);
+    expect(firstDropBar(withAdjustedBpm(map1, map1.bpm))).toBe(1);
 
     const pcmIntro9 = synthesizeFourOnTheFloorTrack({
       bpm: 120,
@@ -184,6 +185,64 @@ describe('BeatMap helpers', () => {
     expect(sectionAtBar(map9, 8)?.role).not.toBe('drop');
     expect(sectionAtBar(map9, 9)?.role).toBe('drop');
     expect(map9.barEnergy[9]! - map9.barEnergy[8]!).toBeGreaterThanOrEqual(0.35);
+    expect(firstDropBar(withAdjustedBpm(map9, map9.bpm))).toBe(9);
+  });
+
+  it('damps mid-song LPF muffled bars (b >= 20) and pinpoints the unmuffle drop bar', () => {
+    const sr = ANALYSIS_SAMPLE_RATE;
+    const bpm = 120;
+    const durationSec = 72; // 36 bars
+    const firstBeatOffsetSec = 0.15;
+    const totalSamples = Math.floor(durationSec * sr);
+    const pcm = new Float32Array(totalSamples);
+    const beatDur = 60 / bpm;
+    const totalBeats = Math.floor((durationSec - firstBeatOffsetSec) / beatDur);
+
+    for (let b = 0; b < totalBeats; b++) {
+      const barIdx = Math.floor(b / 4);
+      const beatInBar = b % 4;
+      const startSample = Math.floor((firstBeatOffsetSec + b * beatDur) * sr);
+      // Bars 0..3: quiet intro; Bars 4..19: full-band drop 1;
+      // Bars 20..24: LPF muffled section (strong sub-bass <150Hz, zero high frequencies >2kHz);
+      // Bars 25..35: full-band drop 2 (filter opens at bar 25!).
+      const isQuietIntro = barIdx < 4;
+      const isLpfMuffled = barIdx >= 20 && barIdx <= 24;
+      const hasKick = !isQuietIntro;
+      const hasHighAir = !isQuietIntro && !isLpfMuffled;
+
+      const len = Math.floor(0.12 * sr);
+      for (let i = 0; i < len && startSample + i < totalSamples; i++) {
+        const t = i / sr;
+        const env = Math.exp(-t * 26);
+        let sample = 0;
+        if (hasKick) {
+          const kickAmp = isLpfMuffled ? 0.52 : beatInBar === 0 ? 0.9 : 0.72;
+          sample += kickAmp * env * Math.sin(2 * Math.PI * 62 * t);
+        } else {
+          sample += 0.14 * env * Math.sin(2 * Math.PI * 380 * t);
+        }
+        if (hasHighAir && (beatInBar === 1 || beatInBar === 3)) {
+          sample +=
+            0.38 *
+            env *
+            (Math.sin(2 * Math.PI * 2600 * t) * 0.6 + Math.sin(2 * Math.PI * 4100 * t) * 0.4);
+        }
+        pcm[startSample + i] = pcm[startSample + i]! + sample;
+      }
+    }
+
+    const { beatMap } = analyzePcm(pcm, sr, {
+      contentHash: 'sha256:lpf-unmuffle-bar25',
+      title: 'LPF Unmuffle Test',
+      artist: 'Tester',
+    });
+
+    // Bar 24 is still LPF-muffled; Bar 25 opens the high-band filter into the drop
+    expect(beatMap.barEnergy[24]!).toBeLessThan(0.6);
+    expect(beatMap.barEnergy[25]!).toBeGreaterThan(0.75);
+    expect(beatMap.barEnergy[25]! - beatMap.barEnergy[24]!).toBeGreaterThanOrEqual(0.25);
+    expect(sectionAtBar(beatMap, 24)?.role).not.toBe('drop');
+    expect(sectionAtBar(beatMap, 25)?.role).toBe('drop');
   });
 });
 
