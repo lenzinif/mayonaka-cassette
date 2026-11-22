@@ -1,6 +1,7 @@
 import { DEFAULT_TUNING, TUNING_CONTROLS } from '@src/config/tuning';
 import { describe, expect, it, vi } from 'vitest';
 import { BeatClock } from './BeatClock';
+import { withAdjustedBpm } from './BeatMap';
 import {
   clearSynthLoopCache,
   DEFAULT_SYNTH_BEATMAP,
@@ -280,6 +281,91 @@ describe('BeatClock & FunkAudioEngine', () => {
     try {
       await engine.unlock();
       expect(createOscillator).not.toHaveBeenCalled();
+    } finally {
+      g.window = prevWindow;
+      g.AudioContext = prevAudioCtx;
+      engine.dispose();
+    }
+  });
+
+  it('rebuilds synth loop buffer and restarts preview source when BPM changes via updateBeatMap', async () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+
+    const createdSources: Array<{ buffer: AudioBuffer | null; start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
+    const fakeParam = () => ({
+      value: 0,
+      setValueAtTime: vi.fn(),
+      linearRampToValueAtTime: vi.fn(),
+      exponentialRampToValueAtTime: vi.fn(),
+      cancelScheduledValues: vi.fn(),
+    });
+    const fakeNode = () => ({
+      gain: fakeParam(),
+      frequency: fakeParam(),
+      Q: fakeParam(),
+      delayTime: fakeParam(),
+      type: 'lowpass',
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+    });
+    const mockCtx = {
+      state: 'running',
+      currentTime: 0,
+      sampleRate: 44100,
+      destination: {},
+      createBiquadFilter: vi.fn(fakeNode),
+      createGain: vi.fn(fakeNode),
+      createDelay: vi.fn(fakeNode),
+      createBuffer: vi.fn((_c: number, length: number, sampleRate: number) => ({
+        length,
+        sampleRate,
+        duration: length / sampleRate,
+        getChannelData: () => new Float32Array(length),
+      })),
+      createBufferSource: vi.fn(() => {
+        const src = {
+          buffer: null as AudioBuffer | null,
+          loop: false,
+          loopStart: 0,
+          loopEnd: 0,
+          playbackRate: fakeParam(),
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+          start: vi.fn(),
+          stop: vi.fn(),
+          onended: null,
+        };
+        createdSources.push(src);
+        return src;
+      }),
+      resume: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+
+    const g = globalThis as unknown as { window?: unknown; AudioContext?: unknown };
+    const prevWindow = g.window;
+    const prevAudioCtx = g.AudioContext;
+    const AudioCtxCtor = vi.fn(function () {
+      return mockCtx;
+    });
+    g.window = { AudioContext: AudioCtxCtor };
+    g.AudioContext = AudioCtxCtor;
+
+    try {
+      await engine.startPreview(0);
+      expect(engine.isPreviewPlaying).toBe(true);
+      expect(createdSources.length).toBe(1);
+      const initialBuffer = createdSources[0]!.buffer;
+
+      const doubled = withAdjustedBpm(engine.beatMap, engine.beatMap.bpm * 2);
+      engine.updateBeatMap(doubled);
+
+      expect(engine.beatMap.bpm).toBeCloseTo(244, 1);
+      expect(engine.isPreviewPlaying).toBe(true);
+      expect(createdSources.length).toBe(2);
+      expect(createdSources[1]!.buffer).not.toBe(initialBuffer);
+      expect(createdSources[0]!.stop).toHaveBeenCalledTimes(1);
+      expect(createdSources[1]!.start).toHaveBeenCalledTimes(1);
     } finally {
       g.window = prevWindow;
       g.AudioContext = prevAudioCtx;
