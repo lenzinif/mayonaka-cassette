@@ -1100,10 +1100,11 @@ export class RoadRenderer {
 
     // Clip near edge to segClipY (screen bottom or hill crest) along the projected edge so
     // lane lines, rumble strips, and road edges stay straight instead of flaring into a funnel.
+    let clipT = 1;
     if (y1 > segClipY) {
       const spanY = p1.screenY - p2.screenY;
       if (spanY > 0.0001) {
-        const clipT = clamp01((segClipY - p2.screenY) / spanY);
+        clipT = clamp01((segClipY - p2.screenY) / spanY);
         x1 = x2 + (p1.screenX - x2) * clipT;
         w1 = w2 + (p1.screenW - w2) * clipT;
       }
@@ -1159,6 +1160,7 @@ export class RoadRenderer {
         trackLength,
         forkChoice ?? 'right',
         legacy,
+        clipT,
       );
       return;
     }
@@ -1244,15 +1246,18 @@ export class RoadRenderer {
     trackLength: number,
     choice: 'left' | 'right',
     legacy = false,
+    clipT = 1,
   ): void {
     const { p1, p2, stripe } = seg;
     const span = Math.max(1, trackLength - forkZoneStartZ);
-    const t1 = clamp01((p1.worldZ - forkZoneStartZ) / span);
+    const z1 = clipT < 1 ? p2.worldZ + (p1.worldZ - p2.worldZ) * clipT : p1.worldZ;
+    const t1 = clamp01((z1 - forkZoneStartZ) / span);
     const t2 = clamp01((p2.worldZ - forkZoneStartZ) / span);
     const rawDy = p1.screenY - p2.screenY;
     const useFastForkRect =
       !legacy && rawDy <= 1.6 && Math.abs(w1 - w2) <= 4.5 && Math.abs(x1 - x2) <= 3.5;
     const sliceH = y1 - y2;
+    const baseLaneStep = Math.max(32, 8 * LANES);
 
     if (t2 <= FORK_WIDEN_END_T) {
       // Phase 1: Pre-split widening zone with center chevron warning gore
@@ -1267,6 +1272,11 @@ export class RoadRenderer {
       const ir2 = r2 * 0.7;
       const c1 = ir1 * pEase1;
       const c2 = ir2 * pEase2;
+
+      const leftLine1 = x1 - (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
+      const leftLine2 = x2 - (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
+      const rightLine1 = x1 + (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
+      const rightLine2 = x2 + (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
 
       if (useFastForkRect) {
         const mx = (x1 + x2) * 0.5;
@@ -1285,6 +1295,20 @@ export class RoadRenderer {
           ctx.fillStyle =
             stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : rumbleColor;
           ctx.fillRect(mx - mc, y2, mc * 2, sliceH);
+        }
+        if (stripe === 0 && w1 >= 6) {
+          const mw = (w1 + w2) * 0.5;
+          const pEaseMid = (pEase1 + pEase2) * 0.5;
+          const baseLw = Math.max(1, mw / baseLaneStep);
+          const chosenLw = baseLw * (1 + pEaseMid);
+          const leftMid = (leftLine1 + leftLine2) * 0.5;
+          const rightMid = (rightLine1 + rightLine2) * 0.5;
+          ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
+          const lW = choice === 'left' ? chosenLw : baseLw;
+          ctx.fillRect(leftMid - lW * 0.5, y2, lW, sliceH);
+          ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
+          const rW = choice === 'right' ? chosenLw : baseLw;
+          ctx.fillRect(rightMid - rW * 0.5, y2, rW, sliceH);
         }
         return;
       }
@@ -1305,18 +1329,20 @@ export class RoadRenderer {
 
       // Continuous lane lines (seamlessly diverging from ±1/3 normal road into ±0.60 branch centers)
       if (stripe === 0 && w1 >= 6) {
-        const l1 = Math.max(1, w1 / 32);
-        const l2 = Math.max(1, w2 / 32);
-        const leftLine1 = x1 - (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
-        const leftLine2 = x2 - (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
-        const rightLine1 = x1 + (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
-        const rightLine2 = x2 + (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
+        const baseHalf1 = Math.max(0.5, w1 / (baseLaneStep * 2));
+        const baseHalf2 = Math.max(0.5, w2 / (baseLaneStep * 2));
+        const chosenHalf1 = baseHalf1 * (1 + pEase1);
+        const chosenHalf2 = baseHalf2 * (1 + pEase2);
 
+        const lHalf1 = choice === 'left' ? chosenHalf1 : baseHalf1;
+        const lHalf2 = choice === 'left' ? chosenHalf2 : baseHalf2;
         ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
-        polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+        polygon(ctx, leftLine1 - lHalf1, y1, leftLine1 + lHalf1, y1, leftLine2 + lHalf2, y2, leftLine2 - lHalf2, y2);
 
+        const rHalf1 = choice === 'right' ? chosenHalf1 : baseHalf1;
+        const rHalf2 = choice === 'right' ? chosenHalf2 : baseHalf2;
         ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
-        polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+        polygon(ctx, rightLine1 - rHalf1, y1, rightLine1 + rHalf1, y1, rightLine2 + rHalf2, y2, rightLine2 - rHalf2, y2);
       }
     } else if (t2 <= FORK_SPLIT_END_T) {
       // Phase 2: Diverging Left & Right asphalt branches with a central V-chevron median island
@@ -1332,28 +1358,63 @@ export class RoadRenderer {
       const ir1 = r1 * 0.7;
       const ir2 = r2 * 0.7;
 
+      // Inner curbs transition smoothly from [-ir, 0] / [0, +ir] at t=0.18
+      // to median-side [-gap, -gap + r] / [+gap - r, +gap] at t=0.65 so Phase 2->3 is flush.
+      const leftInnerL1 = x1 - gap1 - ir1 * (1 - splitEase1);
+      const leftInnerR1 = x1 - gap1 + r1 * splitEase1;
+      const leftInnerL2 = x2 - gap2 - ir2 * (1 - splitEase2);
+      const leftInnerR2 = x2 - gap2 + r2 * splitEase2;
+
+      const rightInnerL1 = x1 + gap1 - r1 * splitEase1;
+      const rightInnerR1 = x1 + gap1 + ir1 * (1 - splitEase1);
+      const rightInnerL2 = x2 + gap2 - r2 * splitEase2;
+      const rightInnerR2 = x2 + gap2 + ir2 * (1 - splitEase2);
+
+      const leftMid1 = x1 - (outerW1 + gap1) * 0.5;
+      const leftMid2 = x2 - (outerW2 + gap2) * 0.5;
+      const rightMid1 = x1 + (outerW1 + gap1) * 0.5;
+      const rightMid2 = x2 + (outerW2 + gap2) * 0.5;
+
       if (useFastForkRect) {
         const mx = (x1 + x2) * 0.5;
         const ow = (outerW1 + outerW2) * 0.5;
         const gap = (gap1 + gap2) * 0.5;
         const mr = (r1 + r2) * 0.5;
-        const ir = (ir1 + ir2) * 0.5;
         const leftOuter = Math.round(mx - ow);
-        const leftInner = Math.round(mx - gap);
-        const rightInner = Math.round(mx + gap);
+        const leftAsphaltInner = Math.round(mx - gap);
+        const rightAsphaltInner = Math.round(mx + gap);
         const rightOuter = Math.round(mx + ow);
         const curbW = Math.max(1, Math.round(mr));
-        const innerCurbW = Math.max(1, Math.round(ir));
+
+        const lInL = Math.round((leftInnerL1 + leftInnerL2) * 0.5);
+        const lInR = Math.round((leftInnerR1 + leftInnerR2) * 0.5);
+        const rInL = Math.round((rightInnerL1 + rightInnerL2) * 0.5);
+        const rInR = Math.round((rightInnerR1 + rightInnerR2) * 0.5);
+
         ctx.fillStyle = rumbleColor;
         ctx.fillRect(leftOuter - curbW, y2, curbW, sliceH);
         ctx.fillRect(rightOuter, y2, curbW, sliceH);
         ctx.fillStyle = roadColor;
-        ctx.fillRect(leftOuter, y2, Math.max(1, leftInner - leftOuter), sliceH);
-        ctx.fillRect(rightInner, y2, Math.max(1, rightOuter - rightInner), sliceH);
+        ctx.fillRect(leftOuter, y2, Math.max(1, leftAsphaltInner - leftOuter), sliceH);
+        ctx.fillRect(rightAsphaltInner, y2, Math.max(1, rightOuter - rightAsphaltInner), sliceH);
         ctx.fillStyle = choice === 'left' ? '#05d9e8' : rumbleColor;
-        ctx.fillRect(leftInner - innerCurbW, y2, innerCurbW, sliceH);
+        ctx.fillRect(lInL, y2, Math.max(1, lInR - lInL), sliceH);
         ctx.fillStyle = choice === 'right' ? '#ffd319' : rumbleColor;
-        ctx.fillRect(rightInner, y2, innerCurbW, sliceH);
+        ctx.fillRect(rInL, y2, Math.max(1, rInR - rInL), sliceH);
+
+        if (stripe === 0 && w1 >= 6) {
+          const mw = (w1 + w2) * 0.5;
+          const baseLw = Math.max(1, mw / baseLaneStep);
+          const chosenLw = baseLw * 2;
+          const leftMid = (leftMid1 + leftMid2) * 0.5;
+          const rightMid = (rightMid1 + rightMid2) * 0.5;
+          ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
+          const lW = choice === 'left' ? chosenLw : baseLw;
+          ctx.fillRect(leftMid - lW * 0.5, y2, lW, sliceH);
+          ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
+          const rW = choice === 'right' ? chosenLw : baseLw;
+          ctx.fillRect(rightMid - rW * 0.5, y2, rW, sliceH);
+        }
         return;
       }
 
@@ -1371,25 +1432,27 @@ export class RoadRenderer {
 
       // Inner median V-curbs
       ctx.fillStyle = choice === 'left' ? '#05d9e8' : rumbleColor;
-      polygon(ctx, x1 - gap1 - ir1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - gap2 - ir2, y2);
+      polygon(ctx, leftInnerL1, y1, leftInnerR1, y1, leftInnerR2, y2, leftInnerL2, y2);
 
       ctx.fillStyle = choice === 'right' ? '#ffd319' : rumbleColor;
-      polygon(ctx, x1 + gap1, y1, x1 + gap1 + ir1, y1, x2 + gap2 + ir2, y2, x2 + gap2, y2);
+      polygon(ctx, rightInnerL1, y1, rightInnerR1, y1, rightInnerR2, y2, rightInnerL2, y2);
 
       // Center guide lines down each branch (from ±0.60 at t=0.18 to ±1.10 at t=0.65)
       if (stripe === 0 && w1 >= 6) {
-        const l1 = Math.max(1, w1 / 32);
-        const l2 = Math.max(1, w2 / 32);
-        const leftMid1 = x1 - (outerW1 + gap1) * 0.5;
-        const leftMid2 = x2 - (outerW2 + gap2) * 0.5;
-        const rightMid1 = x1 + (outerW1 + gap1) * 0.5;
-        const rightMid2 = x2 + (outerW2 + gap2) * 0.5;
+        const baseHalf1 = Math.max(0.5, w1 / (baseLaneStep * 2));
+        const baseHalf2 = Math.max(0.5, w2 / (baseLaneStep * 2));
+        const chosenHalf1 = baseHalf1 * 2;
+        const chosenHalf2 = baseHalf2 * 2;
 
+        const lHalf1 = choice === 'left' ? chosenHalf1 : baseHalf1;
+        const lHalf2 = choice === 'left' ? chosenHalf2 : baseHalf2;
         ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
-        polygon(ctx, leftMid1 - l1, y1, leftMid1 + l1, y1, leftMid2 + l2, y2, leftMid2 - l2, y2);
+        polygon(ctx, leftMid1 - lHalf1, y1, leftMid1 + lHalf1, y1, leftMid2 + lHalf2, y2, leftMid2 - lHalf2, y2);
 
+        const rHalf1 = choice === 'right' ? chosenHalf1 : baseHalf1;
+        const rHalf2 = choice === 'right' ? chosenHalf2 : baseHalf2;
         ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
-        polygon(ctx, rightMid1 - l1, y1, rightMid1 + l1, y1, rightMid2 + l2, y2, rightMid2 - l2, y2);
+        polygon(ctx, rightMid1 - rHalf1, y1, rightMid1 + rHalf1, y1, rightMid2 + rHalf2, y2, rightMid2 - rHalf2, y2);
       }
     } else {
       // Phase 3: Seamless convergence of the chosen branch back to the center road!
@@ -1403,6 +1466,14 @@ export class RoadRenderer {
       const cLeft2 = x2 + cCenter2 - cHalfW2;
       const cRight2 = x2 + cCenter2 + cHalfW2;
 
+      const u1 = clamp01((t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
+      const u2 = clamp01((t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
+      const ease1 = smoothstep(u1);
+      const ease2 = smoothstep(u2);
+
+      const branchStart1 = t1 <= FORK_SPLIT_END_T ? Math.abs(getChosenForkCenter(t1, choice)) : FORK_PEAK_BRANCH_CENTER;
+      const branchStart2 = FORK_PEAK_BRANCH_CENTER;
+
       if (useFastForkRect) {
         const cLeft = Math.round((cLeft1 + cLeft2) * 0.5);
         const cRight = Math.round((cRight1 + cRight2) * 0.5);
@@ -1413,13 +1484,52 @@ export class RoadRenderer {
         ctx.fillStyle = roadColor;
         ctx.fillRect(cLeft, y2, Math.max(1, cRight - cLeft), sliceH);
 
+        if (stripe === 0 && w1 >= 6) {
+          const mw = (w1 + w2) * 0.5;
+          const easeMid = (ease1 + ease2) * 0.5;
+          const baseLw = Math.max(1, mw / baseLaneStep);
+          const convLw = baseLw * (2 - easeMid);
+          if (choice === 'right') {
+            const rightLine1 = x1 + (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
+            const rightLine2 = x2 + (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
+            ctx.fillStyle = easeMid < 0.85 ? '#ffd319' : laneColor;
+            ctx.fillRect((rightLine1 + rightLine2) * 0.5 - convLw * 0.5, y2, convLw, sliceH);
+
+            const leftLineMid = (x1 + x2) * 0.5 - (1 / 3) * mw;
+            if (leftLineMid > cLeft + baseLw) {
+              const alpha = Math.min(1, (leftLineMid - cLeft) / (mw * 0.25));
+              const prevAlpha = ctx.globalAlpha;
+              ctx.globalAlpha = prevAlpha * alpha;
+              ctx.fillStyle = laneColor;
+              ctx.fillRect(leftLineMid - baseLw * 0.5, y2, baseLw, sliceH);
+              ctx.globalAlpha = prevAlpha;
+            }
+          } else {
+            const leftLine1 = x1 - (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
+            const leftLine2 = x2 - (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
+            ctx.fillStyle = easeMid < 0.85 ? '#05d9e8' : laneColor;
+            ctx.fillRect((leftLine1 + leftLine2) * 0.5 - convLw * 0.5, y2, convLw, sliceH);
+
+            const rightLineMid = (x1 + x2) * 0.5 + (1 / 3) * mw;
+            if (rightLineMid < cRight - baseLw) {
+              const alpha = Math.min(1, (cRight - rightLineMid) / (mw * 0.25));
+              const prevAlpha = ctx.globalAlpha;
+              ctx.globalAlpha = prevAlpha * alpha;
+              ctx.fillStyle = laneColor;
+              ctx.fillRect(rightLineMid - baseLw * 0.5, y2, baseLw, sliceH);
+              ctx.globalAlpha = prevAlpha;
+            }
+          }
+        }
+
         const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
         const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
         if (unchosenAlpha > 0.08) {
           const prevAlpha = ctx.globalAlpha;
           ctx.globalAlpha = prevAlpha * unchosenAlpha;
           const uSign = choice === 'left' ? 1 : -1;
-          const eMid = smoothstep(Math.max(0, u2Unchosen));
+          const u1Unchosen = Math.max(0, (t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
+          const eMid = smoothstep((u1Unchosen + Math.max(0, u2Unchosen)) * 0.5);
           const uCenter = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * eMid) * ((w1 + w2) * 0.5);
           const uHalfW = 0.58 * (1 - 0.2 * eMid) * ((w1 + w2) * 0.5);
           const uLeft = Math.round((x1 + x2) * 0.5 + uCenter - uHalfW);
@@ -1444,48 +1554,45 @@ export class RoadRenderer {
 
       // Seamless lane lines converging into standard 3-lane highway dividers (±1/3)
       if (stripe === 0 && w1 >= 6) {
-        const l1 = Math.max(1, w1 / 32);
-        const l2 = Math.max(1, w2 / 32);
-
-        const u1 = clamp01((t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
-        const u2 = clamp01((t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
-        const ease1 = smoothstep(u1);
-        const ease2 = smoothstep(u2);
+        const baseHalf1 = Math.max(0.5, w1 / (baseLaneStep * 2));
+        const baseHalf2 = Math.max(0.5, w2 / (baseLaneStep * 2));
+        const convHalf1 = baseHalf1 * (2 - ease1);
+        const convHalf2 = baseHalf2 * (2 - ease2);
 
         if (choice === 'right') {
           // Right branch lane line: smoothly converges from +1.10 to +1/3 (the right lane divider of normal road!)
-          const rightLine1 = x1 + (FORK_PEAK_BRANCH_CENTER * (1 - ease1) + (1 / 3) * ease1) * w1;
-          const rightLine2 = x2 + (FORK_PEAK_BRANCH_CENTER * (1 - ease2) + (1 / 3) * ease2) * w2;
+          const rightLine1 = x1 + (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
+          const rightLine2 = x2 + (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
           ctx.fillStyle = ease1 < 0.85 ? '#ffd319' : laneColor;
-          polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+          polygon(ctx, rightLine1 - convHalf1, y1, rightLine1 + convHalf1, y1, rightLine2 + convHalf2, y2, rightLine2 - convHalf2, y2);
 
           // Left highway divider (-1/3) smoothly emerges as road widens past the median
           const leftLine1 = x1 - (1 / 3) * w1;
           const leftLine2 = x2 - (1 / 3) * w2;
-          if (leftLine1 > cLeft1 + l1 * 2) {
+          if (leftLine1 > cLeft1 + baseHalf1 * 2) {
             const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
             const prevAlpha = ctx.globalAlpha;
             ctx.globalAlpha = prevAlpha * alpha;
             ctx.fillStyle = laneColor;
-            polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+            polygon(ctx, leftLine1 - baseHalf1, y1, leftLine1 + baseHalf1, y1, leftLine2 + baseHalf2, y2, leftLine2 - baseHalf2, y2);
             ctx.globalAlpha = prevAlpha;
           }
         } else {
           // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
-          const leftLine1 = x1 - (FORK_PEAK_BRANCH_CENTER * (1 - ease1) + (1 / 3) * ease1) * w1;
-          const leftLine2 = x2 - (FORK_PEAK_BRANCH_CENTER * (1 - ease2) + (1 / 3) * ease2) * w2;
+          const leftLine1 = x1 - (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
+          const leftLine2 = x2 - (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
           ctx.fillStyle = ease1 < 0.85 ? '#05d9e8' : laneColor;
-          polygon(ctx, leftLine1 - l1, y1, leftLine1 + l1, y1, leftLine2 + l2, y2, leftLine2 - l2, y2);
+          polygon(ctx, leftLine1 - convHalf1, y1, leftLine1 + convHalf1, y1, leftLine2 + convHalf2, y2, leftLine2 - convHalf2, y2);
 
           // Right highway divider (+1/3) smoothly emerges as road widens past the median
           const rightLine1 = x1 + (1 / 3) * w1;
           const rightLine2 = x2 + (1 / 3) * w2;
-          if (rightLine1 < cRight1 - l1 * 2) {
+          if (rightLine1 < cRight1 - baseHalf1 * 2) {
             const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
             const prevAlpha = ctx.globalAlpha;
             ctx.globalAlpha = prevAlpha * alpha;
             ctx.fillStyle = laneColor;
-            polygon(ctx, rightLine1 - l1, y1, rightLine1 + l1, y1, rightLine2 + l2, y2, rightLine2 - l2, y2);
+            polygon(ctx, rightLine1 - baseHalf1, y1, rightLine1 + baseHalf1, y1, rightLine2 + baseHalf2, y2, rightLine2 - baseHalf2, y2);
             ctx.globalAlpha = prevAlpha;
           }
         }

@@ -42,6 +42,7 @@ export interface HUDProps {
  */
 export function HUD({
   bridge,
+  debugOpen,
   trackLoaderOpen = false,
   inspectorOpen = false,
   onToggleDebug,
@@ -170,6 +171,7 @@ export function HUD({
   const gamepadConnected = snap?.gamepadConnected ?? false;
 
   const sodaDangerPct = Math.min(100, Math.round(sodaDanger * 100));
+  const cassetteVisible = !hideCassette && showCassetteDeck && !effectiveCleanHud;
 
   if (!gameStarted) return null;
 
@@ -277,7 +279,15 @@ export function HUD({
 
       {/* On-Demand Performance Profiler Ribbon (F3) */}
       {showPerfHud && (
-        <div className="ff-mono pointer-events-auto absolute top-11 right-3 z-2 flex max-w-[min(46rem,calc(100%-1.5rem))] flex-wrap items-center justify-end gap-2.5 rounded-[2px] border border-[rgba(255,245,228,0.25)] bg-[#0B0E1E]/95 px-3 py-1 text-[10px] text-[var(--ff-cream)] sm:top-13 sm:right-5 [contain:layout_style_paint] [transform:translateZ(0)]">
+        <div
+          className={`ff-mono pointer-events-auto absolute top-11 z-2 flex flex-wrap items-center justify-end gap-2.5 rounded-[2px] border border-[rgba(255,245,228,0.25)] bg-[#0B0E1E]/95 px-3 py-1 text-[10px] text-[var(--ff-cream)] sm:top-13 [contain:layout_style_paint] [transform:translateZ(0)] ${
+            debugOpen
+              ? cassetteVisible
+                ? 'right-[calc(376px+1.25rem)] max-w-[calc(100%-376px-2.5rem)] sm:right-[calc(376px+1.75rem)] lg:max-w-[min(46rem,calc(100%-760px))]'
+                : 'right-[calc(376px+1.25rem)] max-w-[min(46rem,calc(100%-376px-2.5rem))] sm:right-[calc(376px+1.75rem)]'
+              : 'right-3 max-w-[min(46rem,calc(100%-1.5rem))] sm:right-5'
+          }`}
+        >
           <span className="font-bold tracking-widest text-[var(--ff-pink)] uppercase">PERF MON</span>
           <span className="font-bold text-[var(--ff-mint)]">
             {fps} FPS (MIN {snap?.minFps ?? fps})

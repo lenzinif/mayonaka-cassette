@@ -752,4 +752,165 @@ describe('RoadRenderer — Rendering Environments', () => {
       expect(akibaStrongerRatio).toBe(false);
     });
   });
+
+  describe('Fork delimiter alignment & distant lane lines', () => {
+    it('aligns Phase 2 inner median curbs seamlessly with Phase 3 curbs at t = 0.65 for both right and left choices', () => {
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const totalSegs = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < totalSegs; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: Math.floor(i / 3) % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+        });
+      }
+      const track: Track = { segments, segmentLength: segLen, length: totalSegs * segLen };
+      const forkZoneStartZ = (totalSegs - 100) * segLen; // fork span = 100 segs -> seg 164 ends at t=0.65
+
+      for (const forkChoice of ['right', 'left'] as const) {
+        const polygons: { fillStyle: string; pts: [number, number][] }[] = [];
+        let currentPts: [number, number][] = [];
+        const noop = () => {};
+        const ctx = {
+          canvas: { width: 640, height: 360 },
+          fillStyle: '#000',
+          strokeStyle: '#000',
+          lineWidth: 1,
+          globalAlpha: 1,
+          save: noop,
+          restore: noop,
+          beginPath: () => {
+            currentPts = [];
+          },
+          closePath: noop,
+          moveTo: (x: number, y: number) => currentPts.push([x, y]),
+          lineTo: (x: number, y: number) => currentPts.push([x, y]),
+          quadraticCurveTo: noop,
+          arc: noop,
+          fill: () => {
+            if (currentPts.length > 0) {
+              polygons.push({ fillStyle: ctx.fillStyle as string, pts: [...currentPts] });
+            }
+          },
+          stroke: noop,
+          fillRect: noop,
+          createLinearGradient: () => ({ addColorStop: noop }),
+        } as unknown as CanvasRenderingContext2D;
+
+        const accentColor = forkChoice === 'right' ? '#ffd319' : '#05d9e8';
+        // Position camera so t = 0.65 (seg 64->65) sits comfortably in mid-screen (y ≈ 252, w ≈ 256)
+        renderer.render(
+          ctx,
+          track,
+          {
+            ...defaultView,
+            position: forkZoneStartZ + 55 * segLen,
+            drawDistance: 25,
+            forkZoneStartZ,
+            forkChoice,
+          },
+          PALETTE_NIGHT_FUNK,
+        );
+
+        // Find the last Phase 2 accent inner curb polygon (curb width r = w/6 >> lane width w/32)
+        const accentCurbs = polygons.filter(
+          (p) => p.fillStyle === accentColor && p.pts.length === 4 && Math.abs(p.pts[1]![0] - p.pts[0]![0]) > 25,
+        );
+        expect(accentCurbs.length).toBeGreaterThan(0);
+        // Back-to-front order means the FIRST matching accent curb in Phase 2 is the farthest one (closest to t = 0.65)
+        const phase2TopCurb = accentCurbs[0]!;
+        const topY = phase2TopCurb.pts[2]![1]; // y2 of that slice
+        const phase2TopRightX = Math.max(phase2TopCurb.pts[2]![0], phase2TopCurb.pts[3]![0]);
+        const phase2TopLeftX = Math.min(phase2TopCurb.pts[2]![0], phase2TopCurb.pts[3]![0]);
+
+        // Find the Phase 3 rumble pair polygon immediately adjacent above (whose near edge y1 === topY + 1)
+        const phase3Rumble = polygons.find(
+          (p) =>
+            p.pts.length === 8 &&
+            Math.abs(p.pts[0]![1] - (topY + 1)) < 0.01,
+        );
+        expect(phase3Rumble).toBeDefined();
+
+        // In drawRumblePairSplit: pts[0..3] is left curb [cLeft-r, cLeft], pts[4..7] is right curb [cRight, cRight+r]
+        if (forkChoice === 'right') {
+          const phase3LeftCurbOuter = phase3Rumble!.pts[0]![0];
+          const phase3LeftCurbInner = phase3Rumble!.pts[1]![0];
+          expect(phase2TopLeftX).toBeCloseTo(phase3LeftCurbOuter, 1);
+          expect(phase2TopRightX).toBeCloseTo(phase3LeftCurbInner, 1);
+        } else {
+          const phase3RightCurbInner = phase3Rumble!.pts[4]![0];
+          const phase3RightCurbOuter = phase3Rumble!.pts[5]![0];
+          expect(phase2TopLeftX).toBeCloseTo(phase3RightCurbInner, 1);
+          expect(phase2TopRightX).toBeCloseTo(phase3RightCurbOuter, 1);
+        }
+      }
+    });
+
+    it('renders lane guide lines in useFastForkRect across distant fork slices', () => {
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const totalSegs = 220;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < totalSegs; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: Math.floor(i / 3) % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+        });
+      }
+      const track: Track = { segments, segmentLength: segLen, length: totalSegs * segLen };
+      const forkZoneStartZ = 40 * segLen;
+
+      const rects: { fillStyle: string; x: number; y: number; w: number; h: number }[] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: (x: number, y: number, w: number, h: number) => {
+          rects.push({ fillStyle: ctx.fillStyle as string, x, y, w, h });
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(
+        ctx,
+        track,
+        {
+          ...defaultView,
+          position: forkZoneStartZ + 10 * segLen,
+          drawDistance: 160,
+          forkZoneStartZ,
+          forkChoice: 'right',
+        },
+        PALETTE_NIGHT_FUNK,
+      );
+
+      // Distant Phase 2/3 fast-rect slices must still draw the golden lane guide (#ffd319) as thin rects
+      const thinGoldLaneRects = rects.filter((r) => r.fillStyle === '#ffd319' && r.w > 0 && r.w <= 6);
+      expect(thinGoldLaneRects.length).toBeGreaterThan(5);
+    });
+  });
 });

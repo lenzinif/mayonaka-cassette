@@ -88,9 +88,31 @@ describe('TrackLoader (UI Layer — Cassette Deck & Playlist)', () => {
 
     expect(text).toContain('CASSETTE DECK');
     expect(text).toContain('Your music generates the road');
+    expect(text).toContain('DRIVE [ENTER]');
     expect(text).toContain('BACK [ESC]');
     expect(text).not.toContain('START DRIVE [ENTER]');
     expect(text).not.toContain('Selected Tape:');
+  });
+
+  it('renders RESUME [ENTER] alongside BACK [ESC] when opened mid-run with onResumeDrive', () => {
+    const library = new TrackLibrary();
+    const html = renderToString(
+      createElement(TrackLoader, {
+        open: true,
+        library,
+        isInitialSelect: false,
+        onResumeDrive: vi.fn(),
+        onSelectTrack: vi.fn(),
+        onUpdateBeatMap: vi.fn(),
+        onClose: vi.fn(),
+      }),
+    );
+    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
+
+    expect(text).toContain('CASSETTE DECK');
+    expect(text).toContain('RESUME [ENTER]');
+    expect(text).toContain('BACK [ESC]');
+    expect(text).not.toContain('RESUME DRIVE [ENTER]');
   });
 
   it('renders unified BACK [ESC] button in header and no bottom slop footer when isInitialSelect is false', () => {
