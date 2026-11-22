@@ -326,7 +326,11 @@ export class Game {
   private paletteBlendElapsed = 0;
   private readonly paletteBlendDurationSec = 2.5;
   private lastPaletteBlendStep = -1;
-  private nextTrackCache: { contentHash: string; track: SongTrack } | null = null;
+  private nextTrackCache: {
+    contentHash: string;
+    stageId: StagePalette['id'];
+    track: SongTrack;
+  } | null = null;
   private activeNextTrackLookahead: SongTrack | undefined = undefined;
   private cachedForkLeftOption: ForkOptionInfo | null = null;
   private cachedForkRightOption: ForkOptionInfo | null = null;
@@ -775,7 +779,7 @@ export class Game {
     this.paletteTransitionSnapshot = createMutablePaletteClone(this.palette);
     this.hasCustomTrack = options.track !== undefined;
     this.activeRoadBeatMap = this.audio.beatMap;
-    this.track = options.track ?? generateSongRoad(this.audio.beatMap);
+    this.track = options.track ?? generateSongRoad(this.audio.beatMap, { stageId: this.palette.id });
     this.traffic = new TrafficManager(this.track, this.audio.beatMap.contentHash);
     this.preloader = options.preloader;
     this.autopilot = options.autopilot;
@@ -915,7 +919,7 @@ export class Game {
   /** Regenerates the road and traffic from `beatMap` and resets run state when switching songs. */
   loadBeatMapRoad(beatMap: BeatMap, resetPosition = true): void {
     const prevLength = this.track.length;
-    const songTrack = generateSongRoad(beatMap);
+    const songTrack = generateSongRoad(beatMap, { stageId: this.palette.id });
     this.track = songTrack;
     this.activeRoadBeatMap = beatMap;
     this.nextTrackCache = null;
@@ -970,9 +974,11 @@ export class Game {
     const prevLength = this.track.length;
     const overshoot = Math.max(0, nextPos - prevLength);
     const songTrack =
-      this.nextTrackCache && this.nextTrackCache.contentHash === beatMap.contentHash
+      this.nextTrackCache &&
+      this.nextTrackCache.contentHash === beatMap.contentHash &&
+      this.nextTrackCache.stageId === this.palette.id
         ? this.nextTrackCache.track
-        : generateSongRoad(beatMap);
+        : generateSongRoad(beatMap, { stageId: this.palette.id });
     this.nextTrackCache = null;
     this.activeNextTrackLookahead = undefined;
     this.track = songTrack;
@@ -1037,12 +1043,37 @@ export class Game {
   }
 
   /**
-   * Directly sets the active stage palette by index and notifies HUD and DebugPanel immediately.
+   * Directly sets the active stage palette by index, re-dresses scenery for the new macro-region
+   * (preserving pure geometry), and notifies HUD and DebugPanel immediately.
    */
   setStagePaletteIndex(index: number): void {
     this.palette = getStagePalette(index);
     this.renderPalette = this.palette;
     this.paletteTransitionFrom = null;
+    if (!this.hasCustomTrack) {
+      const prevSong = isSongTrack(this.track) ? this.track : null;
+      this.track = generateSongRoad(
+        this.activeRoadBeatMap,
+        prevSong
+          ? {
+              stageId: this.palette.id,
+              maxSpeed: prevSong.referenceSpeed,
+              referenceSpeedRatio: 1,
+            }
+          : { stageId: this.palette.id },
+      );
+      if (this.track.length > 0) {
+        this.position =
+          ((this.position % this.track.length) + this.track.length) % this.track.length;
+        this.prevPosition = this.position;
+      }
+      this.lastBridgeJointSegment = -1;
+      this.nextTrackCache = null;
+      this.activeNextTrackLookahead = undefined;
+      this.prewarmNextLookaheadTrack();
+      this.updateRoadProgressTelemetry();
+      this.updateForkState();
+    }
     this.renderDirty = true;
     this.bridge.publish(this.buildSnapshot);
   }
@@ -1262,12 +1293,13 @@ export class Game {
     this.updateForkState();
 
     // 5. Update reactive Web Audio filter/pitch and sample BeatClock
+    const cameraSeg = findSegment(this.track, this.position);
     if (this.melonSoda.active) {
       const playerWorldZ = this.position + playerZOffset;
       const currentSeg = findSegment(this.track, playerWorldZ);
       if (
         currentSeg &&
-        currentSeg.env === 'bridge' &&
+        (currentSeg.env === 'bridge' || currentSeg.env === 'viaduct') &&
         currentSeg.stripe === 0 &&
         currentSeg.index % 8 === 0 &&
         this.lastBridgeJointSegment !== currentSeg.index
@@ -1281,6 +1313,7 @@ export class Game {
     this.drivingAudioParams.isDrifting = this.car.isDrifting;
     this.drivingAudioParams.isOffRoad = this.car.isOffRoad;
     this.drivingAudioParams.offRoadDepth = this.car.offRoadDepth;
+    this.drivingAudioParams.inTunnel = cameraSeg?.env === 'tunnel';
     // If multi-track playlist is active and the player is in the late approach to the stage fork
     // but hasn't reached the finish line yet (docs/OUTRO_EXTENSION_PROPOSALS.md), instruct the
     // audio engine to apply progressive Tape Drag and hold the Dub Tape Delay wash if the track concludes.
@@ -1595,7 +1628,8 @@ export class Game {
       drawPlayerCar(ctx, this.car, width, height, alpha);
     }
     const tFgWeather0 = performance.now();
-    if (this.renderBg) {
+    const cameraSegForWeather = findSegment(this.track, renderPos);
+    if (this.renderBg && cameraSegForWeather?.env !== 'tunnel') {
       this.background.renderForegroundWeather(ctx, width, height);
     }
     const tParts0 = performance.now();
@@ -1665,10 +1699,18 @@ export class Game {
     }
     const nextItem = this.library.nextTrackItem;
     if (!nextItem) return;
-    if (!this.nextTrackCache || this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash) {
-      const nextTrack = generateSongRoad(nextItem.beatMap);
-      this.nextTrackCache = { contentHash: nextItem.beatMap.contentHash, track: nextTrack };
-      const nextPalette = getStagePalette(this.runManager.stageNumber);
+    const nextPalette = getStagePalette(this.runManager.stageNumber);
+    if (
+      !this.nextTrackCache ||
+      this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash ||
+      this.nextTrackCache.stageId !== nextPalette.id
+    ) {
+      const nextTrack = generateSongRoad(nextItem.beatMap, { stageId: nextPalette.id });
+      this.nextTrackCache = {
+        contentHash: nextItem.beatMap.contentHash,
+        stageId: nextPalette.id,
+        track: nextTrack,
+      };
       this.background.prewarmPalette(nextPalette);
     }
   }
@@ -1692,10 +1734,16 @@ export class Game {
       return undefined;
     }
 
-    if (!this.nextTrackCache || this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash) {
+    const nextPalette = getStagePalette(this.runManager.stageNumber);
+    if (
+      !this.nextTrackCache ||
+      this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash ||
+      this.nextTrackCache.stageId !== nextPalette.id
+    ) {
       this.prewarmNextLookaheadTrack();
     }
-    return this.nextTrackCache?.contentHash === nextItem.beatMap.contentHash
+    return this.nextTrackCache?.contentHash === nextItem.beatMap.contentHash &&
+      this.nextTrackCache?.stageId === nextPalette.id
       ? this.nextTrackCache.track
       : undefined;
   }

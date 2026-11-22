@@ -116,14 +116,14 @@ describe('Composite Vignettes (Vignettes.ts)', () => {
     }
   });
 
-  it('temporarily excludes jihanki from vignette prefabs and spaces remaining members cleanly', () => {
+  it('restores jihanki inside jihanki-corner and keeps all prefab members cleanly spaced without collisions', () => {
+    const jihankiCorner = VIGNETTE_PREFABS['jihanki-corner'];
+    expect(jihankiCorner.members.some((m) => m.kind === 'jihanki')).toBe(true);
+
     for (const id of vignetteIds) {
       const prefab = VIGNETTE_PREFABS[id];
-      const jihankiMembers = prefab.members.filter((m) => m.kind === 'jihanki');
-      expect(jihankiMembers).toHaveLength(0);
-      expect(prefab.members.length).toBeGreaterThanOrEqual(2);
+      expect(prefab.members.length).toBeGreaterThanOrEqual(4);
 
-      // Members must stay within a wider, non-clumped longitudinal window and avoid same-segment collisions
       const seenOffsets = new Set<string>();
       for (const m of prefab.members) {
         expect(Math.abs(m.dSeg)).toBeLessThanOrEqual(16);
@@ -252,19 +252,25 @@ describe('Composite Vignettes (Vignettes.ts)', () => {
       expect(vignettePropCount1).toBe(vignettePropCount2);
     });
 
-    it('spawns zero jihanki on generated roads while placing remaining vignettes cleanly', () => {
+    it('spawns jihanki in urbano/semiurbano zones and never in costiero or non-standard structures', () => {
       const seeds = ['test-seed-a', 'test-seed-b', 'test-seed-c', 'wangan-seed-99'];
+      let sawJihankiAcrossSeeds = false;
+      let sawVignettePropsAcrossSeeds = false;
 
       for (const seed of seeds) {
-        const road = generateSongRoad(mockBeatMap, { seed });
-        let jihankiCount = 0;
-        let activeVignetteProps = 0;
+        const road = generateSongRoad(mockBeatMap, { seed, stageId: 'akiba_night' });
 
         for (let i = 0; i < road.segments.length; i++) {
           const seg = road.segments[i]!;
+          const barIdx = Math.floor(i / road.segmentsPerBar);
+          const owner = road.chunks.find(
+            (c) => barIdx >= c.startBar && barIdx < c.startBar + c.bars,
+          );
           for (const sp of seg.sprites) {
             if (sp.kind === 'jihanki') {
-              jihankiCount++;
+              sawJihankiAcrossSeeds = true;
+              expect(seg.env).toBe('standard');
+              expect(owner?.archetype).not.toBe('costiero');
             }
             if (
               sp.kind === 'bus-stop' ||
@@ -274,33 +280,35 @@ describe('Composite Vignettes (Vignettes.ts)', () => {
               sp.kind === 'phonebooth' ||
               sp.kind === 'torii'
             ) {
-              activeVignetteProps++;
+              sawVignettePropsAcrossSeeds = true;
             }
           }
         }
-
-        expect(jihankiCount).toBe(0);
-        expect(activeVignetteProps).toBeGreaterThan(0);
       }
+
+      expect(sawJihankiAcrossSeeds).toBe(true);
+      expect(sawVignettePropsAcrossSeeds).toBe(true);
     });
 
-    it('never places vignettes on bridge chunks or bridge segments', () => {
+    it('never places vignettes on bridge, viaduct, or tunnel segments', () => {
       const seeds = ['bridge-test-1', 'bridge-test-2', 'bridge-test-3'];
 
       for (const seed of seeds) {
-        const road = generateSongRoad(mockBeatMap, { seed });
+        for (const stageId of ['night', 'akiba_night'] as const) {
+          const road = generateSongRoad(mockBeatMap, { seed, stageId });
 
-        for (const seg of road.segments) {
-          if (seg.env !== 'bridge') continue;
+          for (const seg of road.segments) {
+            if (seg.env === 'standard') continue;
 
-          for (const sp of seg.sprites) {
-            expect(sp.kind).not.toBe('kiosk');
-            expect(sp.kind).not.toBe('bench');
-            expect(sp.kind).not.toBe('bus-stop');
-            expect(sp.kind).not.toBe('canopy');
-            expect(sp.kind).not.toBe('torii');
-            expect(sp.kind).not.toBe('toro');
-            expect(sp.kind).not.toBe('jihanki');
+            for (const sp of seg.sprites) {
+              expect(sp.kind).not.toBe('kiosk');
+              expect(sp.kind).not.toBe('bench');
+              expect(sp.kind).not.toBe('bus-stop');
+              expect(sp.kind).not.toBe('canopy');
+              expect(sp.kind).not.toBe('torii');
+              expect(sp.kind).not.toBe('toro');
+              expect(sp.kind).not.toBe('jihanki');
+            }
           }
         }
       }

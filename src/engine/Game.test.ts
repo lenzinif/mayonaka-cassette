@@ -1215,3 +1215,33 @@ describe('Drop Onset & Climax Lightning Sync', () => {
     }
   });
 });
+
+describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () => {
+  it('preserves track.length, car position, and transitions cleanly to akiba_night viaducts even after tuning.maxSpeed changes', () => {
+    const prevMaxSpeed = tuning.maxSpeed;
+    try {
+      const game = new Game({ input: new FakeInput(), audio: new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP) });
+      const initialLength = game.track.length;
+      const targetPos = initialLength * 0.45;
+      game.hasStartedDriving = true;
+      game.position = targetPos;
+      (game as unknown as { prevPosition: number }).prevPosition = targetPos;
+
+      // Simulate user altering maxSpeed tuning live via DebugPanel before switching stage
+      tuning.maxSpeed = prevMaxSpeed * 1.4;
+      game.setStagePaletteIndex(2); // AKIBA NIGHT RUSH -> viaducts
+
+      expect(game.palette.id).toBe('akiba_night');
+      expect(game.track.length).toBe(initialLength);
+      expect(game.position).toBeCloseTo(targetPos, 5);
+      expect(game.position).toBeLessThan(game.track.length);
+      expect(game.bridge.getSnapshot()?.lap).toBe(1);
+
+      const envs = new Set(game.track.segments.map((s) => s.env));
+      expect(envs.has('viaduct')).toBe(true);
+      expect(envs.has('bridge')).toBe(false);
+    } finally {
+      tuning.maxSpeed = prevMaxSpeed;
+    }
+  });
+});

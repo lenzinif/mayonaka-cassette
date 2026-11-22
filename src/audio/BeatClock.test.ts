@@ -372,4 +372,157 @@ describe('BeatClock & FunkAudioEngine', () => {
       engine.dispose();
     }
   });
+
+  it('applies subtle tunnel resonance inside env === "tunnel" and triggers an exit filter blip on portal exit', () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+
+    for (let i = 0; i < 20; i++) {
+      engine.update(1 / 60, {
+        speedRatio: 0.85,
+        isDrifting: false,
+        isOffRoad: false,
+        inTunnel: true,
+      });
+    }
+    expect(engine.tunnelResonance).toBeGreaterThan(0.7);
+    const inTunnelCutoff = engine.cutoffHz;
+
+    for (let i = 0; i < 15; i++) {
+      engine.update(1 / 60, {
+        speedRatio: 0.85,
+        isDrifting: false,
+        isOffRoad: false,
+        inTunnel: false,
+      });
+    }
+    expect(engine.tunnelResonance).toBeLessThan(0.15);
+    expect(engine.cutoffHz).toBeGreaterThan(inTunnelCutoff);
+
+    engine.dispose();
+  });
+
+  it('resets tunnel resonance and wet send cleanly on seek/load/preview/crossfade/dispose without spurious exit blips', async () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+    const createdGains: Array<{ gain: { value: number } }> = [];
+    const fakeParam = (initial = 1) => ({
+      value: initial,
+      setValueAtTime: vi.fn(),
+      linearRampToValueAtTime: vi.fn(),
+      exponentialRampToValueAtTime: vi.fn(),
+      cancelScheduledValues: vi.fn(),
+    });
+    const mockCtx = {
+      state: 'running',
+      currentTime: 0,
+      destination: {},
+      createGain: vi.fn(() => {
+        const g = { gain: fakeParam(1), connect: vi.fn(), disconnect: vi.fn() };
+        createdGains.push(g);
+        return g;
+      }),
+      createBiquadFilter: vi.fn(() => ({
+        type: 'lowpass',
+        frequency: fakeParam(16000),
+        Q: fakeParam(1.8),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      })),
+      createDelay: vi.fn(() => ({
+        delayTime: fakeParam(0.1),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      })),
+      createBuffer: vi.fn((_c: number, len: number, sr: number) => ({
+        numberOfChannels: 2,
+        length: len,
+        sampleRate: sr,
+        duration: len / sr,
+        getChannelData: () => new Float32Array(len),
+      })),
+      createBufferSource: vi.fn(() => ({
+        buffer: null,
+        loop: false,
+        loopStart: 0,
+        loopEnd: 0,
+        playbackRate: fakeParam(),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        start: vi.fn(),
+        stop: vi.fn(),
+        onended: null,
+      })),
+      resume: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+
+    const g = globalThis as unknown as { window?: unknown; AudioContext?: unknown };
+    const prevWindow = g.window;
+    const prevAudioCtx = g.AudioContext;
+    const AudioCtxCtor = vi.fn(function () {
+      return mockCtx;
+    });
+    g.window = { AudioContext: AudioCtxCtor };
+    g.AudioContext = AudioCtxCtor;
+
+    try {
+      await engine.unlock();
+      // Tunnel send gain is the 4th gain node created during unlock() (master, dubSend, dubFeedback, tunnelSend)
+      const tunnelSendGain = createdGains[3]!;
+      expect(tunnelSendGain.gain.value).toBe(0);
+
+      // Drive inside tunnel -> wet send rises
+      for (let i = 0; i < 20; i++) {
+        engine.update(1 / 60, { speedRatio: 0.85, isDrifting: false, isOffRoad: false, inTunnel: true });
+      }
+      expect(engine.tunnelResonance).toBeGreaterThan(0.7);
+      expect(tunnelSendGain.gain.value).toBeGreaterThan(0.05);
+
+      // seekTo resets tunnel state and avoids triggering exit filter blip on next update
+      engine.seekTo(0);
+      expect(engine.tunnelResonance).toBe(0);
+      expect(tunnelSendGain.gain.value).toBe(0);
+      engine.update(1 / 60, { speedRatio: 0.5, isDrifting: false, isOffRoad: false, inTunnel: false });
+      expect((engine as unknown as { filterBlipBoost: number }).filterBlipBoost).toBe(0);
+
+      // Enter tunnel again -> startPreview must clear wet send for clean preview playback
+      for (let i = 0; i < 15; i++) {
+        engine.update(1 / 60, { speedRatio: 0.85, isDrifting: false, isOffRoad: false, inTunnel: true });
+      }
+      expect(tunnelSendGain.gain.value).toBeGreaterThan(0.05);
+      await engine.startPreview(0);
+      expect(engine.tunnelResonance).toBe(0);
+      expect(tunnelSendGain.gain.value).toBe(0);
+      engine.stopPreview(false);
+
+      // Enter tunnel again -> exit normally -> tunnelSendGain must converge to exact 0 (no deadband leak)
+      for (let i = 0; i < 15; i++) {
+        engine.update(1 / 60, { speedRatio: 0.85, isDrifting: false, isOffRoad: false, inTunnel: true });
+      }
+      for (let i = 0; i < 120; i++) {
+        engine.update(1 / 60, { speedRatio: 0.85, isDrifting: false, isOffRoad: false, inTunnel: false });
+      }
+      expect(engine.tunnelResonance).toBe(0);
+      expect(tunnelSendGain.gain.value).toBe(0);
+
+      // loadTrack & crossfadeToTrack also clear active tunnel state cleanly
+      for (let i = 0; i < 15; i++) {
+        engine.update(1 / 60, { speedRatio: 0.85, isDrifting: false, isOffRoad: false, inTunnel: true });
+      }
+      engine.loadTrack(DEFAULT_SYNTH_BEATMAP, null);
+      expect(engine.tunnelResonance).toBe(0);
+      expect(tunnelSendGain.gain.value).toBe(0);
+
+      for (let i = 0; i < 15; i++) {
+        engine.update(1 / 60, { speedRatio: 0.85, isDrifting: false, isOffRoad: false, inTunnel: true });
+      }
+      engine.crossfadeToTrack(DEFAULT_SYNTH_BEATMAP, null, 2, true);
+      expect(engine.tunnelResonance).toBe(0);
+      expect(tunnelSendGain.gain.value).toBe(0);
+    } finally {
+      g.window = prevWindow;
+      g.AudioContext = prevAudioCtx;
+      engine.dispose();
+      expect(engine.tunnelResonance).toBe(0);
+    }
+  });
 });

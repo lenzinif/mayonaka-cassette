@@ -65,8 +65,11 @@ function createMockCanvas(): {
 }
 
 describe('SceneryCorridors — Continuous Power Lines (Phase 3)', () => {
-  it('generates continuous runs of power pylons with consistent side and chainId', () => {
-    const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { seed: 'pylon-test-seed-1' });
+  it('generates continuous runs of power pylons with consistent side and chainId in eligible coastal/semiurban corridors', () => {
+    const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, {
+      seed: 'pylon-test-seed-1',
+      stageId: 'og_future_funk',
+    });
     const pylonSprites: { segIdx: number; sprite: RoadSprite }[] = [];
 
     for (let i = 0; i < road.segments.length; i++) {
@@ -128,19 +131,27 @@ describe('SceneryCorridors — Continuous Power Lines (Phase 3)', () => {
     }
   });
 
-  it('guarantees zero towers on bridge segments and respects the stage fork cutoff', () => {
-    const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { seed: 'bridge-pylon-test' });
-    const segmentsPerBar = Math.round(road.segments.length / road.totalBars);
-    const forkCutoffSeg = (road.totalBars - FORK_APPROACH_BARS) * segmentsPerBar;
+  it('guarantees zero towers on bridge/viaduct/tunnel/urbano segments and respects the stage fork cutoff', () => {
+    for (const stageId of ['night', 'akiba_night', 'og_future_funk'] as const) {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, {
+        seed: 'bridge-pylon-test',
+        stageId,
+      });
+      const segmentsPerBar = Math.round(road.segments.length / road.totalBars);
+      const forkCutoffSeg = (road.totalBars - FORK_APPROACH_BARS) * segmentsPerBar;
 
-    for (let i = 0; i < road.segments.length; i++) {
-      const seg = road.segments[i]!;
-      const pylons = seg.sprites.filter((s) => s.kind === 'pylon');
-      if (pylons.length > 0) {
-        // Never on bridges
-        expect(seg.env).not.toBe('bridge');
-        // Never inside the stage fork approach (last 6 bars)
-        expect(i).toBeLessThanOrEqual(forkCutoffSeg);
+      for (let i = 0; i < road.segments.length; i++) {
+        const seg = road.segments[i]!;
+        const pylons = seg.sprites.filter((s) => s.kind === 'pylon');
+        if (pylons.length > 0) {
+          expect(seg.env).toBe('standard');
+          expect(i).toBeLessThanOrEqual(forkCutoffSeg);
+          const barIdx = Math.floor(i / segmentsPerBar);
+          const owner = road.chunks.find(
+            (c) => barIdx >= c.startBar && barIdx < c.startBar + c.bars,
+          );
+          expect(owner?.archetype).not.toBe('urbano');
+        }
       }
     }
   });
@@ -156,10 +167,13 @@ describe('SceneryCorridors — Continuous Power Lines (Phase 3)', () => {
     }
   });
 
-  it('covers ~40-60% of eligible non-bridge road across varied seeds', () => {
+  it('covers eligible coastal/semiurban non-bridge road across varied seeds', () => {
     const seeds = ['pylon-seed-alpha', 'pylon-seed-beta', 'pylon-seed-gamma'];
     for (const seed of seeds) {
-      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { seed });
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, {
+        seed,
+        stageId: 'og_future_funk',
+      });
       const segmentsPerBar = Math.round(road.segments.length / road.totalBars);
       const maxBar = Math.max(0, road.totalBars - FORK_APPROACH_BARS);
 
@@ -168,7 +182,7 @@ describe('SceneryCorridors — Continuous Power Lines (Phase 3)', () => {
 
       for (let b = 0; b < maxBar; b++) {
         const seg = road.segments[b * segmentsPerBar];
-        if (seg && seg.env !== 'bridge') {
+        if (seg && seg.env === 'standard') {
           eligibleBars++;
         }
       }
@@ -185,8 +199,6 @@ describe('SceneryCorridors — Continuous Power Lines (Phase 3)', () => {
         }
       }
 
-      // Coverage ratio in terms of runs of bars (since towers are placed every 2 bars, 1 tower covers ~2 bars)
-      // So each tower in a run covers roughly its spacing in bars
       expect(coveredBars.size).toBeGreaterThanOrEqual(Math.floor(eligibleBars * 0.15));
       expect(coveredBars.size).toBeLessThanOrEqual(Math.ceil(eligibleBars * 0.45));
     }

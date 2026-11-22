@@ -101,6 +101,12 @@ describe('BeatMap helpers', () => {
     });
 
     expect(isBeatMap(beatMap)).toBe(true);
+    expect(beatMap.barBrightness).toBeDefined();
+    expect(beatMap.barBrightness!.length).toBe(beatMap.barEnergy.length);
+    for (const br of beatMap.barBrightness!) {
+      expect(br).toBeGreaterThanOrEqual(0);
+      expect(br).toBeLessThanOrEqual(1);
+    }
     expect(Math.abs(beatMap.bpm - 120)).toBeLessThan(0.25);
     expect(beatDurationSec(beatMap)).toBeCloseTo(0.5, 2);
     expect(barDurationSec(beatMap)).toBeCloseTo(2.0, 2);
@@ -115,6 +121,7 @@ describe('BeatMap helpers', () => {
 
     const doubled = withAdjustedBpm(beatMap, beatMap.bpm * 2);
     expect(doubled.bpm).toBeCloseTo(beatMap.bpm * 2, 1);
+    expect(doubled.barBrightness?.length).toBe(doubled.barEnergy.length);
     expect(doubled.source).toBe('manual');
 
     const nudged = nudgeBeatMapDownbeat(beatMap, 1);
@@ -241,6 +248,9 @@ describe('BeatMap helpers', () => {
     expect(beatMap.barEnergy[24]!).toBeLessThan(0.6);
     expect(beatMap.barEnergy[25]!).toBeGreaterThan(0.75);
     expect(beatMap.barEnergy[25]! - beatMap.barEnergy[24]!).toBeGreaterThanOrEqual(0.25);
+    expect(beatMap.barBrightness).toBeDefined();
+    expect(beatMap.barBrightness?.[22]).toBeLessThan(0.25);
+    expect(beatMap.barBrightness?.[27]).toBeGreaterThan(0.65);
     expect(sectionAtBar(beatMap, 24)?.role).not.toBe('drop');
     expect(sectionAtBar(beatMap, 25)?.role).toBe('drop');
   });

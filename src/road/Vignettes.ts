@@ -54,20 +54,22 @@ export interface RoadChunkVignetteSlot {
  */
 export const VIGNETTE_PREFABS: Record<VignetteId, VignettePrefab> = {
   /**
-   * Roadside convenience corner (rest area without jihanki, awaiting future chunk environment archetypes):
-   * Low lit shop kiosk facade set back with an NTT phone booth, wooden bench, streetlamp, and foliage.
+   * Roadside convenience & jihanki corner (urban / semiurban rest stop):
+   * Illuminated Japanese vending machines alongside a kiosk facade, NTT phone booth,
+   * wooden bench, and streetlamp.
    */
   'jihanki-corner': {
     id: 'jihanki-corner',
-    description: 'Angolo sosta con chiosco illuminato, cabina telefonica, panchina, lampione e arbusti',
+    description: 'Angolo sosta con distributori automatici jihanki, chiosco illuminato, cabina telefonica, panchina e lampione',
     band: 'B',
     baseOffset: 2.6,
     members: [
       { kind: 'lamp', dSeg: -10, dOffset: -0.7 },
-      { kind: 'phonebooth', dSeg: -5, dOffset: 0.1 },
-      { kind: 'kiosk', dSeg: 0, dOffset: 0.55 },
-      { kind: 'bench', dSeg: 6, dOffset: 0.15 },
-      { kind: 'shrub', dSeg: 12, dOffset: 0.4 },
+      { kind: 'jihanki', dSeg: -5, dOffset: 0.05 },
+      { kind: 'jihanki', dSeg: -2, dOffset: 0.12 },
+      { kind: 'kiosk', dSeg: 3, dOffset: 0.55 },
+      { kind: 'phonebooth', dSeg: 7, dOffset: 0.1 },
+      { kind: 'bench', dSeg: 12, dOffset: 0.15 },
     ],
   },
 

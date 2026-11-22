@@ -856,7 +856,7 @@ function computeBarEnergyAndSections(
   firstBeatOffsetSec: number,
   durationSec: number,
   features: SpectralFeatures,
-): { barEnergy: number[]; sections: BeatSection[] } {
+): { barEnergy: number[]; barBrightness: number[]; sections: BeatSection[] } {
   const {
     frameRms,
     frameLowEnergy,
@@ -941,6 +941,20 @@ function computeBarEnergyAndSections(
     }
 
     barEnergy[b] = Math.round(val * 1000) / 1000;
+  }
+
+  // Preserve true spectral brightness ratio relative to track p95 without min-subtraction,
+  // preventing benign slight dips on uniformly bright tracks from stretching down to 0.
+  const sortedCent = new Float32Array(rawCentroid).sort();
+  const sortedHigh = new Float32Array(rawHigh).sort();
+  const p95Cent = percentile(sortedCent, 0.95);
+  const p95High = percentile(sortedHigh, 0.95);
+  const barBrightness: number[] = new Array<number>(totalBars);
+  for (let b = 0; b < totalBars; b++) {
+    const centRatio = Math.max(0, Math.min(1, rawCentroid[b]! / Math.max(250, p95Cent)));
+    const highRatio = Math.max(0, Math.min(1, rawHigh[b]! / Math.max(1e-4, p95High)));
+    const bright = Math.max(0, Math.min(1, 0.7 * centRatio + 0.3 * highRatio));
+    barBrightness[b] = Math.round(bright * 1000) / 1000;
   }
 
   // Partition into 4-bar blocks for section segmentation
@@ -1268,7 +1282,7 @@ function computeBarEnergyAndSections(
     }
   }
 
-  return { barEnergy, sections: articulated };
+  return { barEnergy, barBrightness, sections: articulated };
 }
 
 function downsampleEnvelope(env: Float32Array, targetPoints: number): Float32Array {
@@ -1313,7 +1327,7 @@ export function analyzePcm(
   );
 
   const downbeat = selectDownbeatOffset(grid.bpm, grid.beatPhaseOffsetSec, features);
-  const { barEnergy, sections } = computeBarEnergyAndSections(
+  const { barEnergy, barBrightness, sections } = computeBarEnergyAndSections(
     grid.bpm,
     downbeat.firstBeatOffsetSec,
     durationSec,
@@ -1334,6 +1348,7 @@ export function analyzePcm(
     firstBeatOffsetSec: downbeat.firstBeatOffsetSec,
     beatsPerBar: BEATS_PER_BAR,
     barEnergy,
+    barBrightness,
     sections,
     confidence: {
       tempo: tempoConf,

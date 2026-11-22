@@ -1,10 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_SYNTH_BEATMAP } from '@src/audio/FunkAudioEngine';
+import {
+  BUNDLED_COASTAL_BEATMAP,
+  BUNDLED_WANGAN_BEATMAP,
+  DEFAULT_SYNTH_BEATMAP,
+} from '@src/audio/FunkAudioEngine';
 import { PlayerCar } from '@src/entities/PlayerCar';
 import { type CollisionEvent, TrafficManager } from '@src/entities/TrafficAndProps';
 import {
+  PALETTE_AKIBA_NIGHT,
   PALETTE_NIGHT_FUNK,
   PALETTE_OG_FUTURE_FUNK,
   PALETTE_VAPORFUNK,
@@ -12,7 +17,6 @@ import {
   SCENERY_TOUGE,
   type StagePalette,
 } from './palette';
-import { ROAD_CHUNKS } from './RoadChunks';
 import { RoadRenderer, type RoadView } from './RoadRenderer';
 import {
   createPoint,
@@ -116,9 +120,9 @@ const defaultView: RoadView = {
   alpha: 1,
 };
 
-describe('Fase 5 — Biome Coherence & Scenery Themes (Option A)', () => {
-  describe('1. Generator Emits Abstract Slots & Never Imports Palette/Theme', () => {
-    it('ensures SongRoadGenerator and RoadChunks have zero palette/theme imports', () => {
+describe('Fase 5 & Phase B — Biome Coherence, Environmental Archetypes & Stage Macro-Regions', () => {
+  describe('1. Pure Geometry Separation & Zero Palette Imports', () => {
+    it('ensures SongRoadGenerator, RoadChunks, and EnvironmentArchetypes have zero palette/theme imports', () => {
       const generatorSrc = fs.readFileSync(
         path.resolve(process.cwd(), 'src/road/SongRoadGenerator.ts'),
         'utf-8',
@@ -127,40 +131,92 @@ describe('Fase 5 — Biome Coherence & Scenery Themes (Option A)', () => {
         path.resolve(process.cwd(), 'src/road/RoadChunks.ts'),
         'utf-8',
       );
+      const archSrc = fs.readFileSync(
+        path.resolve(process.cwd(), 'src/road/EnvironmentArchetypes.ts'),
+        'utf-8',
+      );
 
-      // Invariant: generation is a pure function of (BeatMap, seed); themes must NEVER enter generation
-      expect(generatorSrc).not.toContain("from './palette'");
-      expect(generatorSrc).not.toContain('StagePalette');
-      expect(generatorSrc).not.toContain('SceneryTheme');
-
-      expect(chunksSrc).not.toContain("from './palette'");
-      expect(chunksSrc).not.toContain('StagePalette');
-      expect(chunksSrc).not.toContain('SceneryTheme');
+      for (const src of [generatorSrc, chunksSrc, archSrc]) {
+        expect(src).not.toContain("from './palette'");
+        expect(src).not.toContain('StagePalette');
+        expect(src).not.toContain('SceneryTheme');
+      }
     });
 
-    it('verifies that ROAD_CHUNKS verge greenery uses abstract kind "tree" and zero hardcoded "palm"', () => {
-      const palmRules = ROAD_CHUNKS.flatMap((c) =>
-        c.props.filter((p) => (p.kind as string) === 'palm'),
-      );
-      expect(palmRules).toHaveLength(0);
+    it('keeps identical pure road geometry across night, og_future_funk, and akiba_night stages', () => {
+      for (const map of [DEFAULT_SYNTH_BEATMAP, BUNDLED_WANGAN_BEATMAP, BUNDLED_COASTAL_BEATMAP]) {
+        const roadNight = generateSongRoad(map, { stageId: 'night' });
+        const roadSunset = generateSongRoad(map, { stageId: 'og_future_funk' });
+        const roadAkiba = generateSongRoad(map, { stageId: 'akiba_night' });
 
-      const treeRules = ROAD_CHUNKS.flatMap((c) =>
-        c.props.filter((p) => p.kind === 'tree'),
-      );
-      expect(treeRules.length).toBeGreaterThanOrEqual(10);
+        expect(roadNight.segments.length).toBe(roadSunset.segments.length);
+        expect(roadNight.segments.length).toBe(roadAkiba.segments.length);
+        expect(roadNight.dropMarkers).toEqual(roadSunset.dropMarkers);
+        expect(roadNight.dropMarkers).toEqual(roadAkiba.dropMarkers);
+        expect(roadNight.chunks.map((c) => [c.chunkId, c.mirrored])).toEqual(
+          roadSunset.chunks.map((c) => [c.chunkId, c.mirrored]),
+        );
+        expect(roadNight.chunks.map((c) => [c.chunkId, c.mirrored])).toEqual(
+          roadAkiba.chunks.map((c) => [c.chunkId, c.mirrored]),
+        );
+
+        for (let i = 0; i < roadNight.segments.length; i++) {
+          expect(roadSunset.segments[i]!.curve).toBe(roadNight.segments[i]!.curve);
+          expect(roadAkiba.segments[i]!.curve).toBe(roadNight.segments[i]!.curve);
+          expect(roadSunset.segments[i]!.p1.worldY).toBe(roadNight.segments[i]!.p1.worldY);
+          expect(roadAkiba.segments[i]!.p1.worldY).toBe(roadNight.segments[i]!.p1.worldY);
+          expect(roadSunset.segments[i]!.p2.worldY).toBe(roadNight.segments[i]!.p2.worldY);
+          expect(roadAkiba.segments[i]!.p2.worldY).toBe(roadNight.segments[i]!.p2.worldY);
+        }
+      }
     });
 
-    it('generates a song road containing abstract "tree" sprites', () => {
-      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
-      const allSprites = road.segments.flatMap((s) => s.sprites);
-      const treeSprites = allSprites.filter((s) => s.kind === 'tree');
-      expect(treeSprites.length).toBeGreaterThan(0);
+    it('dresses akiba_night with viaducts (zero water bridges) and spawns jihanki strictly in urban/semiurban zones', () => {
+      const akibaRoad = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'akiba_night' });
+      expect(akibaRoad.segments.some((s) => s.env === 'bridge')).toBe(false);
+      expect(akibaRoad.segments.some((s) => s.env === 'viaduct')).toBe(true);
 
-      // The generator itself must NOT emit concrete biome trees ('street-tree' or 'pine')
-      const concreteStreetTrees = allSprites.filter((s) => s.kind === 'street-tree');
-      const concretePines = allSprites.filter((s) => s.kind === 'pine');
-      expect(concreteStreetTrees).toHaveLength(0);
-      expect(concretePines).toHaveLength(0);
+      // Rendering akibaRoad with PALETTE_AKIBA_NIGHT never fills bay water
+      const renderer = new RoadRenderer();
+      const mock = createMockCanvas();
+      const viaductSegIdx = akibaRoad.segments.findIndex((s) => s.env === 'viaduct');
+      renderer.render(
+        mock.ctx,
+        akibaRoad,
+        { ...defaultView, position: viaductSegIdx * akibaRoad.segmentLength },
+        PALETTE_AKIBA_NIGHT,
+      );
+      expect(mock.fills).not.toContain(PALETTE_AKIBA_NIGHT.water![0]);
+
+      // Verify jihanki appears only in urbano / semiurbano_industriale standard chunks, never in costiero
+      let totalJihankiInUrban = 0;
+      for (const stageId of ['night', 'og_future_funk', 'akiba_night'] as const) {
+        const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId });
+        for (const chunk of road.chunks) {
+          for (let s = chunk.startSegment; s < chunk.startSegment + chunk.segmentCount; s++) {
+            const seg = road.segments[s]!;
+            const hasJihanki = seg.sprites.some((sp) => sp.kind === 'jihanki');
+            if (hasJihanki) {
+              expect(seg.env).toBe('standard');
+              expect(chunk.archetype).not.toBe('costiero');
+              totalJihankiInUrban++;
+            }
+          }
+        }
+      }
+      expect(totalJihankiInUrban).toBeGreaterThan(0);
+    });
+
+    it('places zone transitions strictly on musical section boundaries with coherent multi-bar acts', () => {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+      const distinctActs = new Set(road.chunks.map((c) => c.archetype));
+      expect(distinctActs.size).toBeGreaterThanOrEqual(2);
+
+      const sectionStartBars = new Set(DEFAULT_SYNTH_BEATMAP.sections.map((s) => s.startBar));
+      for (const trans of road.zoneTransitions) {
+        expect(sectionStartBars.has(trans.barIndex)).toBe(true);
+        expect(['gantry', 'overpass']).toContain(trans.landmark);
+      }
     });
   });
 

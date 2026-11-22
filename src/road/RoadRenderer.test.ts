@@ -999,4 +999,195 @@ describe('RoadRenderer — Rendering Environments', () => {
       expect(thinGoldLaneRects.length).toBeGreaterThan(5);
     });
   });
+
+  describe('Phase B & Phase C — Viaduct & Tunnel Zero-GC Rendering', () => {
+    it('renders viaduct segments with Shuto sound-barrier parapets and zero bay water fill', () => {
+      const renderer = new RoadRenderer();
+      const mock = createMockCanvas();
+      const track = createTestTrack('viaduct');
+
+      renderer.render(mock.ctx, track, defaultView, PALETTE_AKIBA_NIGHT);
+
+      expect(renderer.stats.drawnSegments).toBeGreaterThan(0);
+      expect(mock.fills).not.toContain(PALETTE_AKIBA_NIGHT.water![0]);
+      expect(mock.fills).toContain('#2c2740'); // Shuto sound-barrier concrete
+      expect(mock.fills).toContain('#474063'); // Viaduct expansion joint
+    });
+
+    it('renders tunnel entrance portal, interior bore, ceiling lights, and exit aperture with zero ctx.clip()', () => {
+      const renderer = new RoadRenderer();
+      let clipCalls = 0;
+      const fills: string[] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        clip: () => {
+          clipCalls++;
+        },
+        fill: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        stroke: noop,
+        fillRect: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 80; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 12 && i < 40 ? 'tunnel' : 'standard',
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // 1. Approaching tunnel from outside (position = 0): draws entrance portal & bore walls
+      renderer.render(ctx, track, { ...defaultView, position: 0, drawDistance: 60 }, PALETTE_NIGHT_FUNK);
+      expect(clipCalls).toBe(0);
+      expect(fills).toContain('#1b172c'); // Tunnel interior wall
+      expect(fills).toContain('#100c1e'); // Tunnel ceiling vault
+      expect(fills).toContain('#2d2645'); // Entrance portal concrete arch
+      expect(fills).toContain('#ffd166'); // Portal hazard chevron bar
+
+      // 2. Driving inside tunnel (position = 16 * segmentLength): masks surround without ctx.clip()
+      fills.length = 0;
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 16 * segmentLength, drawDistance: 60, beatPulse: 0.7 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(clipCalls).toBe(0);
+      expect(fills).toContain('#070510'); // Dark surround outside exit aperture
+      expect(fills).toContain(PALETTE_NIGHT_FUNK.horizonGlow!); // Exit portal sky rim
+    });
+
+    it('bounds inside-tunnel surround masks to <= 8 rects/frame, smooths exterior casing, uses seg.tunnelLight, and preserves multi-tunnel gaps', () => {
+      const renderer = new RoadRenderer();
+      let clipCalls = 0;
+      const darkMaskRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const ceilingLightRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const outerPathVertices: Array<{ x: number; y: number }> = [];
+      const noop = () => {};
+
+      let inPath = false;
+      let currentPts: Array<{ x: number; y: number }> = [];
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: () => {
+          inPath = true;
+          currentPts = [];
+        },
+        closePath: noop,
+        moveTo: (x: number, y: number) => {
+          if (inPath) currentPts.push({ x, y });
+        },
+        lineTo: (x: number, y: number) => {
+          if (inPath) currentPts.push({ x, y });
+        },
+        quadraticCurveTo: noop,
+        arc: noop,
+        clip: () => {
+          clipCalls++;
+        },
+        fill: () => {
+          if (ctx.fillStyle === '#1b162e' || ctx.fillStyle === '#151126') {
+            outerPathVertices.push(...currentPts);
+          }
+          inPath = false;
+        },
+        stroke: noop,
+        fillRect: (x: number, y: number, w: number, h: number) => {
+          if (ctx.fillStyle === '#070510') {
+            darkMaskRects.push({ x, y, w, h });
+          } else if (ctx.fillStyle === '#ffffff') {
+            ceilingLightRects.push({ x, y, w, h });
+          }
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      // Two tunnels: Tunnel 1 at [2..25] (straight/curved), open gap [25..45], Tunnel 2 at [45..70]
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 120; i++) {
+        const inT1 = i >= 6 && i < 25;
+        const inT2 = i >= 45 && i < 70;
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: inT1 ? 2.5 : 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: inT1 || inT2 ? 'tunnel' : 'standard',
+          tunnelLight: (inT1 || inT2) && i % 16 === 0,
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // A. Exterior approach (position = 0 -> approaching Tunnel 1 at seg 6):
+      // Verify outer casing vertices stay outside inner bore (non-pinching C2: roof & flank spans)
+      renderer.render(ctx, track, { ...defaultView, position: 0, drawDistance: 40 }, PALETTE_NIGHT_FUNK);
+      const outerSpanWidths: number[] = [];
+      for (let i = 0; i + 3 < outerPathVertices.length; i += 4) {
+        const p0 = outerPathVertices[i]!;
+        const p2 = outerPathVertices[i + 2]!;
+        const p3 = outerPathVertices[i + 3]!;
+        outerSpanWidths.push(Math.abs(p2.x - p3.x) + Math.abs(p0.x - p3.x));
+      }
+      expect(clipCalls).toBe(0);
+      expect(outerPathVertices.length).toBeGreaterThanOrEqual(12); // Left flank, right flank, top roof quads
+      expect(outerSpanWidths.some((w) => w > 10)).toBe(true);
+
+      // B. Straight single tunnel interior -> at most 4-8 dark surround fillRects total (down from ~800)
+      // plus beat-synced ceiling lights only where seg.tunnelLight === true (not % 4)
+      for (const s of segments) s.curve = 0;
+      darkMaskRects.length = 0;
+      ceilingLightRects.length = 0;
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 8 * segmentLength, drawDistance: 80, beatPulse: 0.8 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(clipCalls).toBe(0);
+      // 4 initial surround rects + at most 0..2 tightening rects (far below 200*4=800), AND ceiling lights only on tunnelLight segments (segs 16 in T1, 48 & 64 in T2)
+      expect(darkMaskRects.length).toBeLessThanOrEqual(8);
+      expect(darkMaskRects.length).toBeGreaterThanOrEqual(3);
+      expect(ceilingLightRects.length).toBe(3);
+
+      // Specifically check Tunnel 2 (at n >= 37 while Tunnel 1 ends at n = 16) did NOT re-paint full-screen #070510 over the open sky gap!
+      const secondFullTopMasks = darkMaskRects.filter((r) => r.x === 0 && r.y === 0 && r.w === 640);
+      expect(secondFullTopMasks.length).toBe(1);
+    });
+  });
 });
