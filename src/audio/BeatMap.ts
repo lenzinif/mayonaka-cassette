@@ -34,7 +34,9 @@ export interface BeatMap {
   beatsPerBar: 4;
   /** Smoothed normalised energy in [0, 1], one entry per bar. */
   barEnergy: number[];
-  /** Structural sections snapped to 4-bar boundaries. */
+  /** Normalised per-bar spectral brightness in [0, 1] (low values = muffled / low-pass filtered). */
+  barBrightness?: number[];
+  /** Structural sections with bar-exact drop onsets. */
   sections: BeatSection[];
   confidence: BeatConfidence;
   source: BeatMapSource;
@@ -58,6 +60,13 @@ export function isBeatMap(raw: unknown): raw is BeatMap {
   if (obj.beatsPerBar !== 4) return false;
   if (!Array.isArray(obj.barEnergy) || !obj.barEnergy.every((v) => typeof v === 'number' && Number.isFinite(v)))
     return false;
+  if (
+    obj.barBrightness !== undefined &&
+    (!Array.isArray(obj.barBrightness) ||
+      !obj.barBrightness.every((v) => typeof v === 'number' && Number.isFinite(v)))
+  ) {
+    return false;
+  }
   if (!Array.isArray(obj.sections)) return false;
   for (const sec of obj.sections) {
     if (typeof sec !== 'object' || sec === null) return false;
@@ -178,14 +187,24 @@ export function withAdjustedBpm(map: BeatMap, newBpm: number): BeatMap {
     newBarEnergy[i] = map.barEnergy[srcIdx] ?? 0.5;
   }
 
+  let newBarBrightness: number[] | undefined;
+  if (map.barBrightness && map.barBrightness.length > 0) {
+    const oldBrightBars = map.barBrightness.length;
+    newBarBrightness = new Array<number>(newBars);
+    for (let i = 0; i < newBars; i++) {
+      const srcIdx = Math.min(oldBrightBars - 1, Math.floor(i / ratio));
+      newBarBrightness[i] = map.barBrightness[srcIdx] ?? 0.5;
+    }
+  }
+
   const newSections: BeatSection[] = [];
   let cursor = 0;
   for (let i = 0; i < map.sections.length; i++) {
     const sec = map.sections[i]!;
     const isLast = i === map.sections.length - 1;
     const scaledBars = isLast
-      ? Math.max(4, newBars - cursor)
-      : Math.max(4, Math.round((sec.bars * ratio) / 4) * 4);
+      ? Math.max(1, newBars - cursor)
+      : Math.max(1, Math.round(sec.bars * ratio));
     if (cursor < newBars) {
       const bars = Math.min(scaledBars, newBars - cursor);
       if (bars > 0) {
@@ -206,6 +225,7 @@ export function withAdjustedBpm(map: BeatMap, newBpm: number): BeatMap {
     bpm: Math.round(clampedBpm * 1000) / 1000,
     firstBeatOffsetSec: Math.round(firstBeatOffsetSec * 10000) / 10000,
     barEnergy: newBarEnergy,
+    ...(newBarBrightness !== undefined ? { barBrightness: newBarBrightness } : {}),
     sections: newSections,
     source: 'manual',
   };

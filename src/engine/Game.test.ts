@@ -1166,3 +1166,82 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
     });
   });
 });
+
+describe('Drop Onset & Climax Lightning Sync', () => {
+  it('triggers lightning once on a post-pickup drop climax surge and enforces refractory cooldown afterward', () => {
+    const prevRain = tuning.bgRain;
+    const prevLightning = tuning.bgLightningOnBeat;
+    tuning.bgRain = 1;
+    tuning.bgLightningOnBeat = 1;
+    try {
+      const customMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:delayed-drop-climax-test',
+        bpm: 120,
+        firstBeatOffsetSec: 0,
+        barEnergy: [0.18, 0.22, 0.24, 0.20, 0.31, 0.74, 0.38, 0.78],
+        sections: [
+          { startBar: 0, bars: 4, role: 'build' as const },
+          { startBar: 4, bars: 4, role: 'drop' as const },
+        ],
+      };
+      const audio = new FunkAudioEngine(customMap);
+      const game = new Game({ input: new FakeInput(), audio });
+      const bgAcc = (game as unknown as { background: { lightningStrikeCount: number } }).background;
+
+      // Advance across bar 4 (drop entry with low energy 0.31) -> strike 1
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 7.95;
+      game.update(0.02);
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 8.05;
+      game.update(0.02);
+      const strikesAtBar4 = bgAcc.lightningStrikeCount;
+      expect(strikesAtBar4).toBeGreaterThanOrEqual(1);
+
+      // Advance across bar 5 (1 bar later: energy surges from 0.31 -> 0.74, Δ+0.43) -> fires climax strike!
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 10.05;
+      game.update(0.02);
+      expect(bgAcc.lightningStrikeCount).toBe(strikesAtBar4 + 1);
+
+      // Advance across bar 6 (dip to 0.38) and bar 7 (rebound to 0.78, Δ+0.40):
+      // Post-pickup exception was consumed at bar 5, so 8-bar refractory cooldown blocks bar 7!
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 12.05;
+      game.update(0.02);
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 14.05;
+      game.update(0.02);
+      expect(bgAcc.lightningStrikeCount).toBe(strikesAtBar4 + 1);
+    } finally {
+      tuning.bgRain = prevRain;
+      tuning.bgLightningOnBeat = prevLightning;
+    }
+  });
+});
+
+describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () => {
+  it('preserves track.length, car position, and transitions cleanly to akiba_night viaducts even after tuning.maxSpeed changes', () => {
+    const prevMaxSpeed = tuning.maxSpeed;
+    try {
+      const game = new Game({ input: new FakeInput(), audio: new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP) });
+      const initialLength = game.track.length;
+      const targetPos = initialLength * 0.45;
+      game.hasStartedDriving = true;
+      game.position = targetPos;
+      (game as unknown as { prevPosition: number }).prevPosition = targetPos;
+
+      // Simulate user altering maxSpeed tuning live via DebugPanel before switching stage
+      tuning.maxSpeed = prevMaxSpeed * 1.4;
+      game.setStagePaletteIndex(2); // AKIBA NIGHT RUSH -> viaducts
+
+      expect(game.palette.id).toBe('akiba_night');
+      expect(game.track.length).toBe(initialLength);
+      expect(game.position).toBeCloseTo(targetPos, 5);
+      expect(game.position).toBeLessThan(game.track.length);
+      expect(game.bridge.getSnapshot()?.lap).toBe(1);
+
+      const envs = new Set(game.track.segments.map((s) => s.env));
+      expect(envs.has('viaduct')).toBe(true);
+      expect(envs.has('bridge')).toBe(false);
+    } finally {
+      tuning.maxSpeed = prevMaxSpeed;
+    }
+  });
+});

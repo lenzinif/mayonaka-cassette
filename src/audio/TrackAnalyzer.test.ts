@@ -101,6 +101,12 @@ describe('BeatMap helpers', () => {
     });
 
     expect(isBeatMap(beatMap)).toBe(true);
+    expect(beatMap.barBrightness).toBeDefined();
+    expect(beatMap.barBrightness!.length).toBe(beatMap.barEnergy.length);
+    for (const br of beatMap.barBrightness!) {
+      expect(br).toBeGreaterThanOrEqual(0);
+      expect(br).toBeLessThanOrEqual(1);
+    }
     expect(Math.abs(beatMap.bpm - 120)).toBeLessThan(0.25);
     expect(beatDurationSec(beatMap)).toBeCloseTo(0.5, 2);
     expect(barDurationSec(beatMap)).toBeCloseTo(2.0, 2);
@@ -115,6 +121,7 @@ describe('BeatMap helpers', () => {
 
     const doubled = withAdjustedBpm(beatMap, beatMap.bpm * 2);
     expect(doubled.bpm).toBeCloseTo(beatMap.bpm * 2, 1);
+    expect(doubled.barBrightness?.length).toBe(doubled.barEnergy.length);
     expect(doubled.source).toBe('manual');
 
     const nudged = nudgeBeatMapDownbeat(beatMap, 1);
@@ -150,6 +157,102 @@ describe('BeatMap helpers', () => {
     expect(Math.abs(beatMap.bpm - 126)).toBeLessThanOrEqual(0.5);
     expect(beatMap.confidence.tempoStable).toBe(true);
     expect(firstDropBar(beatMap)).toBe(8);
+  });
+
+  it('pinpoints exact bar-level drop onsets after a 1-bar vocal pickup or 9-bar filtered build', () => {
+    const pcmPickup1 = synthesizeFourOnTheFloorTrack({
+      bpm: 118,
+      durationSec: 48,
+      firstBeatOffsetSec: 0.04,
+      introBars: 1,
+    });
+    const { beatMap: map1 } = analyzePcm(pcmPickup1, ANALYSIS_SAMPLE_RATE, {
+      contentHash: 'sha256:pickup-1bar',
+      title: 'Pickup 1 Bar',
+      artist: 'Tester',
+    });
+    expect(firstDropBar(map1)).toBe(1);
+    expect(sectionAtBar(map1, 0)?.role).toBe('intro');
+    expect(sectionAtBar(map1, 1)?.role).toBe('drop');
+    expect(map1.barEnergy[1]! - map1.barEnergy[0]!).toBeGreaterThanOrEqual(0.35);
+    expect(firstDropBar(withAdjustedBpm(map1, map1.bpm))).toBe(1);
+
+    const pcmIntro9 = synthesizeFourOnTheFloorTrack({
+      bpm: 120,
+      durationSec: 64,
+      firstBeatOffsetSec: 0.05,
+      introBars: 9,
+    });
+    const { beatMap: map9 } = analyzePcm(pcmIntro9, ANALYSIS_SAMPLE_RATE, {
+      contentHash: 'sha256:intro-9bar',
+      title: 'Intro 9 Bar',
+      artist: 'Tester',
+    });
+    expect(firstDropBar(map9)).toBe(9);
+    expect(sectionAtBar(map9, 8)?.role).not.toBe('drop');
+    expect(sectionAtBar(map9, 9)?.role).toBe('drop');
+    expect(map9.barEnergy[9]! - map9.barEnergy[8]!).toBeGreaterThanOrEqual(0.35);
+    expect(firstDropBar(withAdjustedBpm(map9, map9.bpm))).toBe(9);
+  });
+
+  it('damps mid-song LPF muffled bars (b >= 20) and pinpoints the unmuffle drop bar', () => {
+    const sr = ANALYSIS_SAMPLE_RATE;
+    const bpm = 120;
+    const durationSec = 72; // 36 bars
+    const firstBeatOffsetSec = 0.15;
+    const totalSamples = Math.floor(durationSec * sr);
+    const pcm = new Float32Array(totalSamples);
+    const beatDur = 60 / bpm;
+    const totalBeats = Math.floor((durationSec - firstBeatOffsetSec) / beatDur);
+
+    for (let b = 0; b < totalBeats; b++) {
+      const barIdx = Math.floor(b / 4);
+      const beatInBar = b % 4;
+      const startSample = Math.floor((firstBeatOffsetSec + b * beatDur) * sr);
+      // Bars 0..3: quiet intro; Bars 4..19: full-band drop 1;
+      // Bars 20..24: LPF muffled section (strong sub-bass <150Hz, zero high frequencies >2kHz);
+      // Bars 25..35: full-band drop 2 (filter opens at bar 25!).
+      const isQuietIntro = barIdx < 4;
+      const isLpfMuffled = barIdx >= 20 && barIdx <= 24;
+      const hasKick = !isQuietIntro;
+      const hasHighAir = !isQuietIntro && !isLpfMuffled;
+
+      const len = Math.floor(0.12 * sr);
+      for (let i = 0; i < len && startSample + i < totalSamples; i++) {
+        const t = i / sr;
+        const env = Math.exp(-t * 26);
+        let sample = 0;
+        if (hasKick) {
+          const kickAmp = isLpfMuffled ? 0.52 : beatInBar === 0 ? 0.9 : 0.72;
+          sample += kickAmp * env * Math.sin(2 * Math.PI * 62 * t);
+        } else {
+          sample += 0.14 * env * Math.sin(2 * Math.PI * 380 * t);
+        }
+        if (hasHighAir && (beatInBar === 1 || beatInBar === 3)) {
+          sample +=
+            0.38 *
+            env *
+            (Math.sin(2 * Math.PI * 2600 * t) * 0.6 + Math.sin(2 * Math.PI * 4100 * t) * 0.4);
+        }
+        pcm[startSample + i] = pcm[startSample + i]! + sample;
+      }
+    }
+
+    const { beatMap } = analyzePcm(pcm, sr, {
+      contentHash: 'sha256:lpf-unmuffle-bar25',
+      title: 'LPF Unmuffle Test',
+      artist: 'Tester',
+    });
+
+    // Bar 24 is still LPF-muffled; Bar 25 opens the high-band filter into the drop
+    expect(beatMap.barEnergy[24]!).toBeLessThan(0.6);
+    expect(beatMap.barEnergy[25]!).toBeGreaterThan(0.75);
+    expect(beatMap.barEnergy[25]! - beatMap.barEnergy[24]!).toBeGreaterThanOrEqual(0.25);
+    expect(beatMap.barBrightness).toBeDefined();
+    expect(beatMap.barBrightness?.[22]).toBeLessThan(0.25);
+    expect(beatMap.barBrightness?.[27]).toBeGreaterThan(0.65);
+    expect(sectionAtBar(beatMap, 24)?.role).not.toBe('drop');
+    expect(sectionAtBar(beatMap, 25)?.role).toBe('drop');
   });
 });
 

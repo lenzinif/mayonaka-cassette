@@ -185,15 +185,15 @@ export class SongRoadSyncController {
       }
     }
 
-    // Do not stitch while the camera or near visible window is on a bridge (env === 'bridge'),
-    // so monumental suspension bridge towers, cables, and expansion joints are never cut mid-span.
+    // Do not stitch while the camera or near visible window is on a special structure
+    // (`bridge`, `viaduct`, or `tunnel`) so monumental towers, cables, and portals never cut mid-span.
     const curSegIdx = Math.floor(position / track.segmentLength);
-    const nearBridgeSegs = Math.min(
+    const nearSpecialSegs = Math.min(
       track.segments.length,
-      curSegIdx + Math.max(1, drawDistSegs - 24),
+      curSegIdx + Math.max(1, drawDistSegs),
     );
-    for (let s = Math.max(0, curSegIdx); s < nearBridgeSegs; s += 8) {
-      if (track.segments[s]!.env === 'bridge') {
+    for (let s = Math.max(0, curSegIdx); s < nearSpecialSegs; s++) {
+      if ((track.segments[s]!.env ?? 'standard') !== 'standard') {
         return 0;
       }
     }

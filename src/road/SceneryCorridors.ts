@@ -1,5 +1,6 @@
 import { FORK_APPROACH_BARS } from '../config/constants';
 import type { SeededRandom } from '../core/SeededRandom';
+import { ENVIRONMENT_ARCHETYPES } from './EnvironmentArchetypes';
 import type { RoadSegment, RoadSprite } from './RoadSegment';
 import type { PlacedRoadChunk } from './SongRoadGenerator';
 
@@ -23,13 +24,36 @@ export interface PopulatePowerLinesOptions {
 }
 
 /**
- * Checks if all segments belonging to a placed chunk are non-bridge segments.
+ * Checks if all segments belonging to a placed chunk are standard open segments
+ * and its active environmental archetype supports power-line corridors.
  */
 function isChunkEligible(chunk: PlacedRoadChunk, segments: readonly RoadSegment[]): boolean {
+  if (
+    chunk.archetype !== undefined &&
+    !ENVIRONMENT_ARCHETYPES[chunk.archetype].allowPowerLines
+  ) {
+    return false;
+  }
   const endSeg = Math.min(segments.length, chunk.startSegment + chunk.segmentCount);
   for (let i = chunk.startSegment; i < endSeg; i++) {
-    if (segments[i]?.env === 'bridge') {
+    if (segments[i]?.env !== 'standard') {
       return false;
+    }
+  }
+  return true;
+}
+
+function isBarArchetypePowerLineAllowed(
+  placedChunks: readonly PlacedRoadChunk[],
+  bar: number,
+): boolean {
+  for (let i = 0; i < placedChunks.length; i++) {
+    const c = placedChunks[i]!;
+    if (bar >= c.startBar && bar < c.startBar + c.bars) {
+      return (
+        c.archetype === undefined ||
+        ENVIRONMENT_ARCHETYPES[c.archetype].allowPowerLines
+      );
     }
   }
   return true;
@@ -245,7 +269,7 @@ export function populatePowerLines(
         segIdx >= 0 &&
         segIdx < segments.length &&
         segIdx <= maxAllowedSeg &&
-        segments[segIdx]?.env !== 'bridge' &&
+        segments[segIdx]?.env === 'standard' &&
         (validSegs.length === 0 || validSegs[validSegs.length - 1] !== segIdx)
       ) {
         validSegs.push(segIdx);
@@ -289,9 +313,10 @@ export function populatePowerLines(
     const candidateCrossingBars: number[] = [];
     for (let b = 4; b < maxBar - 2; b++) {
       if (occupiedBars.has(b)) continue;
+      if (!isBarArchetypePowerLineAllowed(placedChunks, b)) continue;
       const segIdx = b * segmentsPerBar;
       const seg = segments[segIdx];
-      if (seg && seg.env !== 'bridge' && Math.abs(seg.curve) < 1.0) {
+      if (seg && seg.env === 'standard' && Math.abs(seg.curve) < 1.0) {
         candidateCrossingBars.push(b);
       }
     }

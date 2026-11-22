@@ -121,6 +121,7 @@ interface SpectralFeatures {
   frameRms: Float32Array;
   frameLowEnergy: Float32Array;
   frameMidHighEnergy: Float32Array;
+  frameHighEnergy: Float32Array;
   frameCentroid: Float32Array;
   fps: number;
   numFrames: number;
@@ -139,11 +140,13 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
   const frameRms = new Float32Array(numFrames);
   const frameLowEnergy = new Float32Array(numFrames);
   const frameMidHighEnergy = new Float32Array(numFrames);
+  const frameHighEnergy = new Float32Array(numFrames);
   const frameCentroid = new Float32Array(numFrames);
 
   const halfN = FFT_SIZE >> 1;
   const binHz = sampleRate / FFT_SIZE;
   const lowMaxBin = Math.max(2, Math.min(halfN - 1, Math.ceil(150 / binHz)));
+  const highMinBin = Math.max(lowMaxBin + 1, Math.min(halfN - 1, Math.ceil(2000 / binHz)));
   const fluxMaxBin = Math.min(halfN - 1, Math.floor(8000 / binHz));
 
   const re = new Float32Array(FFT_SIZE);
@@ -166,6 +169,7 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
     let lowFlux = 0;
     let lowE = 0;
     let midHighE = 0;
+    let highE = 0;
     let weightedBinSum = 0;
     let magSum = 0;
 
@@ -185,6 +189,9 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
         lowE += m * m;
       } else {
         midHighE += m * m;
+        if (k >= highMinBin) {
+          highE += m * m;
+        }
       }
       weightedBinSum += k * m;
       magSum += m;
@@ -197,6 +204,7 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
     frameRms[frameIdx] = rmsVal;
     frameLowEnergy[frameIdx] = Math.sqrt(lowE / lowMaxBin);
     frameMidHighEnergy[frameIdx] = Math.sqrt(midHighE / Math.max(1, fluxMaxBin - lowMaxBin));
+    frameHighEnergy[frameIdx] = Math.sqrt(highE / Math.max(1, fluxMaxBin - highMinBin + 1));
     frameCentroid[frameIdx] = magSum > 1e-6 ? (weightedBinSum / magSum) * binHz : 0;
   };
 
@@ -275,6 +283,7 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
     frameRms,
     frameLowEnergy,
     frameMidHighEnergy,
+    frameHighEnergy,
     frameCentroid,
     fps,
     numFrames,
@@ -825,8 +834,11 @@ function normalizeFeatureByPercentile(arr: Float32Array): Float32Array {
   const n = arr.length;
   const sorted = new Float32Array(arr);
   sorted.sort();
-  const p5 = percentile(sorted, 0.05);
+  let p5 = percentile(sorted, 0.05);
   const p95 = percentile(sorted, 0.95);
+  if (p5 > p95 * 0.65) {
+    p5 = sorted[0] ?? 0;
+  }
   const span = Math.max(1e-6, p95 - p5);
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -844,13 +856,22 @@ function computeBarEnergyAndSections(
   firstBeatOffsetSec: number,
   durationSec: number,
   features: SpectralFeatures,
-): { barEnergy: number[]; sections: BeatSection[] } {
-  const { frameRms, frameLowEnergy, rhythmEnv, frameCentroid, fps, numFrames } = features;
+): { barEnergy: number[]; barBrightness: number[]; sections: BeatSection[] } {
+  const {
+    frameRms,
+    frameLowEnergy,
+    frameHighEnergy,
+    rhythmEnv,
+    frameCentroid,
+    fps,
+    numFrames,
+  } = features;
   const barDur = (60 / bpm) * BEATS_PER_BAR;
   const totalBars = Math.max(4, Math.floor((durationSec - firstBeatOffsetSec) / barDur));
 
   const rawRms = new Float32Array(totalBars);
   const rawLow = new Float32Array(totalBars);
+  const rawHigh = new Float32Array(totalBars);
   const rawFlux = new Float32Array(totalBars);
   const rawCentroid = new Float32Array(totalBars);
 
@@ -862,12 +883,14 @@ function computeBarEnergyAndSections(
 
     let sRms = 0;
     let sLow = 0;
+    let sHigh = 0;
     let sFlux = 0;
     let sCent = 0;
     let cnt = 0;
     for (let f = fStart; f <= fEnd; f++) {
       sRms += frameRms[f]!;
       sLow += frameLowEnergy[f]!;
+      sHigh += frameHighEnergy[f]!;
       sFlux += rhythmEnv[f]!;
       sCent += frameCentroid[f]!;
       cnt++;
@@ -875,6 +898,7 @@ function computeBarEnergyAndSections(
     if (cnt > 0) {
       rawRms[b] = sRms / cnt;
       rawLow[b] = sLow / cnt;
+      rawHigh[b] = sHigh / cnt;
       rawFlux[b] = sFlux / cnt;
       rawCentroid[b] = sCent / cnt;
     }
@@ -882,6 +906,7 @@ function computeBarEnergyAndSections(
 
   const normRms = normalizeFeatureByPercentile(rawRms);
   const normLow = normalizeFeatureByPercentile(rawLow);
+  const normHigh = normalizeFeatureByPercentile(rawHigh);
   const normFlux = normalizeFeatureByPercentile(rawFlux);
   const normCent = normalizeFeatureByPercentile(rawCentroid);
 
@@ -892,14 +917,44 @@ function computeBarEnergyAndSections(
       0.34 * normRms[b]! + 0.46 * normLow[b]! + 0.15 * normFlux[b]! + 0.05 * normCent[b]!;
   }
 
-  // Smooth lightly for `barEnergy` output (3-bar kernel [0.2, 0.6, 0.2])
+  // Edge-preserving smoothing for `barEnergy` output + mid/late-song LPF muffle awareness:
+  // Smooth gently within steady passages, but prevent future drop energy from leaking backward
+  // into a quiet/muffled pre-drop bar (`wNext = 0.04` on sharp rises) and prevent a quiet pre-drop
+  // bar from dragging down the first bar of a drop (`wPrev = 0.04`).
   const barEnergy: number[] = new Array<number>(totalBars);
   for (let b = 0; b < totalBars; b++) {
     const prev = unsmoothedEnergy[Math.max(0, b - 1)]!;
     const cur = unsmoothedEnergy[b]!;
     const next = unsmoothedEnergy[Math.min(totalBars - 1, b + 1)]!;
-    const val = Math.max(0, Math.min(1, 0.2 * prev + 0.6 * cur + 0.2 * next));
+
+    const wNext = next - cur >= 0.24 ? 0.04 : 0.20;
+    const wPrev = cur - prev >= 0.24 ? 0.04 : 0.20;
+    const wCur = 1.0 - wPrev - wNext;
+    let val = Math.max(0, Math.min(1, wPrev * prev + wCur * cur + wNext * next));
+
+    // When a mid/late-song bar (b >= 20) is underwater under a master low-pass filter
+    // (sub-bass active >= 0.45, while >2kHz high-band and centroid collapse < 0.12),
+    // damp output barEnergy so opening the filter produces an unmistakable spectral surge.
+    if (b >= 20 && normLow[b]! >= 0.45 && normHigh[b]! < 0.12 && normCent[b]! < 0.12) {
+      const openRatio = Math.max(0, Math.max(normHigh[b]!, normCent[b]!) / 0.12);
+      val *= 0.55 + 0.45 * openRatio;
+    }
+
     barEnergy[b] = Math.round(val * 1000) / 1000;
+  }
+
+  // Preserve true spectral brightness ratio relative to track p95 without min-subtraction,
+  // preventing benign slight dips on uniformly bright tracks from stretching down to 0.
+  const sortedCent = new Float32Array(rawCentroid).sort();
+  const sortedHigh = new Float32Array(rawHigh).sort();
+  const p95Cent = percentile(sortedCent, 0.95);
+  const p95High = percentile(sortedHigh, 0.95);
+  const barBrightness: number[] = new Array<number>(totalBars);
+  for (let b = 0; b < totalBars; b++) {
+    const centRatio = Math.max(0, Math.min(1, rawCentroid[b]! / Math.max(250, p95Cent)));
+    const highRatio = Math.max(0, Math.min(1, rawHigh[b]! / Math.max(1e-4, p95High)));
+    const bright = Math.max(0, Math.min(1, 0.7 * centRatio + 0.3 * highRatio));
+    barBrightness[b] = Math.round(bright * 1000) / 1000;
   }
 
   // Partition into 4-bar blocks for section segmentation
@@ -1019,6 +1074,18 @@ function computeBarEnergyAndSections(
       start3L >= highLowRef * 0.48 &&
       bestNovelty < 0.34);
 
+  // Detect 1-bar vocal/sample pickups without sub-bass kick (e.g. Love's Gonna, On My Mind)
+  let exactFirstDropBar = immediateGroove ? 0 : bestDropBar;
+  if (immediateGroove && totalBars >= 8) {
+    const e0 = unsmoothedEnergy[0]!;
+    const e1 = unsmoothedEnergy[1]!;
+    const l0 = normLow[0]!;
+    const l1 = normLow[1]!;
+    if (e0 < 0.30 && l0 < 0.18 && e1 - e0 >= 0.25 && l1 - l0 >= 0.30) {
+      exactFirstDropBar = 1;
+    }
+  }
+
   const firstDropBlock = immediateGroove
     ? 0
     : Math.min(numBlocks - 1, Math.max(0, Math.round(bestDropBar / 4)));
@@ -1123,7 +1190,99 @@ function computeBarEnergyAndSections(
     articulated.push({ startBar: 0, bars: totalBars, role: 'drop' });
   }
 
-  return { barEnergy, sections: articulated };
+  // Bar-Exact Drop Onset Pinpointing Pass:
+  // 1. If the song starts with a 1..3 bar vocal/sample pickup before `exactFirstDropBar`
+  //    while the first 4-bar block was classified as `drop`, split out the pickup as `intro`.
+  let splitPickup = false;
+  if (
+    articulated.length > 0 &&
+    articulated[0]!.role === 'drop' &&
+    exactFirstDropBar > 0 &&
+    exactFirstDropBar <= 3
+  ) {
+    const firstSec = articulated[0]!;
+    if (firstSec.bars > exactFirstDropBar) {
+      articulated.splice(
+        0,
+        1,
+        { startBar: 0, bars: exactFirstDropBar, role: 'intro' },
+        { startBar: exactFirstDropBar, bars: firstSec.bars - exactFirstDropBar, role: 'drop' },
+      );
+      splitPickup = true;
+    }
+  }
+
+  // 2. For every non-drop -> drop transition, pinpoint the exact bar within [nominalBar - 2, nominalBar + 2]
+  //    where the spectral opening transient (bass/energy return + high-band filter unmuffle) actually occurs.
+  for (let i = splitPickup ? 2 : 1; i < articulated.length; i++) {
+    const prevSec = articulated[i - 1]!;
+    const curSec = articulated[i]!;
+    if (curSec.role !== 'drop' || prevSec.role === 'drop') continue;
+
+    const nominalBar = curSec.startBar;
+    const isFirstDropSection = !articulated.slice(0, i).some((s) => s.role === 'drop');
+    const minCandidate = Math.max(prevSec.startBar + 1, nominalBar - 2);
+    const maxCandidate = Math.min(curSec.startBar + curSec.bars - 2, nominalBar + 2);
+    if (minCandidate > maxCandidate) continue;
+
+    const transientScore = (b: number): number => {
+      if (b <= 0 || b >= totalBars) return -Infinity;
+      const dE = Math.max(0, unsmoothedEnergy[b]! - unsmoothedEnergy[b - 1]!);
+      const dLow = Math.max(0, normLow[b]! - normLow[b - 1]!);
+      const dHigh = Math.max(0, normHigh[b]! - normHigh[b - 1]!);
+      const post2E = winAvg(unsmoothedEnergy, b, 2);
+      const pre2E = winAvg(unsmoothedEnergy, Math.max(0, b - 2), Math.min(2, b));
+      const sustainStep = Math.max(0, post2E - pre2E);
+      const levelPenalty =
+        unsmoothedEnergy[b]! < Math.min(0.45, highEnergyRef * 0.55) ? -0.45 : 0;
+      const lpfMufflePenalty =
+        b >= 20 && normHigh[b]! < 0.12 && normCent[b]! < 0.12 ? -0.30 : 0;
+      return (
+        0.45 * dE +
+        0.30 * dLow +
+        0.22 * dHigh +
+        0.35 * sustainStep +
+        levelPenalty +
+        lpfMufflePenalty
+      );
+    };
+
+    const nominalScore =
+      transientScore(nominalBar) +
+      (isFirstDropSection && nominalBar === exactFirstDropBar ? 0.10 : 0);
+
+    let bestCandBar = nominalBar;
+    let bestCandScore = -Infinity;
+
+    for (let b = minCandidate; b <= maxCandidate; b++) {
+      if (b === nominalBar) continue;
+      const rawStep =
+        Math.max(0, unsmoothedEnergy[b]! - unsmoothedEnergy[b - 1]!) +
+        0.50 * Math.max(0, normHigh[b]! - normHigh[b - 1]!);
+      if (rawStep < 0.16) continue;
+      let s = transientScore(b);
+      if (isFirstDropSection && b === exactFirstDropBar) {
+        s += 0.10;
+      }
+      if (s > bestCandScore) {
+        bestCandScore = s;
+        bestCandBar = b;
+      }
+    }
+
+    const bestBar = bestCandScore > nominalScore + 0.07 ? bestCandBar : nominalBar;
+
+    if (bestBar !== nominalBar) {
+      const delta = bestBar - nominalBar;
+      if (prevSec.bars + delta >= 1 && curSec.bars - delta >= 2) {
+        prevSec.bars += delta;
+        curSec.startBar += delta;
+        curSec.bars -= delta;
+      }
+    }
+  }
+
+  return { barEnergy, barBrightness, sections: articulated };
 }
 
 function downsampleEnvelope(env: Float32Array, targetPoints: number): Float32Array {
@@ -1168,7 +1327,7 @@ export function analyzePcm(
   );
 
   const downbeat = selectDownbeatOffset(grid.bpm, grid.beatPhaseOffsetSec, features);
-  const { barEnergy, sections } = computeBarEnergyAndSections(
+  const { barEnergy, barBrightness, sections } = computeBarEnergyAndSections(
     grid.bpm,
     downbeat.firstBeatOffsetSec,
     durationSec,
@@ -1189,6 +1348,7 @@ export function analyzePcm(
     firstBeatOffsetSec: downbeat.firstBeatOffsetSec,
     beatsPerBar: BEATS_PER_BAR,
     barEnergy,
+    barBrightness,
     sections,
     confidence: {
       tempo: tempoConf,

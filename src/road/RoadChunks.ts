@@ -1,62 +1,37 @@
 import type { SectionRole } from '@src/audio/BeatMap';
-import type { PropBand, PropKind, SegmentEnvironment } from './RoadSegment';
 import { CURVE, HILL } from './TrackBuilder';
-import type { RoadChunkVignetteSlot } from './Vignettes';
 
 /**
- * Hand-authored bar-length road "chunks" tagged by musical section role (docs/DESIGN.md §3).
+ * Pure choreography & geometry `RoadChunk` vocabulary (decoupled from scenery & stage themes).
  *
- * Pure TypeScript module (AGENTS.md §2: zero React imports).
+ * Pure TypeScript module (AGENTS.md §2: zero React imports; zero palette/scenery imports).
  *
- * Each `RoadChunk` spans 4 or 8 musical bars (16 or 32 beats — roughly 8 to 16 seconds of driving
- * at 120 BPM) and is composed of sequential `maneuvers` whose `bars` sum to `chunk.bars`.
+ * Each `RoadChunk` spans 4 or 8 musical bars and defines only driving maneuvers, cadence,
+ * structural capabilities, and traffic profile. Visual dressing is applied downstream by
+ * `EnvironmentArchetypes` and `SongRoadGenerator`'s Scenery Dresser.
  */
 
-export type PropPlacement =
-  | 'both'
-  | 'left'
-  | 'right'
-  | 'alternating'
-  | 'outside-curve'
-  | 'inside-curve';
-
-export interface ChunkPropRule {
-  kind: PropKind;
-  placement: PropPlacement;
-  /** Spacing in musical beats (1 = every beat, 2 = every 2 beats, 4 = once per bar). */
-  everyBeats: number;
-  /** Lateral distance from road centre in road half-widths (default: sampled from band range or default kind offset). */
-  offset?: number;
-  /** Depth band: 'A' (shoulder), 'B' (verge), 'C' (near field), 'D' (far field). */
-  band?: PropBand;
-  /** Deterministic jitter applied to placement. */
-  jitter?: {
-    lateral?: number;
-    beats?: number;
-  };
-  /** Cluster configuration for organic grouping. */
-  cluster?: {
-    min: number;
-    max: number;
-    spreadBeats: number;
-    spreadLateral: number;
-  };
-  /** Whether prop is placed strictly on the beat grid. Defaults to true for Band A, false for B/C/D. */
-  rhythmic?: boolean;
-  /** Scale variance (scale = 1 ± scaleJitter). Defaults to 0 for rhythmic, 0.2 for non-rhythmic. */
-  scaleJitter?: number;
-}
+export type TrafficProfile = 'weaving' | 'normal' | 'sparse' | 'clear';
+export type ElevationIntent = 'flat' | 'climb' | 'crest' | 'plunge' | 'rolling';
+export type StructureCapability = 'standard' | 'elevated' | 'tunnel';
+export type DrivingStyleTag = 'cruise' | 'wangan' | 'technical' | 'scenic';
 
 export interface ChunkManeuver {
-  /** Duration of this maneuver in musical bars (can be 1, 2, 4, etc.; must sum to `chunk.bars`). */
+  /** Duration of this maneuver in musical bars (sum must equal `chunk.bars`). */
   bars: number;
-  /** Peak horizontal curvature (+right / -left). Scaled by `barEnergy` during generation. */
+  /** Peak/target horizontal curvature (+right / -left). */
   curve: number;
+  /**
+   * If true, curvature blends directly into the next maneuver without resetting to 0
+   * (enables double-apexes, tightening/opening-radius curves, and fluid S-bends).
+   * Defaults to false (returns smoothly to 0).
+   */
+  blendToNext?: boolean;
   /** Elevation change over this maneuver (+uphill / -downhill in HILL units). */
   elevation: number;
   /**
    * Optional `[enterRatio, leaveRatio]` in `[0, 0.5]` controlling how much of the maneuver eases
-   * into and out of `curve`. Defaults to `[0.25, 0.25]`.
+   * into and out of `curve` (controls jerk for Tofu Mode). Defaults to `[0.25, 0.25]`.
    */
   easeRatio?: readonly [number, number];
 }
@@ -76,21 +51,23 @@ export interface RoadChunk {
   weight?: number;
   /** Preferred `[minEnergy, maxEnergy]` in `[0, 1]` (default `[0, 1]`). */
   energyRange?: readonly [number, number];
-  /**
-   * When `true` (used on `build` chunks), guarantees the elevation climbs continuously to a
-   * horizon-occluding crest at the exact end of the chunk so the road reveals on the drop.
-   */
-  crestOnExit?: boolean;
-  env?: SegmentEnvironment;
+  /** Vertical choreography role of this chunk. */
+  elevationIntent: ElevationIntent;
+  /** Preferred immediately after a pre-drop crest (panoramic plunge / reveal). */
+  postCrestReveal?: boolean;
+  /** Road structures compatible with this geometry (e.g. tight hairpins never go on elevated spans). */
+  allowedStructures: readonly StructureCapability[];
+  /** Driving personality tags matched against Track DNA. */
+  styleTags: readonly DrivingStyleTag[];
+  /** Base rhythmic cadence in beats for Band A fixtures (street lamps / tunnel lights). */
+  fixtureCadenceBeats: 1 | 2 | 4;
+  /** Traffic density & weaving profile for TrafficManager. */
+  trafficProfile: TrafficProfile;
   /** Ordered sequence of road maneuvers whose `bars` sum to `chunk.bars`. */
   maneuvers: readonly ChunkManeuver[];
-  /** Roadside prop rhythm rules for this chunk. */
-  props: readonly ChunkPropRule[];
-  /** Optional roadside vignette slots that may spawn inside this chunk (docs/DESIGN.md §2 Fase 4). */
-  vignettes?: readonly RoadChunkVignetteSlot[];
 }
 
-/** Validates that a `RoadChunk` definition has consistent bar counts and valid parameters. */
+/** Validates that a `RoadChunk` definition has consistent bar counts and valid choreography contracts. */
 export function validateRoadChunk(chunk: RoadChunk): RoadChunk {
   if (!chunk.id || typeof chunk.id !== 'string') {
     throw new Error('RoadChunk must have a non-empty string id');
@@ -101,10 +78,38 @@ export function validateRoadChunk(chunk: RoadChunk): RoadChunk {
   if (chunk.maneuvers.length === 0) {
     throw new Error(`RoadChunk "${chunk.id}" must contain at least one maneuver`);
   }
+  if (!chunk.allowedStructures || chunk.allowedStructures.length === 0) {
+    throw new Error(`RoadChunk "${chunk.id}" must declare at least one allowedStructure`);
+  }
+  if (!chunk.styleTags || chunk.styleTags.length === 0) {
+    throw new Error(`RoadChunk "${chunk.id}" must declare at least one styleTag`);
+  }
+  if (
+    chunk.fixtureCadenceBeats !== 1 &&
+    chunk.fixtureCadenceBeats !== 2 &&
+    chunk.fixtureCadenceBeats !== 4
+  ) {
+    throw new Error(
+      `RoadChunk "${chunk.id}" fixtureCadenceBeats must be 1, 2, or 4 (got ${String(chunk.fixtureCadenceBeats)})`,
+    );
+  }
   let sumBars = 0;
   for (const m of chunk.maneuvers) {
     if (m.bars <= 0 || !Number.isFinite(m.bars)) {
       throw new Error(`RoadChunk "${chunk.id}" has invalid maneuver bars: ${String(m.bars)}`);
+    }
+    if (m.easeRatio) {
+      const [enterR, leaveR] = m.easeRatio;
+      if (
+        !Number.isFinite(enterR) ||
+        !Number.isFinite(leaveR) ||
+        enterR < 0 ||
+        enterR > 0.5 ||
+        leaveR < 0 ||
+        leaveR > 0.5
+      ) {
+        throw new Error(`RoadChunk "${chunk.id}" has invalid easeRatio: [${enterR}, ${leaveR}]`);
+      }
     }
     sumBars += m.bars;
   }
@@ -122,564 +127,557 @@ export function defineChunk(chunk: RoadChunk): RoadChunk {
 }
 
 /**
- * Canonical vocabulary of hand-authored `RoadChunks` (docs/DESIGN.md §3).
+ * Canonical vocabulary of pure-choreography `RoadChunks`.
  */
 export const ROAD_CHUNKS: readonly RoadChunk[] = [
   // ============================================================================
-  // INTRO — Gentle straights, wide sweepers, scenery establishing
+  // INTRO — Gentle straights, wide sweepers, rhythmic warming up
   // ============================================================================
   defineChunk({
     id: 'intro-boulevard-cruise',
-    description: 'Rettilineo panoramico con palme cadenzate ogni mezza battuta e leggera brezza finale',
+    description: 'Rettilineo panoramico con brezza finale in leggera ascesa',
     role: 'intro',
     bars: 4,
     weight: 1.2,
     energyRange: [0.0, 0.55],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated', 'tunnel'],
+    styleTags: ['cruise', 'scenic'],
+    fixtureCadenceBeats: 4,
+    trafficProfile: 'sparse',
     maneuvers: [
       { bars: 2, curve: 0, elevation: 0 },
       { bars: 2, curve: CURVE.EASY * 0.75, elevation: HILL.LOW * 0.4 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'alternating', everyBeats: 4, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'tree', placement: 'both', everyBeats: 2, band: 'B', offset: 2.6, jitter: { lateral: 0.7, beats: 0.3 }, rhythmic: false, scaleJitter: 0.25 },
-      { kind: 'shrub', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, cluster: { min: 2, max: 4, spreadBeats: 1.2, spreadLateral: 0.9 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 8, band: 'D', offset: 8.5, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'bus-stop', chance: 0.75, side: 'outside-curve' },
     ],
   }),
 
   defineChunk({
     id: 'intro-sunset-sweeper',
-    description: 'Ampio curvone dolce a 8 battute con ondina costiera per scaldare le gomme',
+    description: 'Ampio curvone continuo a 8 battute con ondina dolce e raccordo fluido',
     role: 'intro',
     bars: 8,
-    weight: 1.1,
+    weight: 1.15,
     energyRange: [0.15, 0.65],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['scenic', 'cruise'],
+    fixtureCadenceBeats: 4,
+    trafficProfile: 'sparse',
     maneuvers: [
       { bars: 2, curve: 0, elevation: HILL.LOW * 0.5 },
-      { bars: 4, curve: CURVE.EASY, elevation: -HILL.LOW * 0.5 },
-      { bars: 2, curve: -CURVE.EASY * 0.5, elevation: 0 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 4, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'tree', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.8, jitter: { lateral: 0.8, beats: 0.4 }, cluster: { min: 1, max: 3, spreadBeats: 1.0, spreadLateral: 0.6 }, rhythmic: false, scaleJitter: 0.25 },
-      { kind: 'billboard', placement: 'inside-curve', everyBeats: 8, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 2.3, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 1.0 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'inside-curve', everyBeats: 8, band: 'C', offset: 4.5, jitter: { lateral: 0.5, beats: 0.8 }, rhythmic: false },
-      { kind: 'tree', placement: 'both', everyBeats: 4, band: 'C', offset: 5.2, jitter: { lateral: 1.0, beats: 0.8 }, cluster: { min: 2, max: 3, spreadBeats: 1.5, spreadLateral: 0.9 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 8, band: 'D', offset: 9.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'shrine-gate', chance: 0.75, side: 'inside-curve' },
+      { bars: 4, curve: CURVE.EASY, blendToNext: true, elevation: -HILL.LOW * 0.5, easeRatio: [0.25, 0.25] },
+      { bars: 2, curve: -CURVE.EASY * 0.5, elevation: 0, easeRatio: [0.25, 0.25] },
     ],
   }),
 
   defineChunk({
     id: 'intro-neon-gateway',
-    description: 'Ingresso cittadino con lampioni simmetrici e doppia curva morbida',
+    description: 'Ingresso veloce a doppia curva morbida raccordata in flusso continuo',
     role: 'intro',
     bars: 4,
     weight: 1.0,
     energyRange: [0.25, 0.75],
+    elevationIntent: 'flat',
+    allowedStructures: ['standard', 'tunnel'],
+    styleTags: ['cruise', 'technical'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'normal',
     maneuvers: [
-      { bars: 2, curve: CURVE.EASY, elevation: 0 },
-      { bars: 2, curve: -CURVE.EASY, elevation: 0 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.8, jitter: { lateral: 0.4, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.5, jitter: { lateral: 1.2, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'bus-stop', chance: 0.75, side: 'any' },
+      { bars: 2, curve: CURVE.EASY, blendToNext: true, elevation: 0, easeRatio: [0.25, 0.25] },
+      { bars: 2, curve: -CURVE.EASY, elevation: 0, easeRatio: [0.25, 0.25] },
     ],
   }),
 
   defineChunk({
     id: 'intro-ocean-promenade-8',
-    description: 'Lungomare ondulato a 8 battute con vista aperta sul sole synthwave',
+    description: 'Lungomare ondulato a 8 battute con ampie curve scorrevoli',
     role: 'intro',
     bars: 8,
-    weight: 1.0,
+    weight: 1.05,
     energyRange: [0.0, 0.5],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['scenic', 'cruise'],
+    fixtureCadenceBeats: 4,
+    trafficProfile: 'sparse',
     maneuvers: [
       { bars: 3, curve: CURVE.EASY * 0.6, elevation: HILL.LOW * 0.6 },
       { bars: 2, curve: 0, elevation: -HILL.LOW * 0.6 },
       { bars: 3, curve: -CURVE.EASY * 0.8, elevation: 0 },
     ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 4, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'tree', placement: 'both', everyBeats: 2, band: 'B', offset: 2.7, jitter: { lateral: 0.75, beats: 0.3 }, rhythmic: false, scaleJitter: 0.25 },
-      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 2.3, cluster: { min: 2, max: 4, spreadBeats: 1.2, spreadLateral: 1.0 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'billboard', placement: 'right', everyBeats: 8, band: 'B', offset: 2.4, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'tree', placement: 'both', everyBeats: 4, band: 'C', offset: 5.0, jitter: { lateral: 1.0, beats: 0.6 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'building', placement: 'both', everyBeats: 8, band: 'D', offset: 10.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'parking-area', chance: 0.75, side: 'outside-curve' },
-    ],
   }),
 
   // ============================================================================
-  // BUILD — Climbs that crest on the first bar of the following drop
+  // BUILD — Climbs that crest cleanly onto the following drop
   // ============================================================================
   defineChunk({
     id: 'build-skyward-crest-4',
     description: 'Rampa dritta in salita progressiva (4 bar) che scollina esattamente sul drop',
     role: 'build',
     bars: 4,
-    crestOnExit: true,
     weight: 1.3,
+    elevationIntent: 'crest',
+    allowedStructures: ['standard', 'elevated', 'tunnel'],
+    styleTags: ['wangan', 'cruise'],
+    fixtureCadenceBeats: 1,
+    trafficProfile: 'clear',
     maneuvers: [
       { bars: 2, curve: 0, elevation: HILL.MEDIUM * 0.65 },
       { bars: 2, curve: 0, elevation: HILL.HIGH * 0.85, easeRatio: [0.15, 0.15] },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'billboard', placement: 'both', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.2, jitter: { lateral: 0.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.0, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
   defineChunk({
     id: 'build-overpass-spiral-8',
-    description: 'Lunga ascesa autostradale a 8 battute con curva in appoggio che raddrizza in cima al crest',
+    description: 'Lunga ascesa a 8 battute con raccordi fluidi che raddrizza in cima al crest',
     role: 'build',
     bars: 8,
-    crestOnExit: true,
     weight: 1.25,
+    elevationIntent: 'crest',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['wangan', 'technical'],
+    fixtureCadenceBeats: 1,
+    trafficProfile: 'sparse',
     maneuvers: [
-      { bars: 3, curve: CURVE.MEDIUM * 0.75, elevation: HILL.MEDIUM * 0.6 },
-      { bars: 3, curve: -CURVE.EASY * 0.6, elevation: HILL.MEDIUM * 0.8 },
+      { bars: 3, curve: CURVE.MEDIUM * 0.75, blendToNext: true, elevation: HILL.MEDIUM * 0.6 },
+      { bars: 3, curve: -CURVE.EASY * 0.6, blendToNext: true, elevation: HILL.MEDIUM * 0.8 },
       { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.15, 0.1] },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.2, rhythmic: true },
-      { kind: 'overpass', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'vms', placement: 'right', everyBeats: 8, band: 'A', offset: 1.38, rhythmic: true },
-      { kind: 'billboard', placement: 'left', everyBeats: 8, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.0, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.5, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
   defineChunk({
     id: 'build-horizon-riser-4',
-    description: 'Salita rapida con curva d’ingresso e fari ravvicinati ad alta tensione ritmica',
+    description: 'Salita rapida con curva d’ingresso che lancia dritto verso la cresta',
     role: 'build',
     bars: 4,
-    crestOnExit: true,
-    weight: 1.0,
+    weight: 1.05,
+    elevationIntent: 'crest',
+    allowedStructures: ['standard', 'elevated', 'tunnel'],
+    styleTags: ['wangan'],
+    fixtureCadenceBeats: 1,
+    trafficProfile: 'clear',
     maneuvers: [
-      { bars: 2, curve: CURVE.MEDIUM * 0.6, elevation: HILL.MEDIUM * 0.7 },
-      { bars: 2, curve: 0, elevation: HILL.HIGH * 0.9, easeRatio: [0.1, 0.1] },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.2, rhythmic: true },
-      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.5, jitter: { lateral: 0.6, beats: 0.8 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
+      { bars: 2, curve: CURVE.MEDIUM * 0.6, blendToNext: true, elevation: HILL.MEDIUM * 0.7 },
+      { bars: 2, curve: 0, elevation: HILL.HIGH * 0.9, easeRatio: [0.15, 0.15] },
     ],
   }),
 
   defineChunk({
     id: 'build-bay-bridge-ascent-8',
-    description: 'Sospensione sul ponte a due stadi di pendenza con allineamento dritto verso il cielo',
+    description: 'Ascesa monumentale dritta a due stadi di pendenza verso l’orizzonte',
     role: 'build',
     bars: 8,
-    crestOnExit: true,
-    env: 'bridge',
-    weight: 1.1,
+    weight: 1.15,
+    elevationIntent: 'climb',
+    allowedStructures: ['standard', 'elevated', 'tunnel'],
+    styleTags: ['wangan', 'scenic'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'clear',
     maneuvers: [
       { bars: 2, curve: 0, elevation: HILL.MEDIUM * 0.5 },
       { bars: 4, curve: 0, elevation: HILL.MEDIUM * 0.9 },
-      { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.1, 0.1] },
-    ],
-    props: [
-      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.18, rhythmic: true },
+      { bars: 2, curve: 0, elevation: HILL.HIGH, easeRatio: [0.15, 0.15] },
     ],
   }),
 
   defineChunk({
     id: 'build-mountain-pass-4',
-    description: 'Salita in cresta che scavalca il passo di montagna con guardrail e lampioni panoramici',
+    description: 'Salita in cresta che scavalca il passo aprendosi in uscita verso il drop',
     role: 'build',
     bars: 4,
-    crestOnExit: true,
     weight: 1.1,
+    elevationIntent: 'crest',
+    allowedStructures: ['standard', 'tunnel'],
+    styleTags: ['technical', 'scenic'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
     maneuvers: [
-      { bars: 2, curve: CURVE.EASY * 0.5, elevation: HILL.MEDIUM * 0.7 },
-      { bars: 2, curve: 0, elevation: HILL.HIGH * 0.8, easeRatio: [0.1, 0.1] },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'sign', placement: 'right', everyBeats: 4, band: 'A', offset: 1.35, rhythmic: true },
-      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 2.4, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 1.1 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'tree', placement: 'both', everyBeats: 4, band: 'B', offset: 3.0, jitter: { lateral: 0.8, beats: 0.5 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'tree', placement: 'both', everyBeats: 2, band: 'C', offset: 5.4, jitter: { lateral: 1.1, beats: 0.7 }, cluster: { min: 1, max: 3, spreadBeats: 1.2, spreadLateral: 0.8 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.0, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.2 },
+      { bars: 2, curve: CURVE.EASY * 0.5, blendToNext: true, elevation: HILL.MEDIUM * 0.7 },
+      { bars: 2, curve: 0, elevation: HILL.HIGH * 0.8, easeRatio: [0.15, 0.15] },
     ],
   }),
 
-  // ============================================================================
-  // DROP — Long fast straights, high-speed sweepers, adrenaline flow
-  // ============================================================================
   defineChunk({
-    id: 'drop-rainbow-expressway-8',
-    description: 'Rettilineo ad altissima velocità su ponte sospeso panoramico sul mare con torri monumentali',
-    role: 'drop',
-    bars: 8,
-    env: 'bridge',
-    weight: 1.2,
-    energyRange: [0.45, 1.0],
+    id: 'build-tightening-climb-4',
+    description: 'Salita in appoggio a raggio decrescente prima dello scatto rettilineo in cresta',
+    role: 'build',
+    bars: 4,
+    weight: 1.0,
+    elevationIntent: 'climb',
+    allowedStructures: ['standard', 'tunnel'],
+    styleTags: ['technical'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'clear',
     maneuvers: [
-      { bars: 3, curve: 0, elevation: -HILL.LOW * 0.5 },
-      { bars: 3, curve: CURVE.EASY * 0.6, elevation: 0 },
-      { bars: 2, curve: 0, elevation: 0 },
-    ],
-    props: [
-      { kind: 'suspension-tower', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.18, rhythmic: true },
+      { bars: 1.5, curve: CURVE.EASY * 0.7, blendToNext: true, elevation: HILL.MEDIUM * 0.5, easeRatio: [0.25, 0.2] },
+      { bars: 1.5, curve: CURVE.MEDIUM * 0.95, blendToNext: true, elevation: HILL.MEDIUM * 0.75, easeRatio: [0.2, 0.25] },
+      { bars: 1, curve: 0, elevation: HILL.HIGH * 0.75, easeRatio: [0.25, 0.15] },
     ],
   }),
 
+  // ============================================================================
+  // DROP — High-speed expressways, double-apex sweepers, post-crest plunges
+  // ============================================================================
   defineChunk({
     id: 'drop-expressway-rush-8',
-    description: 'Rettilineo ad altissima velocità su autostrada metropolitana con file di lampioni e cartelloni',
+    description: 'Rettilineo ad altissima velocità con tuffo iniziale e ampio curvone veloce da slalom',
     role: 'drop',
     bars: 8,
-    weight: 1.15,
+    weight: 1.25,
     energyRange: [0.45, 1.0],
+    elevationIntent: 'plunge',
+    postCrestReveal: true,
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['wangan', 'cruise'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'weaving',
     maneuvers: [
       { bars: 3, curve: 0, elevation: -HILL.LOW * 0.5 },
-      { bars: 3, curve: CURVE.EASY * 0.5, elevation: 0 },
+      { bars: 3, curve: CURVE.EASY * 0.65, blendToNext: true, elevation: 0 },
       { bars: 2, curve: 0, elevation: 0 },
     ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'gantry', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'billboard', placement: 'alternating', everyBeats: 8, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.8, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.5, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'bus-stop', chance: 0.6, side: 'outside-curve' },
+  }),
+
+  defineChunk({
+    id: 'drop-wangan-double-apex-8',
+    description: 'Doppio apice Wangan continuo sullo stesso lato senza ritorno a zero tra i due vertici',
+    role: 'drop',
+    bars: 8,
+    weight: 1.2,
+    energyRange: [0.5, 1.0],
+    elevationIntent: 'flat',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['wangan'],
+    fixtureCadenceBeats: 1,
+    trafficProfile: 'weaving',
+    maneuvers: [
+      { bars: 2, curve: CURVE.EASY * 0.85, blendToNext: true, elevation: 0, easeRatio: [0.25, 0.2] },
+      { bars: 3, curve: CURVE.MEDIUM * 0.95, blendToNext: true, elevation: -HILL.LOW * 0.35, easeRatio: [0.2, 0.2] },
+      { bars: 3, curve: CURVE.EASY * 0.6, elevation: HILL.LOW * 0.2, easeRatio: [0.2, 0.3] },
     ],
   }),
 
   defineChunk({
     id: 'drop-midnight-plunge',
-    description: 'Tuffo giù dal crest ad altissima velocità con curvone da quarta piena',
+    description: 'Tuffo giù dal crest ad altissima velocità con curvone fluido da quarta piena',
     role: 'drop',
     bars: 4,
     weight: 1.3,
     energyRange: [0.4, 1.0],
+    elevationIntent: 'plunge',
+    postCrestReveal: true,
+    allowedStructures: ['standard'],
+    styleTags: ['wangan', 'technical'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'weaving',
     maneuvers: [
       { bars: 2, curve: 0, elevation: -HILL.HIGH * 0.75 },
-      { bars: 2, curve: CURVE.MEDIUM, elevation: 0 },
+      { bars: 2, curve: CURVE.MEDIUM, elevation: 0, easeRatio: [0.25, 0.25] },
     ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'tree', placement: 'both', everyBeats: 1, band: 'B', offset: 2.7, jitter: { lateral: 0.75, beats: 0.3 }, rhythmic: false, scaleJitter: 0.25 },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
-      { kind: 'shrub', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 2.3, cluster: { min: 2, max: 3, spreadBeats: 0.8, spreadLateral: 0.9 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'tree', placement: 'both', everyBeats: 4, band: 'C', offset: 5.2, jitter: { lateral: 1.0, beats: 0.6 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
+  }),
+
+  defineChunk({
+    id: 'drop-crest-plunge-reveal-8',
+    description: 'Picchiata panoramica post-cresta che apre progressivamente il raggio in piena accelerazione',
+    role: 'drop',
+    bars: 8,
+    weight: 1.25,
+    energyRange: [0.45, 1.0],
+    elevationIntent: 'plunge',
+    postCrestReveal: true,
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['wangan', 'scenic'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'weaving',
+    maneuvers: [
+      { bars: 2, curve: 0, elevation: -HILL.HIGH * 0.8 },
+      { bars: 3, curve: CURVE.MEDIUM * 1.05, blendToNext: true, elevation: -HILL.LOW * 0.4, easeRatio: [0.2, 0.25] },
+      { bars: 3, curve: CURVE.EASY * 0.75, elevation: 0, easeRatio: [0.2, 0.3] },
     ],
   }),
 
   defineChunk({
     id: 'drop-wangan-hyper-sweeper',
-    description: '8 battute in stile Wangan: doppia curva veloce da percorrere in pieno o in drift lungo',
+    description: 'Pendolo veloce stile Wangan a 8 battute con transizione continua tra i due curvoni',
     role: 'drop',
     bars: 8,
     weight: 1.3,
     energyRange: [0.55, 1.0],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['wangan'],
+    fixtureCadenceBeats: 1,
+    trafficProfile: 'weaving',
     maneuvers: [
-      { bars: 3, curve: CURVE.MEDIUM, elevation: -HILL.LOW * 0.6 },
-      { bars: 2, curve: 0, elevation: HILL.LOW * 0.5 },
-      { bars: 3, curve: -CURVE.MEDIUM * 1.1, elevation: -HILL.LOW * 0.4 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
-      { kind: 'vms', placement: 'right', everyBeats: 8, band: 'A', offset: 1.38, rhythmic: true },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.0, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.0, jitter: { lateral: 1.6, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'parking-area', chance: 0.6, side: 'outside-curve' },
+      { bars: 3, curve: CURVE.MEDIUM, blendToNext: true, elevation: -HILL.LOW * 0.6, easeRatio: [0.22, 0.22] },
+      { bars: 2, curve: 0, blendToNext: true, elevation: HILL.LOW * 0.5, easeRatio: [0.25, 0.25] },
+      { bars: 3, curve: -CURVE.MEDIUM * 1.1, elevation: -HILL.LOW * 0.4, easeRatio: [0.22, 0.25] },
     ],
   }),
 
   defineChunk({
     id: 'drop-rollercoaster-sprint',
-    description: 'Rettilineo velocissimo con dossi ritmici e piega veloce finale',
+    description: 'Sprint veloce con dossi ritmici e piega ad apertura continua',
     role: 'drop',
     bars: 4,
     weight: 1.05,
     energyRange: [0.35, 0.85],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard'],
+    styleTags: ['wangan', 'cruise'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'normal',
     maneuvers: [
       { bars: 1, curve: 0, elevation: -HILL.MEDIUM * 0.5 },
-      { bars: 1, curve: CURVE.EASY, elevation: HILL.LOW * 0.6 },
+      { bars: 1, curve: CURVE.EASY, blendToNext: true, elevation: HILL.LOW * 0.6 },
       { bars: 2, curve: CURVE.MEDIUM * 0.85, elevation: -HILL.LOW * 0.4 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'alternating', everyBeats: 2, band: 'A', offset: 1.2, rhythmic: true },
-      { kind: 'tree', placement: 'both', everyBeats: 1, band: 'B', offset: 2.7, jitter: { lateral: 0.75, beats: 0.3 }, rhythmic: false, scaleJitter: 0.25 },
-      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 2.25, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 0.9 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.4, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
     ],
   }),
 
   defineChunk({
     id: 'drop-shibuya-express-8',
-    description: 'Discesa mozzafiato seguita da doppio apex veloce tra corridoio di lampioni e insegne',
+    description: 'Discesa esplosiva seguita da doppio apex veloce in flusso continuo tra neon e cavalcavia',
     role: 'drop',
     bars: 8,
     weight: 1.2,
-    energyRange: [0.65, 1.0],
+    energyRange: [0.6, 1.0],
+    elevationIntent: 'plunge',
+    postCrestReveal: true,
+    allowedStructures: ['standard'],
+    styleTags: ['wangan', 'technical'],
+    fixtureCadenceBeats: 1,
+    trafficProfile: 'weaving',
     maneuvers: [
-      { bars: 2, curve: CURVE.EASY * 0.6, elevation: -HILL.HIGH * 0.7 },
-      { bars: 3, curve: CURVE.MEDIUM * 1.15, elevation: 0, easeRatio: [0.2, 0.2] },
-      { bars: 3, curve: -CURVE.MEDIUM * 0.95, elevation: HILL.LOW * 0.4, easeRatio: [0.2, 0.2] },
-    ],
-    props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
-      { kind: 'lamp', placement: 'both', everyBeats: 1, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'overpass', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.1, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.8, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.2, jitter: { lateral: 1.4, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
+      { bars: 2, curve: CURVE.EASY * 0.6, blendToNext: true, elevation: -HILL.HIGH * 0.7 },
+      { bars: 3, curve: CURVE.MEDIUM * 1.15, blendToNext: true, elevation: 0, easeRatio: [0.22, 0.22] },
+      { bars: 3, curve: -CURVE.MEDIUM * 0.95, elevation: HILL.LOW * 0.4, easeRatio: [0.22, 0.25] },
     ],
   }),
 
   defineChunk({
     id: 'drop-pacific-slingshot-4',
-    description: 'Curva fionda in discesa con uscita dritta a tutto gas',
+    description: 'Curva fionda in discesa ad apertura progressiva con uscita lanciata a tutto gas',
     role: 'drop',
     bars: 4,
-    weight: 1.0,
+    weight: 1.05,
     energyRange: [0.45, 0.95],
+    elevationIntent: 'plunge',
+    postCrestReveal: true,
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['wangan', 'scenic'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'weaving',
     maneuvers: [
-      { bars: 2, curve: CURVE.MEDIUM * 1.1, elevation: -HILL.MEDIUM * 0.6 },
-      { bars: 2, curve: 0, elevation: 0 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'tree', placement: 'both', everyBeats: 1, band: 'B', offset: 2.7, jitter: { lateral: 0.75, beats: 0.3 }, rhythmic: false, scaleJitter: 0.25 },
-      { kind: 'billboard', placement: 'both', everyBeats: 4, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 2.25, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 0.9 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.5, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
+      { bars: 2, curve: CURVE.MEDIUM * 1.1, blendToNext: true, elevation: -HILL.MEDIUM * 0.6, easeRatio: [0.22, 0.22] },
+      { bars: 2, curve: CURVE.EASY * 0.4, elevation: 0, easeRatio: [0.2, 0.35] },
     ],
   }),
 
   // ============================================================================
-  // BREAKDOWN — Technical S-bends, hairpins (drift showcases), dips
+  // BREAKDOWN — Technical S-bends, hairpins (drift showcases), tightening apexes
   // ============================================================================
   defineChunk({
     id: 'breakdown-touge-s-bends',
-    description: 'Chicane tecnica a S con cambio di pendenza, disegnata per concatenare due derapate',
+    description: 'Chicane tecnica a S continua con cambio di pendenza, disegnata per concatenare due derapate',
     role: 'breakdown',
     bars: 4,
     weight: 1.25,
-    energyRange: [0.3, 0.85],
+    energyRange: [0.2, 0.9],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard'],
+    styleTags: ['technical'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
     maneuvers: [
-      { bars: 2, curve: CURVE.HARD * 0.85, elevation: -HILL.LOW * 0.6, easeRatio: [0.2, 0.2] },
-      { bars: 2, curve: -CURVE.HARD * 0.85, elevation: HILL.LOW * 0.4, easeRatio: [0.2, 0.2] },
-    ],
-    props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
-      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 2.4, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 1.1 }, rhythmic: false, scaleJitter: 0.32 },
-      { kind: 'tree', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 2.9, jitter: { lateral: 0.85, beats: 0.4 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'tree', placement: 'both', everyBeats: 2, band: 'C', offset: 5.5, jitter: { lateral: 1.2, beats: 0.6 }, cluster: { min: 1, max: 3, spreadBeats: 1.2, spreadLateral: 0.9 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.5, jitter: { lateral: 1.5, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'shrine-gate', chance: 0.75, side: 'outside-curve' },
+      { bars: 2, curve: CURVE.HARD * 0.85, blendToNext: true, elevation: -HILL.LOW * 0.6, easeRatio: [0.22, 0.22] },
+      { bars: 2, curve: -CURVE.HARD * 0.85, elevation: HILL.LOW * 0.4, easeRatio: [0.22, 0.22] },
     ],
   }),
 
   defineChunk({
     id: 'breakdown-canyon-hairpin-8',
-    description: 'Tornante lungo da drift prolungato seguito da controcurva in avvallamento',
+    description: 'Tornante lungo da drift prolungato raccordato a controcurva e rientro fluido',
     role: 'breakdown',
     bars: 8,
     weight: 1.2,
-    energyRange: [0.4, 1.0],
+    energyRange: [0.25, 1.0],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard'],
+    styleTags: ['technical', 'scenic'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
     maneuvers: [
-      { bars: 3, curve: CURVE.HARD, elevation: -HILL.MEDIUM * 0.6, easeRatio: [0.2, 0.2] },
-      { bars: 2, curve: -CURVE.MEDIUM, elevation: 0 },
-      { bars: 3, curve: CURVE.HARD * 0.9, elevation: HILL.LOW * 0.5, easeRatio: [0.2, 0.2] },
-    ],
-    props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
-      { kind: 'lamp', placement: 'inside-curve', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
-      { kind: 'tree', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 2.8, jitter: { lateral: 0.8, beats: 0.4 }, rhythmic: false, scaleJitter: 0.26 },
-      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 2.3, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 1.0 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'tree', placement: 'both', everyBeats: 4, band: 'C', offset: 5.2, jitter: { lateral: 1.1, beats: 0.7 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'shrine-gate', chance: 0.75, side: 'outside-curve' },
+      { bars: 3, curve: CURVE.HARD, blendToNext: true, elevation: -HILL.MEDIUM * 0.6, easeRatio: [0.22, 0.22] },
+      { bars: 2, curve: -CURVE.MEDIUM, blendToNext: true, elevation: 0, easeRatio: [0.22, 0.22] },
+      { bars: 3, curve: CURVE.HARD * 0.9, elevation: HILL.LOW * 0.5, easeRatio: [0.22, 0.25] },
     ],
   }),
 
   defineChunk({
     id: 'breakdown-shuto-curves-8',
-    description: 'S-bends tecnici tra le barriere autostradali della tangenziale Shuto C1',
+    description: 'Pendolo continuo tra curve medio-chiuse della tangenziale metropolitana C1',
     role: 'breakdown',
     bars: 8,
-    weight: 1.1,
-    energyRange: [0.3, 0.85],
+    weight: 1.15,
+    energyRange: [0.2, 0.85],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['technical', 'wangan'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'normal',
     maneuvers: [
-      { bars: 2, curve: CURVE.MEDIUM * 0.8, elevation: 0 },
-      { bars: 2, curve: -CURVE.MEDIUM * 0.8, elevation: -HILL.LOW * 0.4 },
-      { bars: 2, curve: CURVE.HARD * 0.75, elevation: 0 },
+      { bars: 2, curve: CURVE.MEDIUM * 0.85, blendToNext: true, elevation: 0, easeRatio: [0.22, 0.22] },
+      { bars: 2, curve: -CURVE.MEDIUM * 0.85, blendToNext: true, elevation: -HILL.LOW * 0.4, easeRatio: [0.22, 0.22] },
+      { bars: 2, curve: CURVE.HARD * 0.75, blendToNext: true, elevation: 0, easeRatio: [0.22, 0.22] },
       { bars: 2, curve: 0, elevation: HILL.LOW * 0.4 },
-    ],
-    props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.9, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.8, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'parking-area', chance: 0.75, side: 'inside-curve' },
     ],
   }),
 
   defineChunk({
     id: 'breakdown-neon-chicane',
-    description: 'Avvallamento con doppia piega tecnica tra i cartelloni al neon',
+    description: 'Avvallamento con doppia piega tecnica concatenata senza reset centrale',
     role: 'breakdown',
     bars: 4,
-    weight: 1.0,
-    energyRange: [0.2, 0.7],
+    weight: 1.05,
+    energyRange: [0.15, 0.75],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'tunnel'],
+    styleTags: ['technical'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
     maneuvers: [
-      { bars: 1, curve: -CURVE.MEDIUM, elevation: -HILL.LOW * 0.5 },
-      { bars: 2, curve: CURVE.HARD * 0.9, elevation: 0 },
-      { bars: 1, curve: -CURVE.EASY, elevation: HILL.LOW * 0.5 },
-    ],
-    props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'billboard', placement: 'alternating', everyBeats: 2, band: 'B', offset: 2.1, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 4.2, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.2, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'bus-stop', chance: 0.75, side: 'outside-curve' },
+      { bars: 1, curve: -CURVE.MEDIUM, blendToNext: true, elevation: -HILL.LOW * 0.5, easeRatio: [0.25, 0.25] },
+      { bars: 2, curve: CURVE.HARD * 0.9, blendToNext: true, elevation: 0, easeRatio: [0.22, 0.22] },
+      { bars: 1, curve: -CURVE.EASY, elevation: HILL.LOW * 0.5, easeRatio: [0.25, 0.25] },
     ],
   }),
 
   defineChunk({
     id: 'breakdown-akina-switchback-8',
-    description: 'Triplo pendolo da passo di montagna (Destra -> Sinistra -> Destra) per veri drifter',
+    description: 'Triplo pendolo continuo da passo di montagna (Destra -> Sinistra -> Destra) per veri drifter',
     role: 'breakdown',
     bars: 8,
     weight: 1.15,
-    energyRange: [0.45, 1.0],
+    energyRange: [0.3, 1.0],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard'],
+    styleTags: ['technical'],
+    fixtureCadenceBeats: 1,
+    trafficProfile: 'sparse',
     maneuvers: [
-      { bars: 3, curve: CURVE.HARD * 0.95, elevation: -HILL.LOW * 0.7, easeRatio: [0.18, 0.18] },
-      { bars: 3, curve: -CURVE.HARD * 0.95, elevation: -HILL.LOW * 0.5, easeRatio: [0.18, 0.18] },
-      { bars: 2, curve: CURVE.MEDIUM * 1.1, elevation: HILL.LOW * 0.8, easeRatio: [0.2, 0.2] },
+      { bars: 3, curve: CURVE.HARD * 0.95, blendToNext: true, elevation: -HILL.LOW * 0.7, easeRatio: [0.22, 0.22] },
+      { bars: 3, curve: -CURVE.HARD * 0.95, blendToNext: true, elevation: -HILL.LOW * 0.5, easeRatio: [0.22, 0.22] },
+      { bars: 2, curve: CURVE.MEDIUM * 1.1, elevation: HILL.LOW * 0.8, easeRatio: [0.22, 0.25] },
     ],
-    props: [
-      { kind: 'chevron', placement: 'outside-curve', everyBeats: 2, band: 'A', offset: 1.3, rhythmic: true },
-      { kind: 'lamp', placement: 'inside-curve', everyBeats: 1, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'billboard', placement: 'outside-curve', everyBeats: 2, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
-      { kind: 'shrub', placement: 'both', everyBeats: 2, band: 'B', offset: 2.4, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 1.2 }, rhythmic: false, scaleJitter: 0.32 },
-      { kind: 'tree', placement: 'inside-curve', everyBeats: 2, band: 'B', offset: 3.1, jitter: { lateral: 0.9, beats: 0.4 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'tree', placement: 'both', everyBeats: 2, band: 'C', offset: 5.6, jitter: { lateral: 1.2, beats: 0.7 }, cluster: { min: 2, max: 3, spreadBeats: 1.4, spreadLateral: 0.9 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.0, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
+  }),
+
+  defineChunk({
+    id: 'breakdown-tightening-apex-4',
+    description: 'Curva a raggio decrescente (ingresso ampio che chiude progressivamente sull’apice)',
+    role: 'breakdown',
+    bars: 4,
+    weight: 1.15,
+    energyRange: [0.2, 0.85],
+    elevationIntent: 'flat',
+    allowedStructures: ['standard', 'tunnel'],
+    styleTags: ['technical'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
+    maneuvers: [
+      { bars: 2, curve: CURVE.EASY * 1.1, blendToNext: true, elevation: -HILL.LOW * 0.25, easeRatio: [0.25, 0.2] },
+      { bars: 2, curve: CURVE.HARD * 0.85, elevation: HILL.LOW * 0.25, easeRatio: [0.2, 0.28] },
     ],
-    vignettes: [
-      { prefab: 'shrine-gate', chance: 0.75, side: 'outside-curve' },
+  }),
+
+  defineChunk({
+    id: 'breakdown-underground-sweep-8',
+    description: 'Lungo curvone scorrevole in galleria a doppia corda fluida e altitudine controllata',
+    role: 'breakdown',
+    bars: 8,
+    weight: 1.1,
+    energyRange: [0.15, 0.85],
+    elevationIntent: 'flat',
+    allowedStructures: ['standard', 'tunnel'],
+    styleTags: ['wangan', 'technical'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
+    maneuvers: [
+      { bars: 3, curve: CURVE.MEDIUM * 0.85, blendToNext: true, elevation: 0, easeRatio: [0.24, 0.22] },
+      { bars: 2, curve: -CURVE.EASY * 1.1, blendToNext: true, elevation: -HILL.LOW * 0.2, easeRatio: [0.22, 0.22] },
+      { bars: 3, curve: CURVE.MEDIUM * 0.9, elevation: HILL.LOW * 0.2, easeRatio: [0.22, 0.26] },
     ],
   }),
 
   // ============================================================================
-  // OUTRO — Wind-down sweepers ending at the stage fork / finish line
+  // OUTRO — Wind-down sweepers ending calmly at the stage fork / finish line
   // ============================================================================
   defineChunk({
     id: 'outro-coastal-winddown',
-    description: 'Curvoni rilassati di fine brano che riportano dolcemente al livello del mare',
+    description: 'Curvoni rilassati di fine brano che riportano dolcemente al livello zero',
     role: 'outro',
     bars: 4,
     weight: 1.2,
+    elevationIntent: 'plunge',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['cruise', 'scenic'],
+    fixtureCadenceBeats: 4,
+    trafficProfile: 'sparse',
     maneuvers: [
       { bars: 2, curve: CURVE.EASY, elevation: -HILL.LOW * 0.4 },
       { bars: 2, curve: 0, elevation: 0 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 4, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'tree', placement: 'both', everyBeats: 2, band: 'B', offset: 2.7, jitter: { lateral: 0.75, beats: 0.3 }, rhythmic: false, scaleJitter: 0.25 },
-      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 2.25, cluster: { min: 2, max: 3, spreadBeats: 1.0, spreadLateral: 0.95 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'C', offset: 4.8, cluster: { min: 2, max: 4, spreadBeats: 1.4, spreadLateral: 1.2 }, rhythmic: false, scaleJitter: 0.32 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 9.5, jitter: { lateral: 2.0, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'shrine-gate', chance: 0.75, side: 'any' },
     ],
   }),
 
   defineChunk({
     id: 'outro-skyline-emergence-4',
-    description: 'Tratto finale verso la luce dello skyline e del bivio finale',
+    description: 'Tratto finale scorrevole verso la luce dello skyline e del bivio finale',
     role: 'outro',
     bars: 4,
     weight: 1.1,
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard'],
+    styleTags: ['cruise'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'normal',
     maneuvers: [
       { bars: 2, curve: 0, elevation: HILL.LOW * 0.4 },
       { bars: 2, curve: CURVE.EASY * 0.6, elevation: 0 },
-    ],
-    props: [
-      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.9, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.5, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'bus-stop', chance: 0.75, side: 'outside-curve' },
     ],
   }),
 
   defineChunk({
     id: 'outro-horizon-victory-8',
-    description: 'Lungo viale d’arrivo a 8 battute con palme e portali luminosi verso il traguardo',
+    description: 'Lungo viale d’arrivo a 8 battute con S dolce raccordata verso il traguardo',
     role: 'outro',
     bars: 8,
     weight: 1.1,
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['scenic', 'cruise'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
     maneuvers: [
-      { bars: 3, curve: CURVE.EASY * 0.8, elevation: -HILL.LOW * 0.5 },
-      { bars: 3, curve: -CURVE.EASY * 0.8, elevation: 0 },
+      { bars: 3, curve: CURVE.EASY * 0.8, blendToNext: true, elevation: -HILL.LOW * 0.5 },
+      { bars: 3, curve: -CURVE.EASY * 0.8, blendToNext: true, elevation: 0 },
       { bars: 2, curve: 0, elevation: 0 },
     ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.22, rhythmic: true },
-      { kind: 'tree', placement: 'both', everyBeats: 2, band: 'B', offset: 2.8, jitter: { lateral: 0.8, beats: 0.3 }, rhythmic: false, scaleJitter: 0.26 },
-      { kind: 'billboard', placement: 'both', everyBeats: 8, band: 'B', offset: 2.3, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'shrub', placement: 'both', everyBeats: 4, band: 'B', offset: 2.3, cluster: { min: 2, max: 4, spreadBeats: 1.0, spreadLateral: 1.0 }, rhythmic: false, scaleJitter: 0.3 },
-      { kind: 'building', placement: 'both', everyBeats: 8, band: 'C', offset: 4.5, jitter: { lateral: 0.6, beats: 0.8 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'tree', placement: 'both', everyBeats: 4, band: 'C', offset: 5.3, jitter: { lateral: 1.0, beats: 0.6 }, rhythmic: false, scaleJitter: 0.28 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 8.5, jitter: { lateral: 1.8, beats: 1.0 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'parking-area', chance: 0.75, side: 'outside-curve' },
+  }),
+
+  defineChunk({
+    id: 'outro-opening-cruise-8',
+    description: 'Curva ampia ad apertura progressiva verso l’allineamento orizzontale del bivio',
+    role: 'outro',
+    bars: 8,
+    weight: 1.05,
+    elevationIntent: 'flat',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['cruise', 'scenic'],
+    fixtureCadenceBeats: 4,
+    trafficProfile: 'sparse',
+    maneuvers: [
+      { bars: 3, curve: CURVE.MEDIUM * 0.8, blendToNext: true, elevation: 0, easeRatio: [0.25, 0.2] },
+      { bars: 3, curve: CURVE.EASY * 0.65, blendToNext: true, elevation: 0, easeRatio: [0.2, 0.25] },
+      { bars: 2, curve: 0, elevation: 0 },
     ],
   }),
 
@@ -689,19 +687,14 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     role: 'outro',
     bars: 4,
     weight: 1.0,
+    elevationIntent: 'plunge',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['cruise'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'sparse',
     maneuvers: [
       { bars: 2, curve: -CURVE.EASY * 0.7, elevation: -HILL.LOW * 0.3 },
       { bars: 2, curve: 0, elevation: 0 },
-    ],
-    props: [
-      { kind: 'lamp', placement: 'both', everyBeats: 2, band: 'A', offset: 1.25, rhythmic: true },
-      { kind: 'gantry', placement: 'both', everyBeats: 8, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'billboard', placement: 'alternating', everyBeats: 4, band: 'B', offset: 2.2, jitter: { lateral: 0.2, beats: 0.5 }, rhythmic: false },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'C', offset: 3.9, jitter: { lateral: 0.5, beats: 0.6 }, rhythmic: false, scaleJitter: 0.2 },
-      { kind: 'building', placement: 'both', everyBeats: 4, band: 'D', offset: 7.6, jitter: { lateral: 1.5, beats: 0.8 }, rhythmic: false, scaleJitter: 0.25 },
-    ],
-    vignettes: [
-      { prefab: 'bus-stop', chance: 0.75, side: 'any' },
     ],
   }),
 ];
