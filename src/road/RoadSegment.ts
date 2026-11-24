@@ -84,6 +84,40 @@ export function isOverheadProp(kind: PropKind): boolean {
 }
 
 /**
+ * Zero-GC in-place insertion sort for a single segment's sprite list (Band D -> C -> B -> A,
+ * overhead portals last). Ideal for small lists (0..10 sprites) inside the horizon assembler.
+ */
+export function sortSingleSegmentSprites(sprites: RoadSprite[]): void {
+  const len = sprites.length;
+  if (len <= 1) return;
+  for (let i = 1; i < len; i++) {
+    const key = sprites[i]!;
+    const keyOver = isOverheadProp(key.kind) ? 1 : 0;
+    const keyAbs = Math.abs(key.offset);
+    let j = i - 1;
+    while (j >= 0) {
+      const cur = sprites[j]!;
+      const curOver = isOverheadProp(cur.kind) ? 1 : 0;
+      let moveRight: boolean;
+      if (curOver !== keyOver) {
+        moveRight = curOver > keyOver;
+      } else {
+        const diff = keyAbs - Math.abs(cur.offset);
+        if (Math.abs(diff) > 1e-6) {
+          moveRight = diff > 0;
+        } else {
+          moveRight = cur.offset > key.offset;
+        }
+      }
+      if (!moveRight) break;
+      sprites[j + 1] = cur;
+      j--;
+    }
+    sprites[j + 1] = key;
+  }
+}
+
+/**
  * Deterministically orders each segment's sprites by descending `|offset|` (Band D -> C -> B -> A)
  * so closer-to-road roadside props render over farther ones, with overhead portals always last.
  */
@@ -91,14 +125,7 @@ export function sortSegmentSprites(segments: readonly RoadSegment[]): void {
   for (let i = 0; i < segments.length; i++) {
     const sprites = segments[i]!.sprites;
     if (sprites.length > 1) {
-      sprites.sort((a, b) => {
-        const aOver = isOverheadProp(a.kind) ? 1 : 0;
-        const bOver = isOverheadProp(b.kind) ? 1 : 0;
-        if (aOver !== bOver) return aOver - bOver;
-        const diff = Math.abs(b.offset) - Math.abs(a.offset);
-        if (Math.abs(diff) > 1e-6) return diff;
-        return a.offset - b.offset;
-      });
+      sortSingleSegmentSprites(sprites);
     }
   }
 }
@@ -124,8 +151,19 @@ export interface RoadSegment {
 export interface Track {
   segments: RoadSegment[];
   segmentLength: number;
-  /** Total length in world units. */
+  /** Total length in world units (for StreamingTrack, tracks nominal or materialized stage finish Z). */
   length: number;
+  /** True when `segments` is a circular zero-GC power-of-two ring buffer driven by `HorizonAssembler`. */
+  readonly isStreaming?: boolean;
+  /** Bitmask (`segments.length - 1`) for O(1) ring slot lookup when `isStreaming === true`. */
+  readonly ringMask?: number;
+}
+
+/** Type guard checking whether `track` is backed by a circular streaming ring buffer. */
+export function isStreamingTrackBase(
+  track: Track,
+): track is Track & { readonly isStreaming: true; readonly ringMask: number } {
+  return track.isStreaming === true && track.ringMask !== undefined;
 }
 
 export function createPoint(worldY: number, worldZ: number): ProjectedPoint {
@@ -144,8 +182,12 @@ export function createPoint(worldY: number, worldZ: number): ProjectedPoint {
 }
 
 export function findSegment(track: Track, z: number): RoadSegment {
+  const absIdx = Math.floor(z / track.segmentLength);
+  if (track.isStreaming && track.ringMask !== undefined) {
+    return track.segments[absIdx & track.ringMask]!;
+  }
   const n = track.segments.length;
-  const i = Math.floor(z / track.segmentLength) % n;
+  const i = absIdx % n;
   return track.segments[i < 0 ? i + n : i]!;
 }
 

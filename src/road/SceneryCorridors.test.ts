@@ -1,10 +1,12 @@
 import { DEFAULT_SYNTH_BEATMAP } from '@src/audio/FunkAudioEngine';
 import { FORK_APPROACH_BARS } from '@src/config/constants';
 import { describe, expect, it } from 'vitest';
+import { HorizonAssembler, STREAMING_RING_MASK } from './HorizonAssembler';
 import { PALETTE_NIGHT_FUNK } from './palette';
 import { RoadRenderer, type RoadView } from './RoadRenderer';
 import { createPoint, type RoadSegment, type RoadSprite, type Track } from './RoadSegment';
 import { getPylonAttachmentPoints } from './RoadsideProps';
+import { compileSongBlueprint } from './SongBlueprint';
 import { generateSongRoad } from './SongRoadGenerator';
 
 function createMockCanvas(): {
@@ -341,6 +343,49 @@ describe('SceneryCorridors — Continuous Power Lines (Phase 3)', () => {
 
     expect(renderer.stats.drawnProps).toBe(2);
     // At least 5 horizontal catenary wire spans connecting left to right tower
+    expect(mock.quadraticCalls.length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('streams continuous power-line pylons and renders catenary wires on a StreamingTrack ring buffer', () => {
+    const bp = compileSongBlueprint(DEFAULT_SYNTH_BEATMAP, {
+      seed: 'pylon-stream-seed',
+      stageId: 'og_future_funk',
+    });
+    expect(bp.powerLineRuns.length).toBeGreaterThan(0);
+
+    const firstRun = bp.powerLineRuns[0]!;
+    const asm = new HorizonAssembler(bp);
+    asm.resetAtBar(firstRun.startBar, 0, bp, null, 200);
+
+    let streamedPylons = 0;
+    for (let s = asm.track.tailAbsSeg; s < asm.track.headAbsSeg; s++) {
+      const seg = asm.track.segments[s & STREAMING_RING_MASK]!;
+      for (const sp of seg.sprites) {
+        if (sp.kind === 'pylon' && sp.chainId === firstRun.chainId) {
+          streamedPylons++;
+        }
+      }
+    }
+    expect(streamedPylons).toBeGreaterThanOrEqual(2);
+
+    const renderer = new RoadRenderer();
+    const mock = createMockCanvas();
+    renderer.render(
+      mock.ctx,
+      asm.track,
+      {
+        position: 0,
+        playerX: 0,
+        cameraHeight: 1000,
+        cameraDepth: 0.8,
+        roadWidth: 2000,
+        drawDistance: 180,
+        fogDensity: 1,
+        width: 640,
+        height: 360,
+      },
+      PALETTE_NIGHT_FUNK,
+    );
     expect(mock.quadraticCalls.length).toBeGreaterThanOrEqual(5);
   });
 

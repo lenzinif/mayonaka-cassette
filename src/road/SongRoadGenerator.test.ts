@@ -235,17 +235,18 @@ describe('SongRoadGenerator', () => {
       }
     });
 
-    it('preserves exact geometry during overlapping 1.75-bar horizon stitches (deltaSegs < copyCount)', () => {
+    it('preserves exact geometry during overlapping forward horizon stitches (deltaSegs < copyCount)', () => {
       const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
       const drawDistance = 200;
       const copyCount = drawDistance - 24; // 176
+      const overlapBars = Math.min(1.75, (copyCount - 24) / road.segmentsPerBar);
 
-      // Find a standard open-sky window where a 1.75-bar forward stitch (< 176 segments) overlaps its own source
+      // Find a standard open-sky window where a forward stitch (< copyCount segments) overlaps its own source
       let stitchBar = -1;
       for (let b = 4; b < road.totalBars - 10; b++) {
         const startSeg = b * road.segmentsPerBar;
         let hasSpecial = false;
-        for (let s = 0; s < Math.ceil(1.75 * road.segmentsPerBar) + drawDistance + 16; s++) {
+        for (let s = 0; s < Math.ceil(overlapBars * road.segmentsPerBar) + drawDistance + 16; s++) {
           if ((road.segments[startSeg + s]?.env ?? 'standard') !== 'standard') {
             hasSpecial = true;
             break;
@@ -259,7 +260,7 @@ describe('SongRoadGenerator', () => {
 
       expect(stitchBar).toBeGreaterThanOrEqual(0);
       const currentZ = stitchBar * road.barLengthWorld;
-      const rawTargetZ = currentZ + 1.75 * road.barLengthWorld;
+      const rawTargetZ = currentZ + overlapBars * road.barLengthWorld;
 
       const preCurve: number[] = [];
       const preDeltaY: number[] = [];
@@ -342,6 +343,141 @@ describe('SongRoadGenerator', () => {
         );
         expect(bridgeRes).toBeNull();
       }
+    });
+
+    it('builds sorted, deduplicated syncAnchors including tunnelEntry, tunnelExit, impactBars, and fork', () => {
+      const mapWithMuffledAndImpact: BeatMap & {
+        impactBars?: number[];
+        spectralSpans?: { startBar: number; endBar: number; kind: string }[];
+      } = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:cant-stop-anchors-test',
+        bpm: 110.35,
+        durationSec: 148,
+        barEnergy: new Array<number>(68).fill(0.76),
+        barBrightness: Array.from({ length: 68 }, (_, b) => (b >= 32 && b < 38 ? 0.14 : 0.82)),
+        sections: [
+          { startBar: 0, bars: 60, role: 'drop' },
+          { startBar: 60, bars: 8, role: 'outro' },
+        ],
+        spectralSpans: [{ startBar: 32, endBar: 38, kind: 'lpf_muffled' }],
+        impactBars: [38],
+      };
+
+      const road = generateSongRoad(mapWithMuffledAndImpact);
+      const entry = road.syncAnchors.find((a) => a.barIndex === 32);
+      const exit = road.syncAnchors.find((a) => a.barIndex === 38);
+      const fork = road.syncAnchors.find((a) => a.barIndex === 68);
+
+      expect(entry?.kind).toBe('tunnelEntry');
+      expect(entry?.rewardsSyncBonus).toBe(false);
+      expect(exit?.kind).toBe('tunnelExit');
+      // Deduplicated with impactBars: [38] -> preserves tunnelExit kind AND rewardsSyncBonus
+      expect(exit?.rewardsSyncBonus).toBe(true);
+      expect(fork?.kind).toBe('fork');
+
+      // Strictly sorted by worldZ
+      for (let i = 1; i < road.syncAnchors.length; i++) {
+        expect(road.syncAnchors[i]!.worldZ).toBeGreaterThan(road.syncAnchors[i - 1]!.worldZ);
+      }
+    });
+
+    it('executes backward overlapping horizon stitches (deltaSegs < 0) without geometry corruption', () => {
+      const road = generateSongRoad(DEFAULT_SYNTH_BEATMAP);
+      const drawDistance = 200;
+      const copyCount = drawDistance - 24;
+
+      // Find an open-sky standard window where jumping backward by ~1.5 bars (< copyCount) overlaps cleanly
+      let fromBar = -1;
+      for (let b = 6; b < road.totalBars - 10; b++) {
+        const destStartSeg = Math.floor((b - 1.5) * road.segmentsPerBar);
+        const srcEndSeg = b * road.segmentsPerBar + drawDistance + 16;
+        if (destStartSeg < 0 || srcEndSeg >= road.segments.length) continue;
+        let allStandard = true;
+        for (let s = destStartSeg; s <= srcEndSeg; s++) {
+          if ((road.segments[s]?.env ?? 'standard') !== 'standard') {
+            allStandard = false;
+            break;
+          }
+        }
+        if (allStandard) {
+          fromBar = b;
+          break;
+        }
+      }
+
+      expect(fromBar).toBeGreaterThan(0);
+      const currentZ = fromBar * road.barLengthWorld;
+      const rawTargetZ = (fromBar - 1.2) * road.barLengthWorld;
+      const fromSegIdx = Math.floor(currentZ / road.segmentLength);
+
+      const preCurve: number[] = [];
+      const preDeltaY: number[] = [];
+      for (let n = 0; n < copyCount; n++) {
+        const seg = road.segments[fromSegIdx + n]!;
+        preCurve.push(seg.curve);
+        preDeltaY.push(seg.p2.worldY - seg.p1.worldY);
+      }
+
+      const res = stitchHorizonToTargetZ(road, currentZ, rawTargetZ, drawDistance);
+      expect(res).not.toBeNull();
+      if (!res) return;
+
+      expect(res.deltaZ).toBeLessThan(0);
+      expect(Math.abs(res.toSegIndex - res.fromSegIndex)).toBeLessThan(copyCount);
+
+      for (let n = 0; n < copyCount; n++) {
+        const destSeg = road.segments[res.toSegIndex + n]!;
+        expect(destSeg.curve).toBe(preCurve[n]);
+        expect(destSeg.p2.worldY - destSeg.p1.worldY).toBeCloseTo(preDeltaY[n]!, 5);
+      }
+      for (let i = 1; i < road.segments.length; i++) {
+        expect(road.segments[i]!.p1.worldY).toBeCloseTo(road.segments[i - 1]!.p2.worldY, 5);
+      }
+
+      restoreCanonicalTrack(road);
+      for (let i = 0; i < road.segments.length; i++) {
+        expect(road.segments[i]!.curve).toBe(road.canonical.curve[i]);
+        expect(Boolean(road.segments[i]!.tunnelLight)).toBe(road.canonical.tunnelLight[i] === 1);
+      }
+    });
+
+    it('permits homogeneous tunnel -> tunnel stitches when exit is beyond horizon, but blocks near portal exit', () => {
+      const longTunnelMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:homogeneous-tunnel-stitch',
+        barEnergy: new Array<number>(36).fill(0.75),
+        barBrightness: Array.from({ length: 36 }, (_, b) => (b >= 6 && b < 22 ? 0.12 : 0.85)),
+        sections: [
+          { startBar: 0, bars: 28, role: 'drop' },
+          { startBar: 28, bars: 8, role: 'outro' },
+        ],
+      };
+
+      const road = generateSongRoad(longTunnelMap);
+      const drawDistance = 200;
+
+      // Deep inside the 16-bar tunnel (bar 8 -> bar 10): both windows are 100% tunnel
+      const deepZ = 8 * road.barLengthWorld;
+      const targetFwdZ = 10 * road.barLengthWorld;
+      const okRes = stitchHorizonToTargetZ(road, deepZ, targetFwdZ, drawDistance);
+      expect(okRes).not.toBeNull();
+      expect(okRes!.deltaZ).toBeGreaterThan(0);
+
+      // Preserve tunnelLight flags on restored canonical track
+      restoreCanonicalTrack(road);
+      const tunnelLightCount = road.segments.filter((s) => s.env === 'tunnel' && s.tunnelLight).length;
+      expect(tunnelLightCount).toBeGreaterThan(4);
+
+      // Near the tunnel exit (bar 21, exit at bar 22 is inside drawDistance): must reject stitch
+      const nearExitZ = 21 * road.barLengthWorld;
+      const blockedRes = stitchHorizonToTargetZ(
+        road,
+        nearExitZ,
+        nearExitZ - 1.5 * road.barLengthWorld,
+        drawDistance,
+      );
+      expect(blockedRes).toBeNull();
     });
   });
 
@@ -828,10 +964,10 @@ describe('SongRoadGenerator', () => {
       // Drop entry segment right after tunnel exit is back to open sky!
       expect(road.segments[tunnelEndSeg]!.env).not.toBe('tunnel');
 
-      // Horizon stitch guard blocks stitching while on tunnel or viaduct
-      const tunnelZ = tunnelStartSeg * road.segmentLength;
+      // Horizon stitch guard blocks stitching across tunnel portal boundaries or onto viaducts
+      const portalApproachZ = Math.max(0, (tunnelStartSeg - 20) * road.segmentLength);
       expect(
-        stitchHorizonToTargetZ(road, tunnelZ, tunnelZ + 2 * road.barLengthWorld, 200),
+        stitchHorizonToTargetZ(road, portalApproachZ, portalApproachZ + 2 * road.barLengthWorld, 200),
       ).toBeNull();
 
       const akibaRoad = generateSongRoad(DEFAULT_SYNTH_BEATMAP, { stageId: 'akiba_night' });
