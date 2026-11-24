@@ -421,17 +421,18 @@ export class TrafficManager {
     const srcEnd = srcStart + windowWorldSpan;
     const destStart = srcStart + deltaZ;
     const destEnd = destStart + windowWorldSpan;
+    const wrapZ = (z: number): number => ((z % trackLen) + trackLen) % trackLen;
 
     for (let i = 0; i < this.trucks.length; i++) {
       const t = this.trucks[i]!;
       const isVisibleInSrc = t.z >= srcStart && t.z < srcEnd;
       if (isVisibleInSrc) {
-        // Truck was visible on screen: preserve its relative distance to the player
-        t.z = (t.z + deltaZ) % trackLen;
+        // Truck was visible on screen: preserve its relative distance to the player (supports deltaZ < 0)
+        t.z = wrapZ(t.z + deltaZ);
         t.prevZ = t.z;
       } else if (t.z >= destStart && t.z < destEnd) {
         // Truck was not visible, but sits in the destination window: push it past the horizon
-        t.z = (destEnd + (t.z - destStart) + 400) % trackLen;
+        t.z = wrapZ(destEnd + (t.z - destStart) + 400);
         t.prevZ = t.z;
       }
     }

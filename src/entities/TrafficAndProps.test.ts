@@ -254,6 +254,55 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
     expect(t3.z).toBe(14000);
   });
 
+  it('handles negative deltaZ (backward lead stitch) in shiftVisibleWindowTrucks without negative Z coordinates', () => {
+    const track = buildTestTrack();
+    const tm = new TrafficManager();
+    tm.trucks.push(
+      {
+        id: 1,
+        z: 4500, // visible at +500 ahead of player at 4000
+        baseLaneOffset: 0,
+        laneOffset: 0,
+        lateralVel: 0,
+        tiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.45,
+        variant: 0,
+        segmentIndex: 22,
+        nextInSegment: -1,
+      },
+      {
+        id: 2,
+        z: 2400, // sits in destination window [2000, 4000)
+        baseLaneOffset: 0.58,
+        laneOffset: 0.58,
+        lateralVel: 0,
+        tiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.45,
+        variant: 1,
+        segmentIndex: 12,
+        nextInSegment: -1,
+      },
+    );
+
+    tm.shiftVisibleWindowTrucks(track, 4000, -2000, 2000);
+
+    const t1 = tm.trucks.find((t) => t.id === 1)!;
+    const t2 = tm.trucks.find((t) => t.id === 2)!;
+    // Truck 1 preserves exact +500 offset ahead of new player position 2000
+    expect(t1.z).toBe(2500);
+    // Truck 2 is pushed past destination horizon (>= 4000) and stays strictly >= 0
+    expect(t2.z).toBeGreaterThanOrEqual(4000);
+    expect(t2.z).toBeLessThan(track.length);
+
+    // Near z = 0 wrap guard: never yields negative z
+    tm.trucks[0]!.z = 200;
+    tm.shiftVisibleWindowTrucks(track, 0, -1200, 2000);
+    expect(tm.trucks[0]!.z).toBeGreaterThanOrEqual(0);
+    expect(tm.trucks[0]!.z).toBeLessThan(track.length);
+  });
+
   it('keeps trucks stationary and does not collide before the player starts driving (hasStartedDriving = false)', () => {
     const track = buildTestTrack();
     const tm = new TrafficManager(track, 'seed-pre-drive');

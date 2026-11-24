@@ -337,8 +337,8 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
 
     // Advanced distance should be scaled by A1 paceFactor / elastic factor
     expect(advancedDist).toBeGreaterThan(0);
-    expect(advancedDist / baseDist).toBeGreaterThanOrEqual(1 - 0.16 - 0.01);
-    expect(advancedDist / baseDist).toBeLessThanOrEqual(1 + 0.25 + 0.01);
+    expect(advancedDist / baseDist).toBeGreaterThanOrEqual(1 - tuning.syncMaxSlowdown - 0.01);
+    expect(advancedDist / baseDist).toBeLessThanOrEqual(1 + tuning.syncMaxSpeedup + 0.01);
   });
 
   it('synchronizes relaxed driving (65% speed) with drop crest and reaches stage fork without being trapped in outro loop', () => {
