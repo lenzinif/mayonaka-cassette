@@ -186,6 +186,8 @@ export class RoadRenderer {
     setPropTheme(palette.scenery);
 
     const { segments, segmentLength, length: trackLength } = track;
+    const isStreaming = Boolean(track.isStreaming && track.ringMask !== undefined);
+    const ringMask = track.ringMask ?? 0;
     const { position, playerX, cameraDepth, roadWidth, width, height } = view;
     const alpha = view.alpha ?? 1;
     const drawDistance = Math.min(
@@ -196,6 +198,7 @@ export class RoadRenderer {
     const playerZ = view.cameraHeight * cameraDepth;
 
     const base = findSegment(track, position);
+    const baseAbsIdx = Math.floor(position / segmentLength);
     const basePercent = percentRemaining(position, segmentLength);
     const playerSeg = findSegment(track, position + playerZ);
     const playerPercent = percentRemaining(position + playerZ, segmentLength);
@@ -204,6 +207,7 @@ export class RoadRenderer {
     const cameraXBase = playerX * roadWidth;
 
     const hasNextTrackLookahead =
+      !isStreaming &&
       view.nextTrack !== undefined &&
       view.forkChoice === 'right' &&
       base.index + drawDistance > segments.length &&
@@ -284,12 +288,16 @@ export class RoadRenderer {
     let leftCameraTunnel = false;
     for (let n = 0; n < drawDistance; n++) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
-      const seg = isNextSeg
-        ? view.nextTrack!.segments[(n - nextTrackStartPassIdx) % view.nextTrack!.segments.length]!
-        : segments[(base.index + n) % segments.length]!;
-      const cameraZ = isNextSeg
-        ? position - trackLength
-        : position - (seg.index < base.index ? trackLength : 0);
+      const seg = isStreaming
+        ? segments[(baseAbsIdx + n) & ringMask]!
+        : isNextSeg
+          ? view.nextTrack!.segments[(n - nextTrackStartPassIdx) % view.nextTrack!.segments.length]!
+          : segments[(base.index + n) % segments.length]!;
+      const cameraZ = isStreaming
+        ? position
+        : isNextSeg
+          ? position - trackLength
+          : position - (seg.index < base.index ? trackLength : 0);
       const nRatio = drawDistance > 0 ? n / drawDistance : 0;
       seg.fog = legacy || fogStrength <= 0 ? 1 : clamp01(1 - nRatio * fogStrength);
       project(seg.p1, cameraXBase - x, cameraY, cameraZ, cameraDepth, width, height, roadWidth);
@@ -405,7 +413,8 @@ export class RoadRenderer {
 
       const isInCurrentTunnel = isCameraInTunnel && n <= cameraTunnelEndN;
       const isTunnelSeg = seg.env === 'tunnel';
-      const firstTruckIdx = !isNextSeg && traffic ? traffic.getFirstTruckOnSegment(seg.index) : -1;
+      const truckSegKey = isStreaming ? (seg.index & ringMask) : seg.index;
+      const firstTruckIdx = !isNextSeg && traffic ? traffic.getFirstTruckOnSegment(truckSegKey) : -1;
       const segClipY = this.clipY[n]!;
       const segForkZoneStartZ = isNextSeg ? undefined : view.forkZoneStartZ;
       const roadVisible = p2.screenY < p1.screenY && p2.screenY < segClipY;
@@ -425,12 +434,16 @@ export class RoadRenderer {
 
         const segArr = isNextSeg ? view.nextTrack!.segments : segments;
         const segArrLen = segArr.length;
-        const prevEnv =
-          segArrLen > 0
+        const prevEnv = isStreaming
+          ? (segments[(seg.index - 1) & ringMask]?.env ?? 'standard')
+          : segArrLen > 0
             ? (segArr[(seg.index - 1 + segArrLen) % segArrLen]?.env ?? 'standard')
             : 'standard';
-        const nextEnv =
-          segArrLen > 0 ? (segArr[(seg.index + 1) % segArrLen]?.env ?? 'standard') : 'standard';
+        const nextEnv = isStreaming
+          ? (segments[(seg.index + 1) & ringMask]?.env ?? 'standard')
+          : segArrLen > 0
+            ? (segArr[(seg.index + 1) % segArrLen]?.env ?? 'standard')
+            : 'standard';
 
         let shouldDeferSlice = false;
         if (legacy) {
@@ -708,7 +721,7 @@ export class RoadRenderer {
             p1.screenY,
             propPpu,
             seg.index,
-            isNextSeg ? view.nextTrack!.segments.length : segments.length,
+            isStreaming ? 0 : isNextSeg ? view.nextTrack!.segments.length : segments.length,
             legacy,
           );
         }
@@ -791,10 +804,12 @@ export class RoadRenderer {
         while (tIdx !== -1) {
           const truck = traffic.trucks[tIdx]!;
           let prevTruckZ = truck.prevZ ?? truck.z;
-          if (truck.z < prevTruckZ && prevTruckZ - truck.z > trackLength * 0.5) {
-            prevTruckZ -= trackLength;
-          } else if (truck.z > prevTruckZ && truck.z - prevTruckZ > trackLength * 0.5) {
-            prevTruckZ += trackLength;
+          if (!isStreaming) {
+            if (truck.z < prevTruckZ && prevTruckZ - truck.z > trackLength * 0.5) {
+              prevTruckZ -= trackLength;
+            } else if (truck.z > prevTruckZ && truck.z - prevTruckZ > trackLength * 0.5) {
+              prevTruckZ += trackLength;
+            }
           }
           const renderTruckZ =
             alpha >= 0.999

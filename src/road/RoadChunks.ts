@@ -41,8 +41,10 @@ export interface RoadChunk {
   id: string;
   /** Human-readable designer description of the driving feel. */
   description: string;
-  /** Musical section role this chunk belongs to. */
+  /** Primary musical section role this chunk belongs to. */
   role: SectionRole;
+  /** Optional secondary roles that may also select this chunk without duplicating geometry. */
+  secondaryRoles?: readonly SectionRole[];
   /** Total length of the chunk in bars (`4` or `8`). Must equal the sum of `maneuvers[].bars`. */
   bars: 4 | 8;
   /** Whether `SongRoadGenerator` can mirror (`curve * -1`) this chunk (default `true`). */
@@ -155,6 +157,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     id: 'intro-sunset-sweeper',
     description: 'Ampio curvone continuo a 8 battute con ondina dolce e raccordo fluido',
     role: 'intro',
+    secondaryRoles: ['groove'],
     bars: 8,
     weight: 1.15,
     energyRange: [0.15, 0.65],
@@ -174,6 +177,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     id: 'intro-neon-gateway',
     description: 'Ingresso veloce a doppia curva morbida raccordata in flusso continuo',
     role: 'intro',
+    secondaryRoles: ['groove'],
     bars: 4,
     weight: 1.0,
     energyRange: [0.25, 0.75],
@@ -316,6 +320,65 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
   }),
 
   // ============================================================================
+  // GROOVE — Sustained cruise flow, rhythmic sweepers, tunnel-safe continuous drive
+  // ============================================================================
+  defineChunk({
+    id: 'groove-bayshore-flow-8',
+    description: 'Crociera costiera/Wangan a 8 battute con ampie curve raccordate in flusso costante',
+    role: 'groove',
+    bars: 8,
+    weight: 1.3,
+    energyRange: [0.4, 0.95],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated', 'tunnel'],
+    styleTags: ['cruise', 'scenic'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'normal',
+    maneuvers: [
+      { bars: 3, curve: CURVE.EASY * 0.9, blendToNext: true, elevation: HILL.LOW * 0.35, easeRatio: [0.25, 0.25] },
+      { bars: 2, curve: 0, blendToNext: true, elevation: -HILL.LOW * 0.35, easeRatio: [0.25, 0.25] },
+      { bars: 3, curve: -CURVE.MEDIUM * 0.75, elevation: 0, easeRatio: [0.25, 0.25] },
+    ],
+  }),
+
+  defineChunk({
+    id: 'groove-midnight-cruise-4',
+    description: 'Scorrimento fluido a 4 battute con curva morbida da quarta/quinta piena (compatibile tunnel)',
+    role: 'groove',
+    bars: 4,
+    weight: 1.25,
+    energyRange: [0.35, 0.95],
+    elevationIntent: 'flat',
+    allowedStructures: ['standard', 'elevated', 'tunnel'],
+    styleTags: ['cruise', 'wangan'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'normal',
+    maneuvers: [
+      { bars: 2, curve: CURVE.MEDIUM * 0.7, blendToNext: true, elevation: 0, easeRatio: [0.25, 0.25] },
+      { bars: 2, curve: -CURVE.EASY * 0.85, elevation: 0, easeRatio: [0.25, 0.25] },
+    ],
+  }),
+
+  defineChunk({
+    id: 'groove-neon-boulevard-8',
+    description: 'Viale veloce a 8 battute con doppio appoggio progressivo per groove Future Funk sostenuto',
+    role: 'groove',
+    bars: 8,
+    weight: 1.2,
+    energyRange: [0.45, 1.0],
+    elevationIntent: 'rolling',
+    allowedStructures: ['standard', 'elevated'],
+    styleTags: ['wangan', 'cruise'],
+    fixtureCadenceBeats: 2,
+    trafficProfile: 'weaving',
+    maneuvers: [
+      { bars: 2, curve: 0, blendToNext: true, elevation: HILL.LOW * 0.4 },
+      { bars: 3, curve: CURVE.MEDIUM * 0.85, blendToNext: true, elevation: -HILL.LOW * 0.4, easeRatio: [0.22, 0.22] },
+      { bars: 3, curve: CURVE.EASY * 0.6, elevation: 0, easeRatio: [0.22, 0.28] },
+    ],
+  }),
+
+  // ============================================================================
   // DROP — High-speed expressways, double-apex sweepers, post-crest plunges
   // ============================================================================
   defineChunk({
@@ -342,6 +405,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     id: 'drop-wangan-double-apex-8',
     description: 'Doppio apice Wangan continuo sullo stesso lato senza ritorno a zero tra i due vertici',
     role: 'drop',
+    secondaryRoles: ['groove'],
     bars: 8,
     weight: 1.2,
     energyRange: [0.5, 1.0],
@@ -419,6 +483,7 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
     id: 'drop-rollercoaster-sprint',
     description: 'Sprint veloce con dossi ritmici e piega ad apertura continua',
     role: 'drop',
+    secondaryRoles: ['groove'],
     bars: 4,
     weight: 1.05,
     energyRange: [0.35, 0.85],
@@ -699,10 +764,12 @@ export const ROAD_CHUNKS: readonly RoadChunk[] = [
   }),
 ];
 
-/** Returns all chunks matching `role` from a chunk catalog. */
+/** Returns all chunks matching `role` (primary or secondary) from a chunk catalog. */
 export function getChunksForRole(
   role: SectionRole,
   catalog: readonly RoadChunk[] = ROAD_CHUNKS,
 ): readonly RoadChunk[] {
-  return catalog.filter((c) => c.role === role);
+  return catalog.filter(
+    (c) => c.role === role || (c.secondaryRoles !== undefined && c.secondaryRoles.includes(role)),
+  );
 }

@@ -4,6 +4,7 @@ import {
   sectionAtBar,
   type BeatMap,
   type SectionRole,
+  type SpectralSpanKind,
 } from '@src/audio/BeatMap';
 import {
   FunkAudioEngine,
@@ -43,6 +44,7 @@ import {
   type GrooveTier,
 } from '@src/entities/PlayerCar';
 import { TrafficManager, type CollisionEvent } from '@src/entities/TrafficAndProps';
+import { HorizonAssembler, isStreamingTrack } from '@src/road/HorizonAssembler';
 import {
   blendStagePalette,
   createMutablePaletteClone,
@@ -53,16 +55,20 @@ import {
 import { cameraDepthFromFov, interpolate } from '@src/road/RoadProjection';
 import { RoadRenderer, type RoadView } from '@src/road/RoadRenderer';
 import { findSegment, getChosenForkCenter, type Track } from '@src/road/RoadSegment';
+import { compileSongBlueprint, type SongBlueprint } from '@src/road/SongBlueprint';
 import {
-  generateSongRoad,
   isSongTrack,
   restoreCanonicalTrack,
   worldZToBeat,
   type SongTrack,
+  type SyncAnchorKind,
 } from '@src/road/SongRoadGenerator';
 import { Background } from './Background';
 import { PlaylistRunManager, type RunSummary } from './PlaylistRunManager';
-import { SongRoadSyncController } from './SongRoadSyncController';
+import {
+  mapCarSpeedToWorldBaseSpeed,
+  SongRoadSyncController,
+} from './SongRoadSyncController';
 import { StageForkController, type ForkOptionInfo } from './StageForkController';
 
 export type { ForkOptionInfo, RunSummary };
@@ -86,6 +92,7 @@ export interface TelemetrySnapshot {
   beatInBar: number;
   beatPulse: number;
   sectionRole: SectionRole;
+  spectralKind?: SpectralSpanKind | null;
   barEnergy: number;
   filterCutoffHz: number;
   trackTitle: string;
@@ -96,6 +103,9 @@ export interface TelemetrySnapshot {
   totalBars: number;
   currentChunkId: string;
   syncDeltaBeats: number;
+  horizonStretchRatio?: number;
+  activeAnchorKind?: SyncAnchorKind | null;
+  activeAnchorBar?: number;
   // M5 Groove, Gearbox & Tofu Mode telemetry
   gear: GearNumber;
   rpm: number;
@@ -331,6 +341,13 @@ export class Game {
     stageId: StagePalette['id'];
     track: SongTrack;
   } | null = null;
+  private nextBlueprintCache: {
+    contentHash: string;
+    stageId: StagePalette['id'];
+    blueprint: SongBlueprint;
+  } | null = null;
+  private horizonAssembler: HorizonAssembler | null = null;
+  private lastInternalPosition = 0;
   private activeNextTrackLookahead: SongTrack | undefined = undefined;
   private cachedForkLeftOption: ForkOptionInfo | null = null;
   private cachedForkRightOption: ForkOptionInfo | null = null;
@@ -365,6 +382,7 @@ export class Game {
   private beatInBar = 0;
   private audioBeatIndex = 0;
   private sectionRole: SectionRole = 'intro';
+  private spectralKind: SpectralSpanKind | null = null;
   private barEnergy = 0.5;
   private barsSinceLastLightning = 99;
   private lastLightningWasDropEntry = false;
@@ -524,14 +542,30 @@ export class Game {
    * Jumps car position and audio clock to `barIndex` so diagnostics can sample any song section directly.
    */
   seekToBar(barIndex: number): void {
-    const maxBars = isSongTrack(this.track)
+    const maxBars = isStreamingTrack(this.track)
       ? Math.max(1, this.track.totalBars)
-      : Math.max(1, this.activeRoadBeatMap.barEnergy.length);
+      : isSongTrack(this.track)
+        ? Math.max(1, this.track.totalBars)
+        : Math.max(1, this.activeRoadBeatMap.barEnergy.length);
     const clampedBar = Math.max(0, Math.min(maxBars - 1, Math.floor(barIndex)));
-    if (isSongTrack(this.track)) {
+    if (this.horizonAssembler && isStreamingTrack(this.track)) {
+      this.traffic.resetForStreaming(this.horizonAssembler.track, this.activeRoadBeatMap.contentHash);
+      this.horizonAssembler.resetAtBar(
+        clampedBar,
+        0,
+        this.horizonAssembler.track.blueprint,
+        this.horizonAssembler.track.nextBlueprint,
+        tuning.drawDistance,
+        this.forkChoice,
+      );
+      this.position = 0;
+      this.prevPosition = 0;
+      this.lastInternalPosition = 0;
+    } else if (isSongTrack(this.track)) {
       const targetZ = clampedBar * this.track.barLengthWorld;
       this.position = targetZ % this.track.length;
       this.prevPosition = this.position;
+      this.lastInternalPosition = this.position;
     }
     this.car.x = 0;
     this.car.prevX = 0;
@@ -566,8 +600,24 @@ export class Game {
     this.forkChoice = 'right';
     this.car.x = 0.5;
     this.car.prevX = 0.5;
-    this.position = Math.max(0, this.track.length - this.track.segmentLength * 3);
-    this.prevPosition = this.position;
+    if (this.horizonAssembler && isStreamingTrack(this.track)) {
+      this.seekToBar(Math.max(0, this.totalBars - 1));
+      const stageEndZ = this.track.stageFinishWorldZ ?? this.track.length;
+      this.position = Math.max(0, stageEndZ - this.track.segmentLength * 3);
+      this.prevPosition = this.position;
+      this.lastInternalPosition = this.position;
+      this.horizonAssembler.advance(
+        this.position,
+        this.totalBars - 0.1,
+        mapCarSpeedToWorldBaseSpeed(tuning.maxSpeed * 0.85),
+        tuning.drawDistance,
+        1 / 60,
+      );
+    } else {
+      this.position = Math.max(0, this.track.length - this.track.segmentLength * 3);
+      this.prevPosition = this.position;
+      this.lastInternalPosition = this.position;
+    }
     this.car.speed = tuning.maxSpeed * 0.85;
     this.car.gearbox.update(this.car.speed, tuning.maxSpeed);
     this.updateRoadProgressTelemetry();
@@ -603,7 +653,12 @@ export class Game {
     this.car.gearbox.update(this.car.speed, tuning.maxSpeed);
     const playerZOffset = tuning.cameraHeight * cameraDepthFromFov(tuning.fieldOfView);
     const playerWorldZ = this.position + playerZOffset;
-    this.traffic.placeTruckAheadForTest(playerWorldZ, this.car.x, this.track.length);
+    this.traffic.placeTruckAheadForTest(
+      playerWorldZ,
+      this.car.x,
+      this.track.length,
+      isStreamingTrack(this.track),
+    );
     this.renderDirty = true;
     this.bridge.publish(this.buildSnapshot);
   }
@@ -779,8 +834,20 @@ export class Game {
     this.paletteTransitionSnapshot = createMutablePaletteClone(this.palette);
     this.hasCustomTrack = options.track !== undefined;
     this.activeRoadBeatMap = this.audio.beatMap;
-    this.track = options.track ?? generateSongRoad(this.audio.beatMap, { stageId: this.palette.id });
-    this.traffic = new TrafficManager(this.track, this.audio.beatMap.contentHash);
+    if (options.track) {
+      this.track = options.track;
+      this.traffic = new TrafficManager(this.track, this.audio.beatMap.contentHash);
+    } else {
+      const bp = compileSongBlueprint(this.audio.beatMap, { stageId: this.palette.id });
+      this.horizonAssembler = new HorizonAssembler(bp, null);
+      this.track = this.horizonAssembler.track;
+      this.traffic = new TrafficManager();
+      this.traffic.resetForStreaming(this.horizonAssembler.track, this.audio.beatMap.contentHash);
+      this.horizonAssembler.onHorizonBarMaterialized = (barIdx, absSeg, blueprint, st) => {
+        this.traffic.onHorizonBarMaterialized(barIdx, absSeg, blueprint, st);
+      };
+      this.horizonAssembler.resetAtBar(0, 0, bp, null, tuning.drawDistance, this.forkChoice);
+    }
     this.preloader = options.preloader;
     this.autopilot = options.autopilot;
     if (this.autopilot) {
@@ -878,9 +945,10 @@ export class Game {
         const trucks = this.traffic.trucks;
         const result = [];
         const trackLen = this.track.length;
+        const streaming = isStreamingTrack(this.track);
         for (let i = 0; i < trucks.length; i++) {
           const t = trucks[i]!;
-          const dz = (t.z - playerZ + trackLen) % trackLen;
+          const dz = streaming ? t.z - playerZ : (t.z - playerZ + trackLen) % trackLen;
           if (dz > 0 && dz < lookaheadDistance) {
             result.push({ z: dz, laneOffset: t.laneOffset, speedRatio: t.speedRatio });
           }
@@ -919,10 +987,11 @@ export class Game {
   /** Regenerates the road and traffic from `beatMap` and resets run state when switching songs. */
   loadBeatMapRoad(beatMap: BeatMap, resetPosition = true): void {
     const prevLength = this.track.length;
-    const songTrack = generateSongRoad(beatMap, { stageId: this.palette.id });
-    this.track = songTrack;
+    const prevRatio = prevLength > 0 ? this.position / prevLength : 0;
+    const bp = compileSongBlueprint(beatMap, { stageId: this.palette.id });
     this.activeRoadBeatMap = beatMap;
     this.nextTrackCache = null;
+    this.nextBlueprintCache = null;
     this.activeNextTrackLookahead = undefined;
     this.syncController.resetForTrack(
       !resetPosition && prevLength > 0,
@@ -930,12 +999,24 @@ export class Game {
     );
     this.forkController.resetForNewRoad();
     this.lastBridgeJointSegment = -1;
-    this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
+
+    if (!this.horizonAssembler) {
+      this.horizonAssembler = new HorizonAssembler(bp, null);
+      this.horizonAssembler.onHorizonBarMaterialized = (barIdx, absSeg, blueprint, st) => {
+        this.traffic.onHorizonBarMaterialized(barIdx, absSeg, blueprint, st);
+      };
+    }
+    this.track = this.horizonAssembler.track;
+    this.traffic.resetForStreaming(this.horizonAssembler.track, beatMap.contentHash);
+
+    const startBar = resetPosition ? 0 : Math.max(0, Math.min(bp.totalBars - 1, Math.floor(prevRatio * bp.totalBars)));
+    this.horizonAssembler.resetAtBar(startBar, 0, bp, null, tuning.drawDistance, this.forkChoice);
+    this.position = 0;
+    this.prevPosition = 0;
+    this.lastInternalPosition = 0;
 
     if (resetPosition) {
       this.hasStartedDriving = false;
-      this.position = 0;
-      this.prevPosition = 0;
       this.car.speed = 0;
       this.car.gearbox.gear = 1;
       this.car.x = 0;
@@ -949,10 +1030,6 @@ export class Game {
       this.lastLightningWasDropEntry = false;
       this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
       this.resetPerfBenchmark();
-    } else if (prevLength > 0) {
-      const ratio = this.position / prevLength;
-      this.position = (ratio * songTrack.length) % songTrack.length;
-      this.prevPosition = this.position;
     }
 
     this.renderDirty = true;
@@ -961,8 +1038,8 @@ export class Game {
     this.bridge.emit({
       type: 'songRoadGenerated',
       title: beatMap.title,
-      totalBars: songTrack.totalBars,
-      chunkCount: songTrack.chunks.length,
+      totalBars: bp.totalBars,
+      chunkCount: bp.chunks.length,
     });
   }
 
@@ -971,27 +1048,33 @@ export class Game {
    * Preserves vehicle momentum (speed, gear, RPM, groove) while updating road, palette, and traffic.
    */
   private transitionToNextStage(beatMap: BeatMap, nextPos: number): void {
-    const prevLength = this.track.length;
-    const overshoot = Math.max(0, nextPos - prevLength);
-    const songTrack =
-      this.nextTrackCache &&
-      this.nextTrackCache.contentHash === beatMap.contentHash &&
-      this.nextTrackCache.stageId === this.palette.id
-        ? this.nextTrackCache.track
-        : generateSongRoad(beatMap, { stageId: this.palette.id });
+    const newBp =
+      this.nextBlueprintCache &&
+      this.nextBlueprintCache.contentHash === beatMap.contentHash &&
+      this.nextBlueprintCache.stageId === this.palette.id
+        ? this.nextBlueprintCache.blueprint
+        : compileSongBlueprint(beatMap, { stageId: this.palette.id });
     this.nextTrackCache = null;
+    this.nextBlueprintCache = null;
     this.activeNextTrackLookahead = undefined;
-    this.track = songTrack;
     this.activeRoadBeatMap = beatMap;
     this.syncController.resetForTrack(true, true, 2.0);
     this.forkController.resetForStageTransition();
     this.lastBridgeJointSegment = -1;
-    this.traffic.spawnForTrack(songTrack, beatMap.contentHash);
+
+    if (this.horizonAssembler) {
+      const prevEndZ = this.horizonAssembler.track.stageFinishWorldZ ?? this.track.length;
+      const overshoot = Math.max(0, nextPos - prevEndZ);
+      this.horizonAssembler.promoteNextStage(newBp, null, nextPos, tuning.drawDistance);
+      this.track = this.horizonAssembler.track;
+      this.traffic.resetForStreaming(this.horizonAssembler.track, beatMap.contentHash);
+      this.position = overshoot;
+      this.prevPosition = overshoot;
+      this.lastInternalPosition = overshoot;
+    }
 
     // Flow State (AGENTS.md Pillar 3): preserve vehicle momentum and continuous driving state
     this.hasStartedDriving = true;
-    this.position = overshoot % songTrack.length;
-    this.prevPosition = this.position;
     // this.car.speed, this.car.gearbox.gear, this.car.gearbox.rpm, this.car.groove are preserved!
     this.lap = 1;
     this.lapTime = 0;
@@ -1005,9 +1088,23 @@ export class Game {
     this.bridge.emit({
       type: 'songRoadGenerated',
       title: beatMap.title,
-      totalBars: songTrack.totalBars,
-      chunkCount: songTrack.chunks.length,
+      totalBars: newBp.totalBars,
+      chunkCount: newBp.chunks.length,
     });
+  }
+
+  /** Rebase ring-buffer absolute coordinates atomically when session distance grows large (float64 safety). */
+  private maybeRebaseStreamingOrigin(): void {
+    if (!this.horizonAssembler || !isStreamingTrack(this.track)) return;
+    const camAbsSeg = Math.floor(this.position / this.track.segmentLength);
+    if (camAbsSeg < 6144) return;
+    const shiftZ = this.horizonAssembler.rebaseOrigin(camAbsSeg);
+    if (shiftZ > 0) {
+      this.position -= shiftZ;
+      this.prevPosition -= shiftZ;
+      this.lastInternalPosition -= shiftZ;
+      this.traffic.shiftStreamingTrucks(shiftZ);
+    }
   }
 
   /**
@@ -1050,25 +1147,29 @@ export class Game {
     this.palette = getStagePalette(index);
     this.renderPalette = this.palette;
     this.paletteTransitionFrom = null;
-    if (!this.hasCustomTrack) {
-      const prevSong = isSongTrack(this.track) ? this.track : null;
-      this.track = generateSongRoad(
-        this.activeRoadBeatMap,
-        prevSong
-          ? {
-              stageId: this.palette.id,
-              maxSpeed: prevSong.referenceSpeed,
-              referenceSpeedRatio: 1,
-            }
-          : { stageId: this.palette.id },
-      );
-      if (this.track.length > 0) {
-        this.position =
-          ((this.position % this.track.length) + this.track.length) % this.track.length;
-        this.prevPosition = this.position;
-      }
+    if (!this.hasCustomTrack && this.horizonAssembler && isStreamingTrack(this.track)) {
+      const prevLength = this.track.length;
+      const prevPos = this.position;
+      const prevBp = this.track.blueprint;
+      const curBar =
+        prevLength > 0
+          ? Math.max(0, Math.min(prevBp.totalBars - 0.05, (prevPos / prevLength) * prevBp.totalBars))
+          : this.roadBarIndex;
+      const curAbsSeg = Math.max(0, Math.floor(prevPos / this.track.segmentLength));
+      const newBp = compileSongBlueprint(this.activeRoadBeatMap, {
+        stageId: this.palette.id,
+        maxSpeed: prevBp.referenceSpeed,
+        referenceSpeedRatio: 1,
+      });
+      this.traffic.resetForStreaming(this.horizonAssembler.track, this.activeRoadBeatMap.contentHash);
+      this.horizonAssembler.resetAtBar(curBar, curAbsSeg, newBp, null, tuning.drawDistance, this.forkChoice);
+      this.track.length = prevLength;
+      this.position = prevPos;
+      this.prevPosition = prevPos;
+      this.lastInternalPosition = prevPos;
       this.lastBridgeJointSegment = -1;
       this.nextTrackCache = null;
+      this.nextBlueprintCache = null;
       this.activeNextTrackLookahead = undefined;
       this.prewarmNextLookaheadTrack();
       this.updateRoadProgressTelemetry();
@@ -1161,6 +1262,40 @@ export class Game {
     this.prevPosition = this.position;
     this.syncController.tickCooldown(dt);
 
+    // Detect external direct position teleports (e.g. unit tests jumping straight to the fork zone)
+    // and resync the streaming ring buffer seamlessly around the new position.
+    if (
+      this.horizonAssembler &&
+      isStreamingTrack(this.track) &&
+      Math.abs(this.position - this.lastInternalPosition) > this.track.segmentLength * 16
+    ) {
+      const bp = this.track.blueprint;
+      const stageStartZ = this.track.stageStartAbsSeg * this.track.segmentLength;
+      const approxBar = Math.max(
+        0,
+        Math.min(bp.totalBars - 0.05, (this.position - stageStartZ) / Math.max(1, bp.barLengthWorld)),
+      );
+      const startAbsSeg = Math.max(0, Math.floor(this.position / this.track.segmentLength));
+      const targetStageEndZ = this.track.stageFinishWorldZ ?? this.track.length;
+      const targetForkStartZ = this.getForkZoneStartZ();
+      this.horizonAssembler.resetAtBar(
+        approxBar,
+        startAbsSeg,
+        bp,
+        this.track.nextBlueprint,
+        tuning.drawDistance,
+        this.forkChoice,
+      );
+      // Preserve explicit fork/finish worldZ when caller positioned relative to track.length
+      if (targetForkStartZ !== undefined && this.position >= targetForkStartZ - this.track.segmentLength * 8) {
+        this.track.forkZoneStartZ = targetForkStartZ;
+        this.track.stageFinishWorldZ = targetStageEndZ;
+        this.track.length = targetStageEndZ;
+      }
+      this.prevPosition = this.position;
+      this.lastInternalPosition = this.position;
+    }
+
     // 2. Poll continuous driving controls (digital buttons + analog Gamepad axes)
     this.controls.left = this.input.isDown('left');
     this.controls.right = this.input.isDown('right');
@@ -1214,6 +1349,19 @@ export class Game {
     // Accumulate continuous driving score & groove stats
     this.runManager.accumulateDrivingStep(dt, this.car, this.melonSoda.active);
 
+    if (this.horizonAssembler && isStreamingTrack(this.track)) {
+      this.horizonAssembler.advance(
+        this.position,
+        this.audioBeatIndex / 4,
+        mapCarSpeedToWorldBaseSpeed(this.car.speed),
+        tuning.drawDistance,
+        dt,
+      );
+      if (this.forkActive) {
+        this.horizonAssembler.updateForkChoice(this.forkChoice, this.position, tuning.drawDistance);
+      }
+    }
+
     const effectiveSpeed = this.syncController.computeElasticWorldSpeed(
       this.track,
       this.hasCustomTrack,
@@ -1226,22 +1374,29 @@ export class Game {
       dt,
     );
     const nextPos = this.position + effectiveSpeed * dt;
+    const stageEndZ = isStreamingTrack(this.track)
+      ? (this.track.stageFinishWorldZ ?? this.track.length)
+      : this.track.length;
 
     // Smoothly align car.x with the chosen fork branch as it converges back to center
     this.forkController.alignCarInConvergence(
       this.car,
       this.position,
       nextPos,
-      this.track.length,
+      stageEndZ,
       forkZoneStartZ,
       dt,
     );
 
-    const wrappedAcrossStageEnd = nextPos >= this.track.length;
+    const wrappedAcrossStageEnd = nextPos >= stageEndZ;
     if (wrappedAcrossStageEnd) {
       this.handleStageOrLapEnd(nextPos);
     } else {
       this.position = nextPos;
+    }
+    this.lastInternalPosition = this.position;
+    if (this.position > 2e8) {
+      this.maybeRebaseStreamingOrigin();
     }
 
     // 3. Advance AI Kei Trucks & resolve flow-preserving obstacle/traffic collisions.
@@ -1331,7 +1486,11 @@ export class Game {
       this.position < this.track.length;
 
     this.drivingAudioParams.holdOutroLoop = holdOutro;
-    if (holdOutro && isSongTrack(this.track)) {
+    if (holdOutro && isStreamingTrack(this.track)) {
+      const endZ = this.track.stageFinishWorldZ ?? this.track.length;
+      const beatLenWorld = Math.max(1, this.track.barLengthWorld / 4);
+      this.drivingAudioParams.roadBeatsRemaining = Math.max(0, (endZ - this.position) / beatLenWorld);
+    } else if (holdOutro && isSongTrack(this.track)) {
       const totalRoadBeats = this.track.totalBars * 4;
       const currentRoadBeat = worldZToBeat(this.track, this.position);
       this.drivingAudioParams.roadBeatsRemaining = Math.max(0, totalRoadBeats - currentRoadBeat);
@@ -1348,6 +1507,7 @@ export class Game {
     this.beatInBar = clockState.beatInBar;
     this.audioBeatIndex = Math.max(0, clockState.beatFloat);
     this.sectionRole = clockState.sectionRole;
+    this.spectralKind = clockState.spectralKind;
     this.barEnergy = clockState.barEnergy;
 
     if (clockState.justCrossedBar && this.sectionRole !== prevRole) {
@@ -1370,6 +1530,7 @@ export class Game {
     if (stitchDeltaZ !== 0) {
       this.position += stitchDeltaZ;
       this.prevPosition += stitchDeltaZ;
+      this.lastInternalPosition = this.position;
       this.updateRoadProgressTelemetry();
       this.updateForkState();
     }
@@ -1388,14 +1549,17 @@ export class Game {
     if (clockState.justCrossedBar && tuning.bgRain === 1) {
       this.barsSinceLastLightning++;
 
-      // Extreme Case 1: Entering a real Drop section (must come from a build or show a genuine energy lift,
-      // preventing strikes on artificial plateau-split breakdown->drop boundaries in flat tracks)
+      // Extreme Case 1: Genuine musical impact bar (`impactBars`, including contrasting drops
+      // and LPF/HPF filter reopenings), with legacy fallback for BeatMaps without `impactBars`.
+      const hasExplicitImpacts = this.activeRoadBeatMap.impactBars !== undefined;
       const isDropEntry =
         this.barsSinceLastLightning >= 4 &&
-        this.sectionRole === 'drop' &&
-        prevRole !== 'drop' &&
-        (prevRole === 'build' ||
-          (this.barEnergy - prevBarEnergy >= 0.16 && this.barEnergy >= 0.55));
+        (hasExplicitImpacts
+          ? clockState.isImpactBar
+          : this.sectionRole === 'drop' &&
+            prevRole !== 'drop' &&
+            (prevRole === 'build' ||
+              (this.barEnergy - prevBarEnergy >= 0.16 && this.barEnergy >= 0.55)));
       // Extreme Case 2: Peak spectral energy bar with genuine local prominence & refractory period
       const isExtremeSpectralPeak =
         this.sectionRole !== 'intro' &&
@@ -1542,14 +1706,19 @@ export class Game {
     const width = ctx.canvas.width || RENDER_WIDTH;
     const height = ctx.canvas.height || RENDER_HEIGHT;
 
-    // Handle wrap-around across the start/finish line when interpolating position.
-    let prevPos = this.prevPosition;
-    if (this.position < prevPos) {
-      prevPos -= this.track.length;
+    // Handle wrap-around across the start/finish line when interpolating position (streaming is monotonic).
+    let renderPos: number;
+    if (isStreamingTrack(this.track)) {
+      renderPos = interpolate(this.prevPosition, this.position, alpha);
+    } else {
+      let prevPos = this.prevPosition;
+      if (this.position < prevPos) {
+        prevPos -= this.track.length;
+      }
+      renderPos =
+        ((interpolate(prevPos, this.position, alpha) % this.track.length) + this.track.length) %
+        this.track.length;
     }
-    const renderPos =
-      ((interpolate(prevPos, this.position, alpha) % this.track.length) + this.track.length) %
-      this.track.length;
     const renderX = interpolate(this.car.prevX, this.car.x, alpha);
 
     const renderShake = interpolate(this.prevCollisionShake, this.collisionShake, alpha);
@@ -1604,12 +1773,17 @@ export class Game {
     if (inTunnel && this.renderRoad && !this.view.nextTrack) {
       const segs = this.track.segments;
       const segCount = segs.length;
+      const streamingTrack = isStreamingTrack(this.track) ? this.track : null;
+      const ringMask = streamingTrack ? streamingTrack.ringMask : 0;
       if (segCount > 0) {
         const baseIdx = cameraSegForWeather.index;
         const lookaheadCount = Math.max(1, Math.min(this.view.drawDistance, segCount));
         isDeepInTunnel = true;
         for (let i = 1; i < lookaheadCount; i++) {
-          if (segs[(baseIdx + i) % segCount]!.env !== 'tunnel') {
+          const checkSeg = streamingTrack
+            ? segs[(baseIdx + i) & ringMask]!
+            : segs[(baseIdx + i) % segCount]!;
+          if (checkSeg.env !== 'tunnel') {
             isDeepInTunnel = false;
             break;
           }
@@ -1719,32 +1893,33 @@ export class Game {
   };
 
   private prewarmNextLookaheadTrack(): void {
-    if (
-      this.hasCustomTrack ||
-      !this.library.hasNextTrack ||
-      !isSongTrack(this.track)
-    ) {
+    if (this.hasCustomTrack || !this.library.hasNextTrack) {
       return;
     }
     const nextItem = this.library.nextTrackItem;
     if (!nextItem) return;
     const nextPalette = getStagePalette(this.runManager.stageNumber);
     if (
-      !this.nextTrackCache ||
-      this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash ||
-      this.nextTrackCache.stageId !== nextPalette.id
+      !this.nextBlueprintCache ||
+      this.nextBlueprintCache.contentHash !== nextItem.beatMap.contentHash ||
+      this.nextBlueprintCache.stageId !== nextPalette.id
     ) {
-      const nextTrack = generateSongRoad(nextItem.beatMap, { stageId: nextPalette.id });
-      this.nextTrackCache = {
+      const nextBp = compileSongBlueprint(nextItem.beatMap, { stageId: nextPalette.id });
+      this.nextBlueprintCache = {
         contentHash: nextItem.beatMap.contentHash,
         stageId: nextPalette.id,
-        track: nextTrack,
+        blueprint: nextBp,
       };
+      this.horizonAssembler?.setNextBlueprint(nextBp);
       this.background.prewarmPalette(nextPalette);
     }
   }
 
   private getNextLookaheadTrack(): SongTrack | undefined {
+    // Streaming tracks emit `nextBlueprint` seamlessly inside the same circular ring buffer
+    if (isStreamingTrack(this.track)) {
+      return undefined;
+    }
     if (
       this.hasCustomTrack ||
       !this.library.hasNextTrack ||
@@ -1764,13 +1939,6 @@ export class Game {
     }
 
     const nextPalette = getStagePalette(this.runManager.stageNumber);
-    if (
-      !this.nextTrackCache ||
-      this.nextTrackCache.contentHash !== nextItem.beatMap.contentHash ||
-      this.nextTrackCache.stageId !== nextPalette.id
-    ) {
-      this.prewarmNextLookaheadTrack();
-    }
     return this.nextTrackCache?.contentHash === nextItem.beatMap.contentHash &&
       this.nextTrackCache?.stageId === nextPalette.id
       ? this.nextTrackCache.track
@@ -1802,10 +1970,26 @@ export class Game {
     if (this.hasCustomTrack || this.forkChoice === 'left') {
       const currentItem = this.library.activeItem;
       this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true);
-      if (isSongTrack(this.track)) {
-        restoreCanonicalTrack(this.track);
+      if (this.horizonAssembler && isStreamingTrack(this.track)) {
+        const prevEndZ = this.track.stageFinishWorldZ ?? this.track.length;
+        const overshoot = Math.max(0, nextPos - prevEndZ);
+        this.horizonAssembler.promoteNextStage(
+          this.track.blueprint,
+          this.track.nextBlueprint,
+          nextPos,
+          tuning.drawDistance,
+        );
+        this.traffic.resetForStreaming(this.horizonAssembler.track, currentItem.contentHash);
+        this.position = overshoot;
+        this.prevPosition = overshoot;
+        this.lastInternalPosition = overshoot;
+      } else {
+        if (isSongTrack(this.track)) {
+          restoreCanonicalTrack(this.track);
+        }
+        this.position = nextPos % this.track.length;
+        this.lastInternalPosition = this.position;
       }
-      this.position = nextPos % this.track.length;
       this.lastLapTime = this.lapTime;
       this.syncController.resetForTrack(false, this.car.speedRatio > 0.25);
       this.bridge.emit({ type: 'lapCompleted', lap: this.lap, lapTime: this.lapTime });
@@ -1855,10 +2039,26 @@ export class Game {
       // Completed the final track of the playlist -> emit End-of-Run Grade Screen summary!
       const runSummary = this.runManager.buildRunSummary();
       this.bridge.emit({ type: 'runCompleted', summary: runSummary });
-      if (isSongTrack(this.track)) {
-        restoreCanonicalTrack(this.track);
+      if (this.horizonAssembler && isStreamingTrack(this.track)) {
+        const prevEndZ = this.track.stageFinishWorldZ ?? this.track.length;
+        const overshoot = Math.max(0, nextPos - prevEndZ);
+        this.horizonAssembler.promoteNextStage(
+          this.track.blueprint,
+          null,
+          nextPos,
+          tuning.drawDistance,
+        );
+        this.traffic.resetForStreaming(this.horizonAssembler.track, this.activeRoadBeatMap.contentHash);
+        this.position = overshoot;
+        this.prevPosition = overshoot;
+        this.lastInternalPosition = overshoot;
+      } else {
+        if (isSongTrack(this.track)) {
+          restoreCanonicalTrack(this.track);
+        }
+        this.position = nextPos % this.track.length;
+        this.lastInternalPosition = this.position;
       }
-      this.position = nextPos % this.track.length;
       this.lastLapTime = this.lapTime;
       this.syncController.resetForTrack(false, this.car.speedRatio > 0.25);
       this.lap++;
@@ -2030,6 +2230,7 @@ export class Game {
       beatInBar: this.beatInBar,
       beatPulse: this.beatPulse,
       sectionRole: this.sectionRole,
+      spectralKind: this.spectralKind,
       barEnergy: this.barEnergy,
       filterCutoffHz: this.audio.cutoffHz,
       trackTitle: this.activeRoadBeatMap.title,
@@ -2039,6 +2240,11 @@ export class Game {
       totalBars: this.totalBars,
       currentChunkId: this.currentChunkId,
       syncDeltaBeats: this.syncDeltaBeats,
+      horizonStretchRatio: this.horizonAssembler
+        ? Math.round(this.horizonAssembler.stretchRatio * 100) / 100
+        : 1,
+      activeAnchorKind: this.syncController.activeAnchorKind,
+      activeAnchorBar: this.syncController.activeAnchorBar,
       gear: this.car.gear,
       rpm: this.car.rpm,
       isLugging: this.car.isLugging,

@@ -4,7 +4,17 @@
  * Pure TypeScript module (AGENTS.md §2: zero React imports).
  */
 
-export type SectionRole = 'intro' | 'build' | 'drop' | 'breakdown' | 'outro';
+export type SectionRole = 'intro' | 'build' | 'groove' | 'drop' | 'breakdown' | 'outro';
+
+export type SpectralSpanKind = 'lpf_muffled' | 'hpf_thin' | 'fadeout';
+
+export interface SpectralSpan {
+  /** Inclusive 0-based start bar of the spectral span. */
+  startBar: number;
+  /** Exclusive 0-based end bar of the spectral span (`endBar > startBar`). */
+  endBar: number;
+  kind: SpectralSpanKind;
+}
 
 export interface BeatSection {
   startBar: number;
@@ -36,13 +46,27 @@ export interface BeatMap {
   barEnergy: number[];
   /** Normalised per-bar spectral brightness in [0, 1] (low values = muffled / low-pass filtered). */
   barBrightness?: number[];
+  /** Orthogonal spectral/timbral spans (LPF muffled, HPF thin, fadeout) detected offline. */
+  spectralSpans?: SpectralSpan[];
+  /** Structural phrase boundaries (multiples of 4/8/16 bars) driven by timbral novelty. */
+  phraseBars?: number[];
+  /** Genuine musical impact bars (contrasting drop entries or LPF/HPF filter reopenings). */
+  impactBars?: number[];
   /** Structural sections with bar-exact drop onsets. */
   sections: BeatSection[];
   confidence: BeatConfidence;
   source: BeatMapSource;
 }
 
-const VALID_ROLES = new Set<SectionRole>(['intro', 'build', 'drop', 'breakdown', 'outro']);
+const VALID_ROLES = new Set<SectionRole>([
+  'intro',
+  'build',
+  'groove',
+  'drop',
+  'breakdown',
+  'outro',
+]);
+const VALID_SPECTRAL_KINDS = new Set<SpectralSpanKind>(['lpf_muffled', 'hpf_thin', 'fadeout']);
 const VALID_SOURCES = new Set<BeatMapSource>(['analysis', 'manual', 'bundled']);
 
 export function isBeatMap(raw: unknown): raw is BeatMap {
@@ -64,6 +88,43 @@ export function isBeatMap(raw: unknown): raw is BeatMap {
     obj.barBrightness !== undefined &&
     (!Array.isArray(obj.barBrightness) ||
       !obj.barBrightness.every((v) => typeof v === 'number' && Number.isFinite(v)))
+  ) {
+    return false;
+  }
+  if (obj.spectralSpans !== undefined) {
+    if (!Array.isArray(obj.spectralSpans)) return false;
+    for (const sp of obj.spectralSpans) {
+      if (typeof sp !== 'object' || sp === null) return false;
+      const span = sp as Record<string, unknown>;
+      if (
+        typeof span.startBar !== 'number' ||
+        !Number.isFinite(span.startBar) ||
+        span.startBar < 0 ||
+        typeof span.endBar !== 'number' ||
+        !Number.isFinite(span.endBar) ||
+        span.endBar <= span.startBar
+      ) {
+        return false;
+      }
+      if (
+        typeof span.kind !== 'string' ||
+        !VALID_SPECTRAL_KINDS.has(span.kind as SpectralSpanKind)
+      ) {
+        return false;
+      }
+    }
+  }
+  if (
+    obj.phraseBars !== undefined &&
+    (!Array.isArray(obj.phraseBars) ||
+      !obj.phraseBars.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0))
+  ) {
+    return false;
+  }
+  if (
+    obj.impactBars !== undefined &&
+    (!Array.isArray(obj.impactBars) ||
+      !obj.impactBars.every((v) => typeof v === 'number' && Number.isFinite(v) && v >= 0))
   ) {
     return false;
   }
@@ -139,15 +200,71 @@ export function sectionAtBar(
     : map.sections[map.sections.length - 1];
 }
 
-/** Returns the starting bar index of the first `drop` section, or `null` if none exists. */
-export function firstDropBar(map: Pick<BeatMap, 'sections'>): number | null {
-  const drop = map.sections.find((s) => s.role === 'drop');
-  return drop ? drop.startBar : null;
+/** Returns the orthogonal spectral span covering `barIndex`, or `undefined` if open/untagged. */
+export function spectralSpanAtBar(
+  map: Pick<BeatMap, 'spectralSpans'>,
+  barIndex: number,
+): SpectralSpan | undefined {
+  const spans = map.spectralSpans;
+  if (!spans || spans.length === 0) return undefined;
+  for (let i = 0; i < spans.length; i++) {
+    const sp = spans[i]!;
+    if (barIndex >= sp.startBar && barIndex < sp.endBar) {
+      return sp;
+    }
+  }
+  return undefined;
 }
 
-/** Returns the timestamp in seconds of the first `drop` section, or `null` if none exists. */
+/** Returns all `lpf_muffled` spans declared on `map.spectralSpans` (empty array if absent). */
+export function getMuffledSpectralSpans(map: Pick<BeatMap, 'spectralSpans'>): SpectralSpan[] {
+  const spans = map.spectralSpans;
+  if (!spans || spans.length === 0) return [];
+  const out: SpectralSpan[] = [];
+  for (let i = 0; i < spans.length; i++) {
+    const sp = spans[i]!;
+    if (sp.kind === 'lpf_muffled') {
+      out.push(sp);
+    }
+  }
+  return out;
+}
+
+/**
+ * Returns the sorted bar indices of genuine musical impacts (`map.impactBars`),
+ * falling back to `drop` section starts for legacy BeatMaps without `impactBars`.
+ */
+export function getImpactBars(map: Pick<BeatMap, 'impactBars' | 'sections'>): number[] {
+  if (map.impactBars !== undefined) {
+    return map.impactBars.slice();
+  }
+  const out: number[] = [];
+  for (let i = 0; i < map.sections.length; i++) {
+    const sec = map.sections[i]!;
+    if (sec.role === 'drop') {
+      out.push(sec.startBar);
+    }
+  }
+  return out;
+}
+
+/**
+ * Returns the starting bar index of the first major impact/drop section,
+ * checking `impactBars` -> first `drop` -> first `groove`, or `null` if none exists.
+ */
+export function firstDropBar(map: Pick<BeatMap, 'sections' | 'impactBars'>): number | null {
+  if (map.impactBars && map.impactBars.length > 0) {
+    return map.impactBars[0]!;
+  }
+  const drop = map.sections.find((s) => s.role === 'drop');
+  if (drop) return drop.startBar;
+  const groove = map.sections.find((s) => s.role === 'groove');
+  return groove ? groove.startBar : null;
+}
+
+/** Returns the timestamp in seconds of the first impact/drop section, or `null` if none exists. */
 export function firstDropTimeSec(
-  map: Pick<BeatMap, 'sections' | 'bpm' | 'beatsPerBar' | 'firstBeatOffsetSec'>,
+  map: Pick<BeatMap, 'sections' | 'impactBars' | 'bpm' | 'beatsPerBar' | 'firstBeatOffsetSec'>,
 ): number | null {
   const bar = firstDropBar(map);
   return bar !== null ? barToTime(map, bar) : null;
@@ -217,6 +334,46 @@ export function withAdjustedBpm(map: BeatMap, newBpm: number): BeatMap {
     newSections.push({ startBar: 0, bars: newBars, role: 'drop' });
   }
 
+  let newSpectralSpans: SpectralSpan[] | undefined;
+  if (map.spectralSpans !== undefined) {
+    newSpectralSpans = [];
+    for (const sp of map.spectralSpans) {
+      const startBar = Math.max(0, Math.min(newBars - 1, Math.round(sp.startBar * ratio)));
+      const endBar = Math.max(startBar + 1, Math.min(newBars, Math.round(sp.endBar * ratio)));
+      if (endBar > startBar && startBar < newBars) {
+        newSpectralSpans.push({ startBar, endBar, kind: sp.kind });
+      }
+    }
+  }
+
+  let newPhraseBars: number[] | undefined;
+  if (map.phraseBars !== undefined) {
+    const seen = new Set<number>();
+    newPhraseBars = [];
+    for (const b of map.phraseBars) {
+      const scaled = Math.max(0, Math.min(newBars - 1, Math.round(b * ratio)));
+      if (!seen.has(scaled)) {
+        seen.add(scaled);
+        newPhraseBars.push(scaled);
+      }
+    }
+    newPhraseBars.sort((a, b) => a - b);
+  }
+
+  let newImpactBars: number[] | undefined;
+  if (map.impactBars !== undefined) {
+    const seen = new Set<number>();
+    newImpactBars = [];
+    for (const b of map.impactBars) {
+      const scaled = Math.max(0, Math.min(newBars - 1, Math.round(b * ratio)));
+      if (!seen.has(scaled)) {
+        seen.add(scaled);
+        newImpactBars.push(scaled);
+      }
+    }
+    newImpactBars.sort((a, b) => a - b);
+  }
+
   const newBarDur = (60 / clampedBpm) * map.beatsPerBar;
   const firstBeatOffsetSec = ((map.firstBeatOffsetSec % newBarDur) + newBarDur) % newBarDur;
 
@@ -226,6 +383,9 @@ export function withAdjustedBpm(map: BeatMap, newBpm: number): BeatMap {
     firstBeatOffsetSec: Math.round(firstBeatOffsetSec * 10000) / 10000,
     barEnergy: newBarEnergy,
     ...(newBarBrightness !== undefined ? { barBrightness: newBarBrightness } : {}),
+    ...(newSpectralSpans !== undefined ? { spectralSpans: newSpectralSpans } : {}),
+    ...(newPhraseBars !== undefined ? { phraseBars: newPhraseBars } : {}),
+    ...(newImpactBars !== undefined ? { impactBars: newImpactBars } : {}),
     sections: newSections,
     source: 'manual',
   };

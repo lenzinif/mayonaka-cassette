@@ -337,8 +337,8 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
 
     // Advanced distance should be scaled by A1 paceFactor / elastic factor
     expect(advancedDist).toBeGreaterThan(0);
-    expect(advancedDist / baseDist).toBeGreaterThanOrEqual(1 - 0.16 - 0.01);
-    expect(advancedDist / baseDist).toBeLessThanOrEqual(1 + 0.25 + 0.01);
+    expect(advancedDist / baseDist).toBeGreaterThanOrEqual(1 - tuning.syncMaxSlowdown - 0.01);
+    expect(advancedDist / baseDist).toBeLessThanOrEqual(1 + tuning.syncMaxSpeedup + 0.01);
   });
 
   it('synchronizes relaxed driving (65% speed) with drop crest and reaches stage fork without being trapped in outro loop', () => {
@@ -725,9 +725,12 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
         expect(audio.beatMap.contentHash).toBe(DEFAULT_SYNTH_BEATMAP.contentHash);
         prevPosBeforeFinish = game.position;
 
-        // Approaching the horizon boundary pre-generates Stage 2's lookahead road
+        // Approaching the horizon boundary pre-warms Stage 2's blueprint into the streaming assembler
         if (game.position >= game.track.length - 25000) {
-          expect(gameAcc.activeNextTrackLookahead).toBeDefined();
+          expect(
+            (game.track as { nextBlueprint?: { contentHash: string } | null }).nextBlueprint
+              ?.contentHash,
+          ).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
         }
       } else if (beforeStage === 0 && library.currentIndex === 1) {
         enteredStage2 = true;
@@ -1105,22 +1108,23 @@ describe('MP-10 — Single-Track End-of-Run Fork', () => {
   });
 
   describe('Frame pacing & lookahead prewarming', () => {
-    it('prewarms the next-track lookahead road on init and reuses it without mid-stage regeneration', () => {
+    it('prewarms the next-track blueprint on init and reuses it in the streaming assembler without mid-stage regeneration', () => {
       const library = new TrackLibrary();
       const game = new Game({ input: new FakeInput(), library });
       const gameAcc = game as unknown as {
         position: number;
-        nextTrackCache: { contentHash: string; track: unknown } | null;
-        activeNextTrackLookahead?: unknown;
+        nextBlueprintCache: { contentHash: string; blueprint: unknown } | null;
       };
 
-      expect(gameAcc.nextTrackCache).not.toBeNull();
-      expect(gameAcc.nextTrackCache!.contentHash).toBe(library.nextTrackItem!.beatMap.contentHash);
-      const prewarmedTrack = gameAcc.nextTrackCache!.track;
+      expect(gameAcc.nextBlueprintCache).not.toBeNull();
+      expect(gameAcc.nextBlueprintCache!.contentHash).toBe(
+        library.nextTrackItem!.beatMap.contentHash,
+      );
+      const prewarmedBp = gameAcc.nextBlueprintCache!.blueprint;
 
       gameAcc.position = game.track.length - 10000;
       game.update(1 / 60);
-      expect(gameAcc.activeNextTrackLookahead).toBe(prewarmedTrack);
+      expect((game.track as { nextBlueprint?: unknown }).nextBlueprint).toBe(prewarmedBp);
     });
 
     it('uses rafNow timestamps, skips resume warmup frames, and normalizes 59.94 Hz avgFps to 60', () => {
@@ -1375,7 +1379,8 @@ describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () =>
       expect(game.position).toBeLessThan(game.track.length);
       expect(game.bridge.getSnapshot()?.lap).toBe(1);
 
-      const envs = new Set(game.track.segments.map((s) => s.env));
+      const bp = (game.track as { blueprint?: { barEnv: readonly string[] } }).blueprint;
+      const envs = new Set(bp ? bp.barEnv : game.track.segments.map((s) => s.env));
       expect(envs.has('viaduct')).toBe(true);
       expect(envs.has('bridge')).toBe(false);
     } finally {

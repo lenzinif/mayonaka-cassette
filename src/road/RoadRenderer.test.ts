@@ -1,5 +1,8 @@
 import { tuning } from '@src/config/tuning';
+import { DEFAULT_SYNTH_BEATMAP } from '@src/audio/FunkAudioEngine';
 import { describe, expect, it } from 'vitest';
+import { HorizonAssembler } from './HorizonAssembler';
+import { compileSongBlueprint } from './SongBlueprint';
 import {
   lerpHexColor,
   PALETTE_AKIBA_NIGHT,
@@ -1522,6 +1525,27 @@ describe('RoadRenderer — Rendering Environments', () => {
       expect(fills).toContain('#2e274b'); // Arch ribs preserved (not dropped by over-eager coalescing)
       expect(fills).toContain('#00f5d4'); // Curve wall chevrons preserved
       expect(fills).toContain(PALETTE_NIGHT_FUNK.horizonGlow!); // Backlit exit rim drawn cleanly
+    });
+
+    it('renders a StreamingTrack circular ring buffer past slot 1024 without wrap artifacts', () => {
+      const bp = compileSongBlueprint(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+      const asm = new HorizonAssembler(bp);
+      const targetPos = 1150 * bp.segmentLength;
+      let pos = 0;
+      while (pos < targetPos) {
+        pos += bp.referenceSpeed * (1 / 30);
+        asm.advance(pos, pos / bp.barLengthWorld, bp.referenceSpeed, 200, 1 / 30);
+      }
+
+      const renderer = new RoadRenderer();
+      const mock = createMockCanvas();
+      renderer.render(
+        mock.ctx,
+        asm.track,
+        { ...defaultView, position: pos, drawDistance: 180 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(renderer.stats.drawnSegments).toBeGreaterThan(20);
     });
   });
 });

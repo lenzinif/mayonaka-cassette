@@ -42,6 +42,7 @@ interface CorpusTrackItem {
 const ROLE_COLORS: Record<SectionRole, { fill: string; border: string; text: string }> = {
   intro: { fill: 'rgba(5, 217, 232, 0.16)', border: '#05d9e8', text: '#67e8f9' },
   build: { fill: 'rgba(245, 158, 11, 0.20)', border: '#f59e0b', text: '#fcd34d' },
+  groove: { fill: 'rgba(46, 232, 196, 0.20)', border: '#2ee8c4', text: '#5eead4' },
   drop: { fill: 'rgba(255, 42, 109, 0.25)', border: '#ff2a6d', text: '#f472b6' },
   breakdown: { fill: 'rgba(168, 85, 247, 0.20)', border: '#a855f7', text: '#d8b4fe' },
   outro: { fill: 'rgba(148, 163, 184, 0.16)', border: '#94a3b8', text: '#cbd5e1' },

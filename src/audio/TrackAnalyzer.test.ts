@@ -10,13 +10,17 @@ import {
   beatDurationSec,
   firstDropBar,
   firstDropTimeSec,
+  getImpactBars,
+  getMuffledSpectralSpans,
   isBeatMap,
   nudgeBeatMapDownbeat,
   parseTitleArtistFromFilename,
   sectionAtBar,
+  spectralSpanAtBar,
   timeToBar,
   timeToBeat,
   withAdjustedBpm,
+  type BeatMap,
 } from './BeatMap';
 import { ANALYSIS_SAMPLE_RATE } from './TrackAnalyzer';
 
@@ -358,6 +362,134 @@ describe('BeatMap helpers', () => {
     }
     const spans = detectMuffledSpans(beatMap, beatMap.barEnergy.length);
     expect(spans).toEqual([]);
+    // Also detected orthogonally as `hpf_thin` (bassless airy passage)
+    expect(
+      beatMap.spectralSpans?.some((sp) => sp.kind === 'hpf_thin' && sp.startBar <= 12 && sp.endBar >= 18),
+    ).toBe(true);
+  });
+
+  it('classifies flat-RMS Future Funk plateau with LPF muffled passage (bars 32..38) as groove + spectralSpans + impactBar 38 without fake MP-05 breakdown', () => {
+    const sr = ANALYSIS_SAMPLE_RATE;
+    const bpm = 110.35;
+    const barDur = (60 / bpm) * 4;
+    const totalBarsTarget = 68;
+    const firstBeatOffsetSec = 0.05;
+    const durationSec = firstBeatOffsetSec + totalBarsTarget * barDur + 0.1;
+    const totalSamples = Math.floor(durationSec * sr);
+    const pcm = new Float32Array(totalSamples);
+    const beatDur = 60 / bpm;
+    const totalBeats = Math.floor((durationSec - firstBeatOffsetSec) / beatDur);
+
+    for (let b = 0; b < totalBeats; b++) {
+      const barIdx = Math.floor(b / 4);
+      const beatInBar = b % 4;
+      const startSample = Math.floor((firstBeatOffsetSec + b * beatDur) * sr);
+      const isLpfMuffled = barIdx >= 32 && barIdx < 38;
+      // Gentle fadeout on final 7 bars (bars 61..67)
+      const fadeGain =
+        barIdx >= 61 ? Math.max(0.05, 1 - ((barIdx - 60) / 8) * 0.92) : 1.0;
+
+      const len = Math.floor(0.14 * sr);
+      for (let i = 0; i < len && startSample + i < totalSamples; i++) {
+        const t = i / sr;
+        const env = Math.exp(-t * 24);
+        // Constant 4-on-the-floor kick/sub-bass throughout bars 0..60
+        const kickAmp = (beatInBar === 0 ? 0.88 : 0.72) * fadeGain;
+        let sample = kickAmp * env * Math.sin(2 * Math.PI * 62 * t);
+        if (!isLpfMuffled) {
+          // Crisp Future Funk hats/vocals/air (>2kHz & >3.5kHz)
+          const airAmp = (beatInBar === 1 || beatInBar === 3 ? 0.44 : 0.22) * fadeGain;
+          sample +=
+            airAmp *
+            env *
+            (Math.sin(2 * Math.PI * 2600 * t) * 0.45 + Math.sin(2 * Math.PI * 4400 * t) * 0.55);
+        }
+        pcm[startSample + i] = pcm[startSample + i]! + sample;
+      }
+    }
+
+    const { beatMap } = analyzePcm(pcm, sr, {
+      contentHash: 'sha256:flat-rms-lpf-groove-model',
+      title: 'Flat RMS Groove LPF',
+      artist: 'Tester',
+    });
+
+    expect(isBeatMap(beatMap)).toBe(true);
+    // Plateau starts as sustained `groove` and must NOT inject a fake MP-05 breakdown at bars 28..32
+    expect(sectionAtBar(beatMap, 0)?.role).toBe('groove');
+    expect(sectionAtBar(beatMap, 28)?.role).not.toBe('breakdown');
+    // Exact LPF muffled span detected on bars 32..38 and fadeout on tail
+    expect(
+      beatMap.spectralSpans?.some(
+        (sp) => sp.kind === 'lpf_muffled' && sp.startBar === 32 && sp.endBar === 38,
+      ),
+    ).toBe(true);
+    expect(beatMap.spectralSpans?.some((sp) => sp.kind === 'fadeout')).toBe(true);
+    // Filter reopening at bar 38 produces a genuine impactBar and tunnel span
+    expect(beatMap.impactBars).toContain(38);
+    expect(beatMap.phraseBars?.length).toBeGreaterThanOrEqual(1);
+    expect(detectMuffledSpans(beatMap, beatMap.barEnergy.length)).toEqual([
+      { startBar: 32, endBar: 38 },
+    ]);
+  });
+
+  it('validates orthogonal BeatMap fields, helpers, backward compatibility, and BPM scaling', () => {
+    const base: BeatMap = {
+      version: 1,
+      contentHash: 'sha256:orthogonal-helper-test',
+      title: 'Helper Test',
+      artist: 'Tester',
+      durationSec: 128,
+      bpm: 120,
+      firstBeatOffsetSec: 0,
+      beatsPerBar: 4,
+      barEnergy: new Array<number>(64).fill(0.75),
+      barBrightness: new Array<number>(64).fill(0.8),
+      spectralSpans: [
+        { startBar: 32, endBar: 38, kind: 'lpf_muffled' },
+        { startBar: 58, endBar: 64, kind: 'fadeout' },
+      ],
+      phraseBars: [16, 32, 48],
+      impactBars: [38],
+      sections: [
+        { startBar: 0, bars: 60, role: 'groove' },
+        { startBar: 60, bars: 4, role: 'outro' },
+      ],
+      confidence: { tempo: 0.95, downbeat: 0.9, tempoStable: true },
+      source: 'analysis',
+    };
+
+    expect(isBeatMap(base)).toBe(true);
+    expect(spectralSpanAtBar(base, 35)?.kind).toBe('lpf_muffled');
+    expect(spectralSpanAtBar(base, 10)).toBeUndefined();
+    expect(getMuffledSpectralSpans(base)).toEqual([{ startBar: 32, endBar: 38, kind: 'lpf_muffled' }]);
+    expect(getImpactBars(base)).toEqual([38]);
+    expect(firstDropBar(base)).toBe(38);
+
+    // Fallback when `impactBars` is absent: falls back to `drop` then `groove`
+    const grooveOnly: BeatMap = {
+      ...base,
+      impactBars: undefined,
+      spectralSpans: undefined,
+      phraseBars: undefined,
+    };
+    expect(isBeatMap(grooveOnly)).toBe(true);
+    expect(getImpactBars(grooveOnly)).toEqual([]);
+    expect(firstDropBar(grooveOnly)).toBe(0);
+
+    // Rejects malformed spectralSpans
+    expect(
+      isBeatMap({
+        ...base,
+        spectralSpans: [{ startBar: 20, endBar: 10, kind: 'lpf_muffled' }],
+      }),
+    ).toBe(false);
+
+    // Scales orthogonal arrays when adjusting BPM
+    const halved = withAdjustedBpm(base, 60);
+    expect(halved.spectralSpans?.[0]).toEqual({ startBar: 16, endBar: 19, kind: 'lpf_muffled' });
+    expect(halved.phraseBars).toEqual([8, 16, 24]);
+    expect(halved.impactBars).toEqual([19]);
   });
 });
 

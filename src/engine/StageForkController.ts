@@ -10,6 +10,7 @@ import {
   type ForkCrossSection,
   type Track,
 } from '@src/road/RoadSegment';
+import { isStreamingTrack } from '@src/road/HorizonAssembler';
 import { isSongTrack } from '@src/road/SongRoadGenerator';
 
 export interface ForkOptionInfo {
@@ -64,7 +65,17 @@ export class StageForkController {
     _hasMultipleTracks: boolean,
     hasCustomTrack: boolean,
   ): number | undefined {
-    if (hasCustomTrack || !isSongTrack(track)) {
+    if (hasCustomTrack) {
+      return undefined;
+    }
+    if (isStreamingTrack(track)) {
+      if (track.forkZoneStartZ !== undefined) {
+        return track.forkZoneStartZ;
+      }
+      const forkBars = Math.min(FORK_APPROACH_BARS, Math.floor(track.totalBars * 0.25));
+      return Math.max(0, track.length - forkBars * track.barLengthWorld);
+    }
+    if (!isSongTrack(track)) {
       return undefined;
     }
     const forkBars = Math.min(FORK_APPROACH_BARS, Math.floor(track.totalBars * 0.25));

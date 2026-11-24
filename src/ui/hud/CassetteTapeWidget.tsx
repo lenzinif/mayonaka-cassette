@@ -64,6 +64,7 @@ const TIER_CASSETTE_CONFIG: Readonly<
 const SECTION_BADGE_STYLES: Readonly<Record<SectionRole, string>> = {
   intro: 'bg-[#0B0E1E] text-[#FFF5E4]',
   build: 'bg-[#FFD166] text-[#0B0E1E]',
+  groove: 'bg-[#05D9E8] text-[#0B0E1E]',
   drop: 'bg-[#FF3B7F] text-[#FFF5E4]',
   breakdown: 'bg-[#2EE8C4] text-[#0B0E1E]',
   outro: 'bg-[#1A2140] text-[#FFF5E4]',

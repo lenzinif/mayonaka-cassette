@@ -1,4 +1,4 @@
-import type { BeatMap, BeatSection, SectionRole } from './BeatMap';
+import type { BeatMap, BeatSection, SectionRole, SpectralSpan } from './BeatMap';
 
 /**
  * Offline DSP worker & pure PCM analyzer (docs/DESIGN.md §2.3, AGENTS.md §4.7).
@@ -857,18 +857,28 @@ function normalizeFeatureByPercentile(arr: Float32Array): Float32Array {
 }
 
 /**
- * Steps 6 & 7: Compute per-bar smoothed energy (`barEnergy[]`) and 4-bar-snapped
- * structural `sections[]` (`intro`, `build`, `drop`, `breakdown`, `outro`).
+ * Steps 6 & 7: Compute per-bar smoothed energy (`barEnergy[]`), spectral brightness
+ * (`barBrightness[]`), orthogonal descriptors (`spectralSpans[]`, `phraseBars[]`,
+ * `impactBars[]`), and structural `sections[]` (`intro`, `build`, `groove`, `drop`,
+ * `breakdown`, `outro`).
  */
 function computeBarEnergyAndSections(
   bpm: number,
   firstBeatOffsetSec: number,
   durationSec: number,
   features: SpectralFeatures,
-): { barEnergy: number[]; barBrightness: number[]; sections: BeatSection[] } {
+): {
+  barEnergy: number[];
+  barBrightness: number[];
+  spectralSpans: SpectralSpan[];
+  phraseBars: number[];
+  impactBars: number[];
+  sections: BeatSection[];
+} {
   const {
     frameRms,
     frameLowEnergy,
+    frameMidHighEnergy,
     frameHighEnergy,
     frameAirEnergy,
     rhythmEnv,
@@ -881,6 +891,7 @@ function computeBarEnergyAndSections(
 
   const rawRms = new Float32Array(totalBars);
   const rawLow = new Float32Array(totalBars);
+  const rawMidHigh = new Float32Array(totalBars);
   const rawHigh = new Float32Array(totalBars);
   const rawAir = new Float32Array(totalBars);
   const rawFlux = new Float32Array(totalBars);
@@ -894,6 +905,7 @@ function computeBarEnergyAndSections(
 
     let sRms = 0;
     let sLow = 0;
+    let sMidHigh = 0;
     let sHigh = 0;
     let sAir = 0;
     let sFlux = 0;
@@ -902,6 +914,7 @@ function computeBarEnergyAndSections(
     for (let f = fStart; f <= fEnd; f++) {
       sRms += frameRms[f]!;
       sLow += frameLowEnergy[f]!;
+      sMidHigh += frameMidHighEnergy[f]!;
       sHigh += frameHighEnergy[f]!;
       sAir += frameAirEnergy[f]!;
       sFlux += rhythmEnv[f]!;
@@ -911,6 +924,7 @@ function computeBarEnergyAndSections(
     if (cnt > 0) {
       rawRms[b] = sRms / cnt;
       rawLow[b] = sLow / cnt;
+      rawMidHigh[b] = sMidHigh / cnt;
       rawHigh[b] = sHigh / cnt;
       rawAir[b] = sAir / cnt;
       rawFlux[b] = sFlux / cnt;
@@ -920,7 +934,9 @@ function computeBarEnergyAndSections(
 
   const normRms = normalizeFeatureByPercentile(rawRms);
   const normLow = normalizeFeatureByPercentile(rawLow);
+  const normMidHigh = normalizeFeatureByPercentile(rawMidHigh);
   const normHigh = normalizeFeatureByPercentile(rawHigh);
+  const normAir = normalizeFeatureByPercentile(rawAir);
   const normFlux = normalizeFeatureByPercentile(rawFlux);
   const normCent = normalizeFeatureByPercentile(rawCentroid);
 
@@ -1160,13 +1176,211 @@ function computeBarEnergyAndSections(
     }
   }
 
-  // Post-merge Long-Drop Plateau Articulation Pass (MP-05):
-  // Split monolithic `drop` plateaus (> 28 bars) at their lowest 4-bar energy+centroid valley
-  // while keeping `firstDropBar` anchored at the original section start.
+  // ============================================================================
+  // ORTHOGONAL LAYER 1: Spectral Spans (`lpf_muffled`, `hpf_thin`, `fadeout`)
+  // ============================================================================
+  const FORK_CUTOFF_BARS = 6;
+  const spectralSpans: SpectralSpan[] = [];
+  const barCoveredBySpan = new Uint8Array(totalBars);
+
+  // 1a. `lpf_muffled` (LPF / band-pass muffled spans, independent of section role / sub-bass)
+  const maxTunnelEnd = Math.max(0, totalBars - FORK_CUTOFF_BARS);
+  const brightArr = Float32Array.from(barBrightness);
+  const sortedBright = new Float32Array(brightArr).sort();
+  const rawP75Bright = percentile(sortedBright, 0.75);
+  if (totalBars >= 4 && maxTunnelEnd >= 4 && rawP75Bright >= 0.15) {
+    const p75Bright = Math.max(0.25, rawP75Bright);
+    const muffleThresh = Math.min(0.42, p75Bright * 0.48);
+    const bridgeThresh = muffleThresh * 1.25;
+    const isMuffled = new Uint8Array(maxTunnelEnd);
+    for (let b = 0; b < maxTunnelEnd; b++) {
+      if (brightArr[b]! < muffleThresh) {
+        isMuffled[b] = 1;
+      }
+    }
+    for (let b = 1; b < maxTunnelEnd - 1; b++) {
+      if (
+        isMuffled[b] === 0 &&
+        isMuffled[b - 1] === 1 &&
+        isMuffled[b + 1] === 1 &&
+        brightArr[b]! < bridgeThresh
+      ) {
+        isMuffled[b] = 1;
+      }
+    }
+
+    const candidateMuffled: SpectralSpan[] = [];
+    let totalMuffledBars = 0;
+    let cursor = 0;
+    while (cursor < maxTunnelEnd) {
+      if (isMuffled[cursor] === 0) {
+        cursor++;
+        continue;
+      }
+      let startBar = cursor;
+      while (cursor < maxTunnelEnd && isMuffled[cursor] === 1) {
+        cursor++;
+      }
+      const endBar = cursor;
+      const shiftedFromZero = startBar === 0;
+      if (shiftedFromZero) {
+        startBar = endBar >= 6 ? 2 : 1;
+      }
+      const minSpanBars = shiftedFromZero ? 3 : 4;
+      if (endBar - startBar >= minSpanBars) {
+        candidateMuffled.push({ startBar, endBar, kind: 'lpf_muffled' });
+        totalMuffledBars += endBar - startBar;
+      }
+    }
+
+    // Guard against uniformly dark lo-fi tracks: require muffled coverage <= 40% of track
+    if (totalMuffledBars <= Math.ceil(totalBars * 0.40)) {
+      for (const sp of candidateMuffled) {
+        spectralSpans.push(sp);
+        for (let b = sp.startBar; b < sp.endBar; b++) {
+          barCoveredBySpan[b] = 1;
+        }
+      }
+    }
+  }
+
+  // 1b. `fadeout` (monotonic RMS tail decay over final 4..12 bars)
+  const sortedRms = new Float32Array(rawRms).sort();
+  const p75Rms = percentile(sortedRms, 0.75);
+  const p95Rms = percentile(sortedRms, 0.95);
+  if (totalBars >= 12 && p75Rms > 1e-5 && rawRms[totalBars - 1]! < p75Rms * 0.25) {
+    const earliestFade = Math.max(totalBars - 12, Math.floor(totalBars * 0.75));
+    let fadeStart = totalBars - 1;
+    while (
+      fadeStart > earliestFade &&
+      rawRms[fadeStart - 1]! >= rawRms[fadeStart]! * 0.94 &&
+      rawRms[fadeStart]! < p75Rms * 0.92
+    ) {
+      fadeStart--;
+    }
+    const fadeLen = totalBars - fadeStart;
+    if (fadeLen >= 4 && rawRms[fadeStart]! >= Math.max(1e-5, rawRms[totalBars - 1]!) * 1.8) {
+      spectralSpans.push({ startBar: fadeStart, endBar: totalBars, kind: 'fadeout' });
+      for (let b = fadeStart; b < totalBars; b++) {
+        barCoveredBySpan[b] = 1;
+      }
+    }
+  }
+
+  // 1c. `hpf_thin` (bassless / airy / vocal-only passages: low < 0.25, air >= 0.55, rms >= 0.18)
+  if (totalBars >= 8 && p95Air >= 1e-4 && p95Low >= 1e-4 && p95Rms >= 1e-5) {
+    const isThin = new Uint8Array(totalBars);
+    for (let b = 0; b < totalBars; b++) {
+      if (barCoveredBySpan[b] === 1) continue;
+      const lowRatio = rawLow[b]! / p95Low;
+      const airRatio = rawAir[b]! / p95Air;
+      const rmsRatio = rawRms[b]! / p95Rms;
+      if (lowRatio < 0.25 && airRatio >= 0.55 && rmsRatio >= 0.18) {
+        isThin[b] = 1;
+      }
+    }
+    for (let b = 1; b < totalBars - 1; b++) {
+      if (
+        isThin[b] === 0 &&
+        barCoveredBySpan[b] === 0 &&
+        isThin[b - 1] === 1 &&
+        isThin[b + 1] === 1 &&
+        rawLow[b]! / p95Low < 0.32 &&
+        rawAir[b]! / p95Air >= 0.45
+      ) {
+        isThin[b] = 1;
+      }
+    }
+    let cursor = 0;
+    while (cursor < totalBars) {
+      if (isThin[cursor] === 0) {
+        cursor++;
+        continue;
+      }
+      const startBar = cursor;
+      while (cursor < totalBars && isThin[cursor] === 1) {
+        cursor++;
+      }
+      const endBar = cursor;
+      if (endBar - startBar >= 4) {
+        spectralSpans.push({ startBar, endBar, kind: 'hpf_thin' });
+        for (let b = startBar; b < endBar; b++) {
+          barCoveredBySpan[b] = 1;
+        }
+      }
+    }
+  }
+
+  spectralSpans.sort((a, b) => a.startBar - b.startBar);
+
+  // ============================================================================
+  // ORTHOGONAL LAYER 2: Phrase Boundaries (`phraseBars`, RMS-independent novelty)
+  // ============================================================================
+  const phraseBars: number[] = [];
+  if (totalBars >= 16) {
+    const winAvgF = (arr: Float32Array, start: number, count: number): number => {
+      const lo = Math.max(0, start);
+      const hi = Math.min(arr.length, start + count);
+      if (hi <= lo) return 0;
+      let s = 0;
+      for (let i = lo; i < hi; i++) s += arr[i]!;
+      return s / (hi - lo);
+    };
+
+    const candidates: Array<{ bar: number; score: number }> = [];
+    for (let b = 8; b <= totalBars - 8; b += 4) {
+      const dLow = Math.abs(winAvgF(normLow, b, 4) - winAvgF(normLow, b - 4, 4));
+      const dMidH = Math.abs(winAvgF(normMidHigh, b, 4) - winAvgF(normMidHigh, b - 4, 4));
+      const dHigh = Math.abs(winAvgF(normHigh, b, 4) - winAvgF(normHigh, b - 4, 4));
+      const dAir = Math.abs(winAvgF(normAir, b, 4) - winAvgF(normAir, b - 4, 4));
+      const dCent = Math.abs(winAvgF(normCent, b, 4) - winAvgF(normCent, b - 4, 4));
+      const dFlux = Math.abs(winAvgF(normFlux, b, 4) - winAvgF(normFlux, b - 4, 4));
+      const rawNov = (dLow + dMidH + dHigh + dAir + dCent + dFlux) / 6;
+      const gridMult = b % 16 === 0 ? 1.18 : b % 8 === 0 ? 1.1 : 1.0;
+      candidates.push({ bar: b, score: rawNov * gridMult });
+    }
+
+    if (candidates.length > 0) {
+      const scoreArr = Float32Array.from(candidates.map((c) => c.score)).sort();
+      const novThreshold = Math.max(0.14, percentile(scoreArr, 0.6));
+      const sortedCands = candidates.slice().sort((a, b) => b.score - a.score);
+      for (const c of sortedCands) {
+        if (c.score < novThreshold) break;
+        if (phraseBars.every((pb) => Math.abs(pb - c.bar) >= 8)) {
+          phraseBars.push(c.bar);
+        }
+      }
+      // Guarantee at least 1 real phrase boundary on long steady tracks (>= 32 bars)
+      if (phraseBars.length === 0 && totalBars >= 32) {
+        const bestMid = sortedCands.find(
+          (c) => c.bar >= 12 && c.bar <= totalBars - 12 && c.score > 0.04,
+        );
+        if (bestMid) {
+          phraseBars.push(bestMid.bar);
+        }
+      }
+      phraseBars.sort((a, b) => a - b);
+    }
+  }
+
+  // Post-merge Long-Drop Plateau Articulation Pass (MP-05, orthogonal-aware):
+  // Skip artificial plateau splits when the plateau is already articulated by real
+  // spectral spans (`lpf_muffled`/`hpf_thin`) or >= 2 `phraseBars`.
   const articulated: BeatSection[] = [];
   for (let i = 0; i < sections.length; i++) {
     let cur: BeatSection = sections[i]!;
-    while (cur.role === 'drop' && cur.bars > 28) {
+    const curEnd = cur.startBar + cur.bars;
+    const hasOrthogonalArticulation =
+      cur.role === 'drop' &&
+      (spectralSpans.some(
+        (sp) =>
+          (sp.kind === 'lpf_muffled' || sp.kind === 'hpf_thin') &&
+          sp.startBar < curEnd &&
+          sp.endBar > cur.startBar,
+      ) ||
+        phraseBars.filter((pb) => pb > cur.startBar + 4 && pb < curEnd - 4).length >= 2);
+
+    while (cur.role === 'drop' && cur.bars > 28 && !hasOrthogonalArticulation) {
       const sectionEnd = cur.startBar + cur.bars;
       const searchStart = cur.startBar + 12;
       const searchEnd = Math.min(cur.startBar + 28, sectionEnd - 8);
@@ -1308,7 +1522,86 @@ function computeBarEnergyAndSections(
     }
   }
 
-  return { barEnergy, barBrightness, sections: articulated };
+  // Snap `lpf_muffled` exits to adjacent drop downbeats within ±1 bar so sky opens on impact
+  for (const sp of spectralSpans) {
+    if (sp.kind !== 'lpf_muffled') continue;
+    const minSpanBars = sp.startBar <= 2 ? 3 : 4;
+    for (const sec of articulated) {
+      if (sec.role !== 'drop') continue;
+      if (
+        Math.abs(sp.endBar - sec.startBar) <= 1 &&
+        sec.startBar <= maxTunnelEnd &&
+        sec.startBar - sp.startBar >= minSpanBars
+      ) {
+        sp.endBar = sec.startBar;
+        break;
+      }
+    }
+  }
+
+  // ============================================================================
+  // PHASE 2: Distinguish sustained `'groove'` vs contrasting climax `'drop'`
+  // ============================================================================
+  const energySpread = percentile(sortedBarE, 0.9) - percentile(sortedBarE, 0.25);
+
+  const hasGenuineContrastAt = (secIdx: number): boolean => {
+    const sec = articulated[secIdx]!;
+    if (secIdx === 0 || sec.startBar <= 0) return false;
+    const prevSec = articulated[secIdx - 1]!;
+    if (prevSec.role === 'build') return true;
+    const pre2E = winAvg(unsmoothedEnergy, Math.max(0, sec.startBar - 2), Math.min(2, sec.startBar));
+    const post2E = winAvg(unsmoothedEnergy, sec.startBar, 2);
+    const pre2Br = winAvg(brightArr, Math.max(0, sec.startBar - 2), Math.min(2, sec.startBar));
+    const post2Br = winAvg(brightArr, sec.startBar, 2);
+    return post2E - pre2E >= 0.14 || post2Br - pre2Br >= 0.22;
+  };
+
+  for (let i = 0; i < articulated.length; i++) {
+    const sec = articulated[i]!;
+    if (sec.role !== 'drop') continue;
+    const contrasting = hasGenuineContrastAt(i);
+    if (!contrasting && (sec.startBar === 0 || energySpread < 0.22)) {
+      sec.role = 'groove';
+    }
+  }
+
+  // ============================================================================
+  // ORTHOGONAL LAYER 3: Genuine Impact Bars (`impactBars`)
+  // ============================================================================
+  const rawImpacts: number[] = [];
+
+  for (let i = 0; i < articulated.length; i++) {
+    const sec = articulated[i]!;
+    if (sec.role === 'drop' && sec.startBar > 0 && hasGenuineContrastAt(i)) {
+      rawImpacts.push(sec.startBar);
+    }
+  }
+
+  for (const sp of spectralSpans) {
+    if (sp.kind !== 'lpf_muffled' && sp.kind !== 'hpf_thin') continue;
+    const b = sp.endBar;
+    if (b <= 0 || b >= totalBars) continue;
+    const pre2Br = winAvg(brightArr, Math.max(0, b - 2), Math.min(2, b));
+    const post2Br = winAvg(brightArr, b, 2);
+    const dBright = brightArr[b]! - brightArr[b - 1]!;
+    const dLow = normLow[b]! - normLow[b - 1]!;
+    const reopens =
+      (sp.kind === 'lpf_muffled' && (dBright >= 0.16 || post2Br - pre2Br >= 0.18)) ||
+      (sp.kind === 'hpf_thin' && dLow >= 0.22);
+    if (reopens) {
+      rawImpacts.push(b);
+    }
+  }
+
+  rawImpacts.sort((a, b) => a - b);
+  const impactBars: number[] = [];
+  for (const b of rawImpacts) {
+    if (impactBars.length === 0 || b - impactBars[impactBars.length - 1]! >= 4) {
+      impactBars.push(b);
+    }
+  }
+
+  return { barEnergy, barBrightness, spectralSpans, phraseBars, impactBars, sections: articulated };
 }
 
 function downsampleEnvelope(env: Float32Array, targetPoints: number): Float32Array {
@@ -1353,12 +1646,13 @@ export function analyzePcm(
   );
 
   const downbeat = selectDownbeatOffset(grid.bpm, grid.beatPhaseOffsetSec, features);
-  const { barEnergy, barBrightness, sections } = computeBarEnergyAndSections(
-    grid.bpm,
-    downbeat.firstBeatOffsetSec,
-    durationSec,
-    features,
-  );
+  const { barEnergy, barBrightness, spectralSpans, phraseBars, impactBars, sections } =
+    computeBarEnergyAndSections(
+      grid.bpm,
+      downbeat.firstBeatOffsetSec,
+      durationSec,
+      features,
+    );
 
   const tempoConf = Math.round(
     Math.max(0.1, Math.min(0.99, 0.55 * coarse.tempoConfidence + 0.45 * grid.alignmentScore)) * 100,
@@ -1375,6 +1669,9 @@ export function analyzePcm(
     beatsPerBar: BEATS_PER_BAR,
     barEnergy,
     barBrightness,
+    spectralSpans,
+    phraseBars,
+    impactBars,
     sections,
     confidence: {
       tempo: tempoConf,

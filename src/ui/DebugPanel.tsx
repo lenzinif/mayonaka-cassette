@@ -22,14 +22,11 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 
-const STORAGE_KEY = 'mayonaka-cassette.tuning.v1';
-const LEGACY_STORAGE_KEY = 'outrun-futurefunk.tuning.v1';
+const STORAGE_KEY = 'mayonaka-cassette.tuning.v2';
 
 export function loadSavedTuning(): void {
   try {
-    const raw =
-      window.localStorage.getItem(STORAGE_KEY) ??
-      window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return;
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
@@ -843,7 +840,8 @@ export function DebugPanel({
                   {snap?.trackTitle ?? 'Loading...'} · {snap?.bpm ?? 0} BPM
                 </span>
                 <span className="shrink-0">
-                  Bar {snap?.roadBarIndex ?? 0}/{snap?.totalBars ?? 0} ({snap?.sectionRole ?? 'intro'})
+                  Bar {snap?.roadBarIndex ?? 0}/{snap?.totalBars ?? 0} ({snap?.sectionRole ?? 'intro'}
+                  {snap?.spectralKind ? ` · ${snap.spectralKind}` : ''})
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-1.5">
@@ -874,6 +872,22 @@ export function DebugPanel({
                 <span>
                   Pylon Spans:{' '}
                   <strong className="text-[var(--ff-cream)]">{snap?.drawnPylonSpans ?? 0}</strong>
+                </span>
+              </div>
+              <div className="flex justify-between text-[10px] text-[var(--ff-muted)]">
+                <span>
+                  Horizon Stretch:{' '}
+                  <strong className="text-[var(--ff-mint)]">
+                    {(snap?.horizonStretchRatio ?? 1).toFixed(2)}×
+                  </strong>
+                </span>
+                <span>
+                  Sync Anchor:{' '}
+                  <strong className="text-[var(--ff-gold)]">
+                    {snap?.activeAnchorKind
+                      ? `${snap.activeAnchorKind}@B${snap.activeAnchorBar ?? 0}`
+                      : 'FREE'}
+                  </strong>
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-1 text-[9px] select-none">

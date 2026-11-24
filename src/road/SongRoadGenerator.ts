@@ -1,4 +1,10 @@
-import { barDurationSec, type BeatMap, type BeatSection, type SectionRole } from '@src/audio/BeatMap';
+import {
+  barDurationSec,
+  getImpactBars,
+  type BeatMap,
+  type BeatSection,
+  type SectionRole,
+} from '@src/audio/BeatMap';
 import { FORK_APPROACH_BARS, RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { DEFAULT_TUNING, tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
@@ -47,6 +53,19 @@ export interface CanonicalSegmentData {
   readonly sprites: readonly (readonly RoadSprite[])[];
   /** Ambiente originale (`'standard'` | `'bridge'` | `'viaduct'` | `'tunnel'`) di ciascun segmento. */
   readonly env: readonly SegmentEnvironment[];
+  /** Stato originale delle luci a soffitto tunnel (0/1, lunghezza = segments.length). */
+  readonly tunnelLight: Uint8Array;
+}
+
+export type SyncAnchorKind = 'drop' | 'impact' | 'tunnelEntry' | 'tunnelExit' | 'fork';
+
+export interface SyncAnchor {
+  readonly kind: SyncAnchorKind;
+  readonly barIndex: number;
+  readonly segmentIndex: number;
+  readonly worldZ: number;
+  /** True quando l'attraversamento on-beat (|deltaBeats| <= 1.25) assegna il bonus SYNC Groove. */
+  readonly rewardsSyncBonus: boolean;
 }
 
 export interface TrackDna {
@@ -91,6 +110,7 @@ export interface SongTrack extends Track {
   referenceSpeed: number;
   chunks: PlacedRoadChunk[];
   dropMarkers: DropMarker[];
+  readonly syncAnchors: readonly SyncAnchor[];
   tunnelSpans: readonly MuffledSpan[];
   zoneTransitions: readonly ZoneTransition[];
   readonly canonical: CanonicalSegmentData;
@@ -221,7 +241,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
   // LAYER 1: Track DNA & Muffled Span Blueprint (pure function of BeatMap)
   // ==========================================================================
   const trackDna = computeTrackDna(beatMap);
-  const tunnelSpans = detectMuffledSpans(beatMap, totalBars);
+  const tunnelSpans = resolveMuffledSpansCompat(beatMap, totalBars);
 
   const isRangeMuffled = (startBar: number, endBar: number): boolean => {
     for (let i = 0; i < tunnelSpans.length; i++) {
@@ -236,7 +256,17 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
   // ==========================================================================
   const segments: RoadSegment[] = [];
   const draftChunks: GeometryChunkDraft[] = [];
-  const dropMarkers: DropMarker[] = [];
+  const impactBars = getImpactBars(beatMap).filter((b) => b >= 0 && b < totalBars);
+  const impactBarSet = new Set<number>(impactBars);
+  const dropMarkers: DropMarker[] = impactBars.map((barIndex) => {
+    const segIdx = barIndex * segmentsPerBar;
+    return {
+      barIndex,
+      segmentIndex: segIdx,
+      worldZ: segIdx * segmentLength,
+    };
+  });
+  const phraseBars = beatMap.phraseBars ?? [];
 
   const lastY = (): number => {
     const last = segments[segments.length - 1];
@@ -287,17 +317,12 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
   for (let secIdx = 0; secIdx < sections.length; secIdx++) {
     const sec = sections[secIdx]!;
     const nextSec = sections[secIdx + 1];
-    const isPreDropSection = sec.role !== 'drop' && nextSec?.role === 'drop';
-    let justCrestedIntoDrop = sec.role === 'drop' && prevSectionCrested;
-
-    if (sec.role === 'drop') {
-      const dropSegIdx = sec.startBar * segmentsPerBar;
-      dropMarkers.push({
-        barIndex: sec.startBar,
-        segmentIndex: dropSegIdx,
-        worldZ: dropSegIdx * segmentLength,
-      });
-    }
+    const isPreDropSection =
+      sec.role !== 'drop' &&
+      nextSec !== undefined &&
+      (nextSec.role === 'drop' || impactBarSet.has(nextSec.startBar));
+    let justCrestedIntoDrop =
+      (sec.role === 'drop' || impactBarSet.has(sec.startBar)) && prevSectionCrested;
 
     let barCursor = sec.startBar;
     const secEndBar = sec.startBar + sec.bars;
@@ -311,8 +336,15 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
       const chunkIsMuffled = isRangeMuffled(barCursor, barCursor + actualBars);
 
       const requiresPreDropCrest = isPreDropSection && isFinalChunkOfSection && !chunkIsMuffled;
-      const requiresPostCrestReveal = sec.role === 'drop' && justCrestedIntoDrop;
+      const requiresPostCrestReveal =
+        (sec.role === 'drop' || impactBarSet.has(barCursor)) && justCrestedIntoDrop;
       justCrestedIntoDrop = false;
+
+      let phraseIndex = 0;
+      for (let p = 0; p < phraseBars.length; p++) {
+        if (phraseBars[p]! <= barCursor) phraseIndex++;
+        else break;
+      }
 
       const avgEnergy = averageBarEnergy(beatMap.barEnergy, barCursor, actualBars);
       const chunk = selectChunk(
@@ -329,6 +361,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
         requiresPostCrestReveal,
         chunkIsMuffled,
         isPreDropSection,
+        phraseIndex,
       );
       recentChunkIds.push(chunk.id);
       if (recentChunkIds.length > 3) {
@@ -540,6 +573,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     totalBars,
     segmentsPerBar,
     sceneryRng,
+    beatMap.phraseBars,
   );
 
   for (let i = 0; i < segments.length; i++) {
@@ -699,6 +733,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
   const canonicalP2WorldY = new Float64Array(count);
   const canonicalSprites: (readonly RoadSprite[])[] = new Array(count);
   const canonicalEnv: SegmentEnvironment[] = new Array(count);
+  const canonicalTunnelLight = new Uint8Array(count);
 
   for (let i = 0; i < count; i++) {
     const s = segments[i]!;
@@ -707,6 +742,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     canonicalP2WorldY[i] = s.p2.worldY;
     canonicalSprites[i] = s.sprites.slice();
     canonicalEnv[i] = s.env ?? 'standard';
+    canonicalTunnelLight[i] = s.tunnelLight ? 1 : 0;
   }
 
   const canonical: CanonicalSegmentData = {
@@ -715,7 +751,17 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     p2WorldY: canonicalP2WorldY,
     sprites: canonicalSprites,
     env: canonicalEnv,
+    tunnelLight: canonicalTunnelLight,
   };
+
+  const syncAnchors = buildSyncAnchors(
+    beatMap,
+    dropMarkers,
+    tunnelSpans,
+    totalBars,
+    segmentsPerBar,
+    segmentLength,
+  );
 
   return {
     segments,
@@ -731,6 +777,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     referenceSpeed,
     chunks: placedChunks,
     dropMarkers,
+    syncAnchors,
     tunnelSpans,
     zoneTransitions: zonePlan.transitions,
     canonical,
@@ -780,14 +827,150 @@ export function getSectionPaceFactor(
     case 'outro':
       return 0.92;
     case 'build':
+    case 'groove':
     case 'drop':
     default:
+      // Forward-compatible with 'groove' role from orthogonal taxonomy: maps cleanly to 1.0
       return 1.0;
   }
 }
 
+interface ExtendedBeatMapFields {
+  readonly impactBars?: readonly number[];
+  readonly spectralSpans?: readonly {
+    readonly startBar: number;
+    readonly endBar: number;
+    readonly kind: string;
+  }[];
+}
+
+/**
+ * Forward-compatible muffled span reader: uses `beatMap.spectralSpans` (`kind === 'lpf_muffled'`)
+ * when populated by the orthogonal taxonomy analyzer, falling back to `detectMuffledSpans`.
+ */
+export function resolveMuffledSpansCompat(beatMap: BeatMap, totalBars: number): MuffledSpan[] {
+  const ext = beatMap as BeatMap & ExtendedBeatMapFields;
+  if (ext.spectralSpans && ext.spectralSpans.length > 0) {
+    const maxTunnelEnd = Math.max(0, totalBars - FORK_APPROACH_BARS);
+    const spans: MuffledSpan[] = [];
+    for (let i = 0; i < ext.spectralSpans.length; i++) {
+      const sp = ext.spectralSpans[i]!;
+      if (sp.kind !== 'lpf_muffled') continue;
+      let startBar = Math.max(0, Math.floor(sp.startBar));
+      const endBar = Math.min(maxTunnelEnd, Math.floor(sp.endBar));
+      const shiftedFromZero = startBar === 0;
+      if (shiftedFromZero) {
+        startBar = endBar >= 6 ? 2 : 1;
+      }
+      const minSpanBars = shiftedFromZero ? 3 : 4;
+      if (endBar - startBar >= minSpanBars) {
+        spans.push({ startBar, endBar });
+      }
+    }
+    return spans;
+  }
+  return detectMuffledSpans(beatMap, totalBars);
+}
+
+/**
+ * Builds the sorted, deduplicated list of structural spacetime sync anchors
+ * (`drop` / `impact`, `tunnelEntry`, `tunnelExit`, and final `fork`).
+ */
+export function buildSyncAnchors(
+  beatMap: BeatMap,
+  dropMarkers: readonly DropMarker[],
+  tunnelSpans: readonly MuffledSpan[],
+  totalBars: number,
+  segmentsPerBar: number,
+  segmentLength: number,
+): SyncAnchor[] {
+  const ext = beatMap as BeatMap & ExtendedBeatMapFields;
+  const byBar = new Map<number, SyncAnchor>();
+
+  const addOrMerge = (anchor: SyncAnchor): void => {
+    const existing = byBar.get(anchor.barIndex);
+    if (!existing) {
+      byBar.set(anchor.barIndex, anchor);
+      return;
+    }
+    // Preserve structural tunnel portal kind while retaining SYNC Groove reward if an impact/drop coincides
+    const preferNewKind =
+      anchor.kind === 'tunnelExit' ||
+      anchor.kind === 'tunnelEntry' ||
+      (existing.kind === 'fork' && anchor.kind !== 'fork');
+    byBar.set(anchor.barIndex, {
+      kind: preferNewKind ? anchor.kind : existing.kind,
+      barIndex: anchor.barIndex,
+      segmentIndex: anchor.segmentIndex,
+      worldZ: anchor.worldZ,
+      rewardsSyncBonus: existing.rewardsSyncBonus || anchor.rewardsSyncBonus,
+    });
+  };
+
+  if (ext.impactBars && ext.impactBars.length > 0) {
+    for (let i = 0; i < ext.impactBars.length; i++) {
+      const bar = Math.floor(ext.impactBars[i]!);
+      if (bar <= 0 || bar >= totalBars) continue;
+      const segIdx = bar * segmentsPerBar;
+      addOrMerge({
+        kind: 'impact',
+        barIndex: bar,
+        segmentIndex: segIdx,
+        worldZ: segIdx * segmentLength,
+        rewardsSyncBonus: true,
+      });
+    }
+  } else {
+    for (let i = 0; i < dropMarkers.length; i++) {
+      const dm = dropMarkers[i]!;
+      addOrMerge({
+        kind: 'drop',
+        barIndex: dm.barIndex,
+        segmentIndex: dm.segmentIndex,
+        worldZ: dm.worldZ,
+        rewardsSyncBonus: true,
+      });
+    }
+  }
+
+  for (let i = 0; i < tunnelSpans.length; i++) {
+    const span = tunnelSpans[i]!;
+    if (span.startBar > 0 && span.startBar < totalBars) {
+      const entrySeg = span.startBar * segmentsPerBar;
+      addOrMerge({
+        kind: 'tunnelEntry',
+        barIndex: span.startBar,
+        segmentIndex: entrySeg,
+        worldZ: entrySeg * segmentLength,
+        rewardsSyncBonus: false,
+      });
+    }
+    if (span.endBar > 0 && span.endBar < totalBars) {
+      const exitSeg = span.endBar * segmentsPerBar;
+      addOrMerge({
+        kind: 'tunnelExit',
+        barIndex: span.endBar,
+        segmentIndex: exitSeg,
+        worldZ: exitSeg * segmentLength,
+        rewardsSyncBonus: false,
+      });
+    }
+  }
+
+  const forkSeg = totalBars * segmentsPerBar;
+  addOrMerge({
+    kind: 'fork',
+    barIndex: totalBars,
+    segmentIndex: forkSeg,
+    worldZ: forkSeg * segmentLength,
+    rewardsSyncBonus: false,
+  });
+
+  return Array.from(byBar.values()).sort((a, b) => a.worldZ - b.worldZ);
+}
+
 export interface HorizonStitchResult {
-  /** Delta Z (in world units, exact multiple of 2 * RUMBLE_LENGTH * segmentLength) applied to position. */
+  /** Delta Z (in world units, signed exact multiple of 2 * RUMBLE_LENGTH * segmentLength) applied to position. */
   deltaZ: number;
   /** Segment index before stitch. */
   fromSegIndex: number;
@@ -798,7 +981,9 @@ export interface HorizonStitchResult {
 }
 
 /**
- * Executes a zero-pop-in macro phase realignment (A2) to sync the road with the audio clock.
+ * Executes a bidirectional zero-pop-in macro phase realignment (A2) to sync the road with the audio clock.
+ * Supports both forward stitches (`deltaSegs > 0`, lag recovery) and backward stitches (`deltaSegs < 0`, lead compensation)
+ * on homogeneous `'standard'` or `'tunnel'` windows.
  */
 export function stitchHorizonToTargetZ(
   track: SongTrack,
@@ -816,42 +1001,71 @@ export function stitchHorizonToTargetZ(
   const rumbleStep = 2 * RUMBLE_LENGTH; // 6 segments
   const deltaSegs = rumbleStep * Math.round(rawDeltaSegs / rumbleStep);
 
-  if (deltaSegs < 12) return null;
+  if (Math.abs(deltaSegs) < 12) return null;
 
   const toSegIndex = fromSegIndex + deltaSegs;
-  if (fromSegIndex < 0 || toSegIndex + drawDistance + 16 >= segCount) {
+  if (fromSegIndex < 0 || toSegIndex < 0 || toSegIndex + drawDistance + 16 >= segCount) {
     return null;
   }
 
   const copyCount = Math.max(1, drawDistance - 24);
+  const baseEnv: SegmentEnvironment = track.segments[fromSegIndex]?.env ?? 'standard';
+  if (baseEnv !== 'standard' && baseEnv !== 'tunnel') {
+    return null;
+  }
 
-  // Never stitch across or onto any special structure (`bridge`, `viaduct`, or `tunnel`),
-  // including the 24-segment horizon blend zone so portals and ramps never warp.
+  // Require homogeneous environment (`standard -> standard` or `tunnel -> tunnel`) across the entire
+  // source visible window, destination window, and blend anchor so portals/ramps/towers never cut mid-span.
   for (let n = 0; n < drawDistance; n++) {
     const srcEnv = track.segments[fromSegIndex + n]?.env ?? 'standard';
     const destEnv = track.canonical.env[toSegIndex + n] ?? 'standard';
-    if (srcEnv !== 'standard' || destEnv !== 'standard') {
+    if (srcEnv !== baseEnv || destEnv !== baseEnv) {
       return null;
     }
+  }
+  if ((track.canonical.env[toSegIndex + drawDistance] ?? 'standard') !== baseEnv) {
+    return null;
   }
 
   const deltaY =
     track.canonical.p1WorldY[toSegIndex]! - track.segments[fromSegIndex]!.p1.worldY;
 
-  for (let n = copyCount - 1; n >= 0; n--) {
-    const srcSeg = track.segments[fromSegIndex + n]!;
-    const destSeg = track.segments[toSegIndex + n]!;
+  // Overlap-safe copy direction: descending when jumping forward, ascending when jumping backward
+  if (deltaSegs > 0) {
+    for (let n = copyCount - 1; n >= 0; n--) {
+      const srcSeg = track.segments[fromSegIndex + n]!;
+      const destSeg = track.segments[toSegIndex + n]!;
 
-    destSeg.curve = srcSeg.curve;
-    destSeg.p1.worldY = srcSeg.p1.worldY + deltaY;
-    destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
-    destSeg.env = srcSeg.env;
+      destSeg.curve = srcSeg.curve;
+      destSeg.p1.worldY = srcSeg.p1.worldY + deltaY;
+      destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
+      destSeg.env = srcSeg.env;
+      destSeg.tunnelLight = srcSeg.tunnelLight;
 
-    const isDestDropMarker = isDropMarkerSegment(track.dropMarkers, toSegIndex + n);
-    if (isDestDropMarker) {
-      destSeg.sprites = track.canonical.sprites[toSegIndex + n] as RoadSprite[];
-    } else {
-      destSeg.sprites = srcSeg.sprites;
+      const isDestDropMarker = isDropMarkerSegment(track.dropMarkers, toSegIndex + n);
+      if (isDestDropMarker) {
+        destSeg.sprites = track.canonical.sprites[toSegIndex + n] as RoadSprite[];
+      } else {
+        destSeg.sprites = srcSeg.sprites;
+      }
+    }
+  } else {
+    for (let n = 0; n < copyCount; n++) {
+      const srcSeg = track.segments[fromSegIndex + n]!;
+      const destSeg = track.segments[toSegIndex + n]!;
+
+      destSeg.curve = srcSeg.curve;
+      destSeg.p1.worldY = srcSeg.p1.worldY + deltaY;
+      destSeg.p2.worldY = srcSeg.p2.worldY + deltaY;
+      destSeg.env = srcSeg.env;
+      destSeg.tunnelLight = srcSeg.tunnelLight;
+
+      const isDestDropMarker = isDropMarkerSegment(track.dropMarkers, toSegIndex + n);
+      if (isDestDropMarker) {
+        destSeg.sprites = track.canonical.sprites[toSegIndex + n] as RoadSprite[];
+      } else {
+        destSeg.sprites = srcSeg.sprites;
+      }
     }
   }
 
@@ -878,6 +1092,7 @@ export function stitchHorizonToTargetZ(
 
     seg.sprites = track.canonical.sprites[segIdx] as RoadSprite[];
     seg.env = track.canonical.env[segIdx]!;
+    seg.tunnelLight = track.canonical.tunnelLight[segIdx] === 1 ? true : undefined;
   }
 
   const newStart = toSegIndex;
@@ -893,6 +1108,7 @@ export function stitchHorizonToTargetZ(
       seg.p2.worldY = track.canonical.p2WorldY[i]!;
       seg.sprites = track.canonical.sprites[i] as RoadSprite[];
       seg.env = track.canonical.env[i]!;
+      seg.tunnelLight = track.canonical.tunnelLight[i] === 1 ? true : undefined;
     }
     const afterStart = Math.max(prevStart, newEnd);
     for (let i = afterStart; i < prevEnd; i++) {
@@ -902,6 +1118,7 @@ export function stitchHorizonToTargetZ(
       seg.p2.worldY = track.canonical.p2WorldY[i]!;
       seg.sprites = track.canonical.sprites[i] as RoadSprite[];
       seg.env = track.canonical.env[i]!;
+      seg.tunnelLight = track.canonical.tunnelLight[i] === 1 ? true : undefined;
     }
   }
   track.dirtyStitchRange = { start: newStart, end: newEnd };
@@ -934,6 +1151,7 @@ export function restoreCanonicalTrack(track: SongTrack): void {
     s.p2.worldY = canonical.p2WorldY[i]!;
     s.sprites = canonical.sprites[i] as RoadSprite[];
     s.env = canonical.env[i]!;
+    s.tunnelLight = canonical.tunnelLight[i] === 1 ? true : undefined;
   }
   track.dirtyStitchRange = undefined;
 }
@@ -1014,6 +1232,9 @@ function computeRoleAwareCurveScale(
   if (role === 'intro' || role === 'outro') {
     return Math.max(0.65, Math.min(1.15, 1 + (energy - 0.5) * curveEnergyScale * 0.7));
   }
+  if (role === 'groove') {
+    return Math.max(0.8, Math.min(1.22, 1 + (energy - 0.5) * curveEnergyScale * 0.85));
+  }
   return Math.max(0.72, Math.min(1.35, 1 + (energy - 0.5) * curveEnergyScale));
 }
 
@@ -1035,6 +1256,7 @@ function selectChunk(
   requiresPostCrestReveal: boolean,
   chunkIsMuffled: boolean,
   isPreDropSection: boolean,
+  phraseIndex = 0,
 ): RoadChunk {
   const rolePool = getChunksForRole(role, catalog);
   const pool = rolePool.length > 0 ? rolePool : catalog;
@@ -1120,11 +1342,21 @@ function selectChunk(
       }
     }
 
+    // Phrase-driven variety on sustained `groove` sections: gently alternate cruise/scenic vs wangan
+    let phraseStyleBias = 1.0;
+    if (role === 'groove') {
+      const preferExpress = phraseIndex % 2 === 1;
+      const hasExpress = chunk.styleTags.includes('wangan') || chunk.styleTags.includes('technical');
+      const hasCruise = chunk.styleTags.includes('cruise') || chunk.styleTags.includes('scenic');
+      if (preferExpress && hasExpress) phraseStyleBias = 1.22;
+      else if (!preferExpress && hasCruise) phraseStyleBias = 1.22;
+    }
+
     // Muffled sections prefer tunnel-compatible choreography
     const muffleBias =
       chunkIsMuffled && chunk.allowedStructures.includes('tunnel') ? 1.65 : chunkIsMuffled ? 0.65 : 1.0;
 
-    return energyWeight * noveltyWeight * dnaWeight * elevationBias * muffleBias;
+    return energyWeight * noveltyWeight * dnaWeight * elevationBias * phraseStyleBias * muffleBias;
   });
 }
 
