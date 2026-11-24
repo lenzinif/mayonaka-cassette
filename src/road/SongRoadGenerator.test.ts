@@ -1155,5 +1155,40 @@ describe('SongRoadGenerator', () => {
         expect(maxUphillCurve).toBeLessThanOrEqual(2.4);
       }
     });
+
+    it('supports groove chunks (4 & 8 bar, tunnel/elevated/standard), pace factor 1.0, and orthogonal spectralSpans + phraseBars + impactBars', () => {
+      const groovePool = getChunksForRole('groove');
+      expect(groovePool.some((c) => c.bars === 4)).toBe(true);
+      expect(groovePool.some((c) => c.bars === 8)).toBe(true);
+      expect(groovePool.some((c) => c.allowedStructures.includes('tunnel'))).toBe(true);
+      expect(groovePool.some((c) => c.allowedStructures.includes('elevated'))).toBe(true);
+
+      const flatGrooveMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:orthogonal-groove-road-test',
+        bpm: 110.35,
+        barEnergy: new Array<number>(68).fill(0.76),
+        barBrightness: new Array<number>(68).fill(0.8),
+        spectralSpans: [
+          { startBar: 32, endBar: 38, kind: 'lpf_muffled' },
+          { startBar: 62, endBar: 68, kind: 'fadeout' },
+        ],
+        phraseBars: [16, 32, 48],
+        impactBars: [38],
+        sections: [
+          { startBar: 0, bars: 60, role: 'groove' },
+          { startBar: 60, bars: 4, role: 'breakdown' },
+          { startBar: 64, bars: 4, role: 'outro' },
+        ],
+      };
+
+      const road = generateSongRoad(flatGrooveMap, { stageId: 'night' });
+      expect(getSectionPaceFactor(road, 10, 'groove')).toBe(1.0);
+      expect(road.tunnelSpans).toEqual([{ startBar: 32, endBar: 38 }]);
+      expect(road.dropMarkers.map((d) => d.barIndex)).toEqual([38]);
+      // Phrase boundaries unlock multi-act district progression even inside a 60-bar groove section
+      const distinctArchetypes = new Set(road.chunks.map((c) => c.archetype));
+      expect(distinctArchetypes.size).toBeGreaterThanOrEqual(2);
+    });
   });
 });

@@ -843,7 +843,8 @@ export function DebugPanel({
                   {snap?.trackTitle ?? 'Loading...'} · {snap?.bpm ?? 0} BPM
                 </span>
                 <span className="shrink-0">
-                  Bar {snap?.roadBarIndex ?? 0}/{snap?.totalBars ?? 0} ({snap?.sectionRole ?? 'intro'})
+                  Bar {snap?.roadBarIndex ?? 0}/{snap?.totalBars ?? 0} ({snap?.sectionRole ?? 'intro'}
+                  {snap?.spectralKind ? ` · ${snap.spectralKind}` : ''})
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-1.5">

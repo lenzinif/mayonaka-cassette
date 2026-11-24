@@ -1,4 +1,10 @@
-import { sectionAtBar, type BeatMap, type BeatSection, type SectionRole } from '@src/audio/BeatMap';
+import {
+  getMuffledSpectralSpans,
+  sectionAtBar,
+  type BeatMap,
+  type BeatSection,
+  type SectionRole,
+} from '@src/audio/BeatMap';
 import { FORK_APPROACH_BARS } from '@src/config/constants';
 import type { SeededRandom } from '@src/core/SeededRandom';
 import type { StructureCapability } from './RoadChunks';
@@ -124,8 +130,8 @@ export const ENVIRONMENT_ARCHETYPES: Readonly<Record<EnvironmentArchetypeId, Env
     bandARules: [
       { kind: 'lamp', placement: 'both', everyBeats: 'cadence', band: 'A', offset: 1.22, rhythmic: true },
       { kind: 'gantry', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
-      { kind: 'vms', placement: 'right', everyBeats: 16, band: 'A', offset: 1.38, rhythmic: true, roles: ['build', 'drop'] },
-      { kind: 'overpass', placement: 'both', everyBeats: 24, band: 'A', offset: 0, rhythmic: true, roles: ['drop', 'breakdown'] },
+      { kind: 'vms', placement: 'right', everyBeats: 16, band: 'A', offset: 1.38, rhythmic: true, roles: ['build', 'groove', 'drop'] },
+      { kind: 'overpass', placement: 'both', everyBeats: 24, band: 'A', offset: 0, rhythmic: true, roles: ['groove', 'drop', 'breakdown'] },
     ],
     bandBRules: [
       { kind: 'billboard', placement: 'outside-curve', everyBeats: 4, band: 'B', offset: 2.15, jitter: { lateral: 0.2, beats: 0.4 }, rhythmic: false },
@@ -153,7 +159,7 @@ export const ENVIRONMENT_ARCHETYPES: Readonly<Record<EnvironmentArchetypeId, Env
       { kind: 'lamp', placement: 'both', everyBeats: 'cadence', band: 'A', offset: 1.24, rhythmic: true },
       { kind: 'gantry', placement: 'both', everyBeats: 16, band: 'A', offset: 0, rhythmic: true },
       { kind: 'sign', placement: 'right', everyBeats: 8, band: 'A', offset: 1.35, rhythmic: true },
-      { kind: 'overpass', placement: 'both', everyBeats: 32, band: 'A', offset: 0, rhythmic: true, roles: ['drop'] },
+      { kind: 'overpass', placement: 'both', everyBeats: 32, band: 'A', offset: 0, rhythmic: true, roles: ['groove', 'drop'] },
     ],
     bandBRules: [
       { kind: 'billboard', placement: 'alternating', everyBeats: 8, band: 'B', offset: 2.25, jitter: { lateral: 0.25, beats: 0.5 }, rhythmic: false },
@@ -272,18 +278,58 @@ export const STAGE_REGION_CONFIG: Readonly<Record<StageRegionId, StageRegionConf
 };
 
 /**
- * Detects contiguous muffled (low-pass filtered) musical spans (`>= 4` bars) from
- * `beatMap.barBrightness`, aligning tunnel exits to adjacent drop downbeats.
+ * Detects contiguous muffled (low-pass filtered) musical spans (`>= 4` bars).
  *
- * Pure deterministic function of `BeatMap`. Returns `[]` when `barBrightness` is absent.
+ * Uses `beatMap.spectralSpans` (`kind === 'lpf_muffled'`) as primary source when present,
+ * falling back to `beatMap.barBrightness` threshold detection for legacy BeatMaps.
+ * Pure deterministic function of `BeatMap`.
  */
 export function detectMuffledSpans(beatMap: BeatMap, totalBars: number): MuffledSpan[] {
-  const brightness = beatMap.barBrightness;
-  if (!brightness || brightness.length === 0 || totalBars < 4) {
+  if (totalBars < 4) {
     return [];
   }
 
   const maxTunnelEnd = Math.max(0, totalBars - FORK_APPROACH_BARS);
+  if (maxTunnelEnd < 4) {
+    return [];
+  }
+
+  // Primary source: orthogonal `spectralSpans` (`lpf_muffled`) from offline DSP
+  if (beatMap.spectralSpans !== undefined) {
+    const rawMuffled = getMuffledSpectralSpans(beatMap);
+    const spans: MuffledSpan[] = [];
+    for (const sp of rawMuffled) {
+      let startBar = Math.max(0, sp.startBar);
+      let endBar = Math.min(maxTunnelEnd, sp.endBar);
+      const shiftedFromZero = startBar === 0;
+      if (shiftedFromZero) {
+        startBar = endBar >= 6 ? 2 : 1;
+      }
+      const minSpanBars = shiftedFromZero ? 3 : 4;
+      for (const sec of beatMap.sections) {
+        if (sec.role !== 'drop') continue;
+        if (
+          Math.abs(endBar - sec.startBar) <= 1 &&
+          sec.startBar <= maxTunnelEnd &&
+          sec.startBar - startBar >= minSpanBars
+        ) {
+          endBar = sec.startBar;
+          break;
+        }
+      }
+      if (endBar - startBar >= minSpanBars) {
+        spans.push({ startBar, endBar });
+      }
+    }
+    return spans;
+  }
+
+  // Legacy fallback: derive from `barBrightness` when `spectralSpans` is absent
+  const brightness = beatMap.barBrightness;
+  if (!brightness || brightness.length === 0) {
+    return [];
+  }
+
   const sampleCount = Math.min(totalBars, brightness.length, maxTunnelEnd);
   if (sampleCount < 4) {
     return [];
@@ -376,6 +422,7 @@ export function planStageZones(
   totalBars: number,
   segmentsPerBar: number,
   rng: SeededRandom,
+  phraseBars?: readonly number[],
 ): StageZonePlan {
   const stageConfig = STAGE_REGION_CONFIG[stageId] ?? STAGE_REGION_CONFIG.night;
   const template = rng.pick(stageConfig.journeyTemplates);
@@ -385,30 +432,47 @@ export function planStageZones(
     template[0] ?? stageConfig.allowedArchetypes[0]!,
   );
 
-  // Assign archetypes strictly along section boundaries with minimum ~12-bar zone duration
+  // Build union of musical section starts and timbral phrase boundaries so long steady
+  // `groove` tracks still progress naturally across 2-4 environmental acts.
+  const boundarySet = new Set<number>([0]);
+  for (const sec of sections) {
+    if (sec.startBar >= 0 && sec.startBar < totalBars) {
+      boundarySet.add(sec.startBar);
+    }
+  }
+  if (phraseBars) {
+    for (const pb of phraseBars) {
+      if (pb > 0 && pb < totalBars) {
+        boundarySet.add(pb);
+      }
+    }
+  }
+  const boundaries = Array.from(boundarySet).sort((a, b) => a - b);
+
+  // Assign archetypes along section/phrase boundaries with minimum ~12-bar zone duration
   const minZoneBars = totalBars >= 32 ? 12 : totalBars >= 20 ? 8 : 4;
   let actIdx = 0;
   let currentActBars = 0;
 
-  for (let sIdx = 0; sIdx < sections.length; sIdx++) {
-    const sec = sections[sIdx]!;
-    const remainingFromSec = Math.max(0, totalBars - sec.startBar);
+  for (let bIdx = 0; bIdx < boundaries.length; bIdx++) {
+    const spanStart = boundaries[bIdx]!;
+    const spanEnd = bIdx + 1 < boundaries.length ? boundaries[bIdx + 1]! : totalBars;
+    const remainingFromSpan = Math.max(0, totalBars - spanStart);
     if (
-      sIdx > 0 &&
+      bIdx > 0 &&
       actIdx + 1 < maxActs &&
       currentActBars >= minZoneBars &&
-      remainingFromSec >= minZoneBars
+      remainingFromSpan >= minZoneBars
     ) {
       actIdx++;
       currentActBars = 0;
     }
 
     const arch = template[actIdx] ?? stageConfig.allowedArchetypes[0]!;
-    const secEnd = Math.min(totalBars, sec.startBar + sec.bars);
-    for (let b = Math.max(0, sec.startBar); b < secEnd; b++) {
+    for (let b = spanStart; b < spanEnd; b++) {
       barArchetypes[b] = arch;
     }
-    currentActBars += Math.max(0, secEnd - Math.max(0, sec.startBar));
+    currentActBars += Math.max(0, spanEnd - spanStart);
   }
 
   const chunkArchetypes: EnvironmentArchetypeId[] = placedChunks.map(
@@ -432,7 +496,7 @@ export function planStageZones(
       c.startBar >= 4 &&
       cEnd <= forkCutoffBar &&
       c.allowedStructures.includes('elevated') &&
-      (c.role === 'build' || c.role === 'drop') &&
+      (c.role === 'build' || c.role === 'groove' || c.role === 'drop') &&
       !overlapsTunnel(c.startBar, cEnd)
     ) {
       elevatedCandidates.push(i);
@@ -448,6 +512,7 @@ export function planStageZones(
       let w = c.bars >= 8 ? 1.8 : 1.0;
       if (arch === preferredArch || arch === 'semiurbano_industriale') w *= 1.5;
       if (c.role === 'drop' || c.role === 'build') w *= 1.3;
+      else if (c.role === 'groove') w *= 1.15;
       return w;
     });
 
