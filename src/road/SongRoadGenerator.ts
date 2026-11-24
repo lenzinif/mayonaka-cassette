@@ -399,6 +399,8 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
         //    (`build -> drop` climbs across the build; `intro/breakdown -> drop` climbs on final chunk)
         // 2. Pre-drop muffled tunnel: keep gentle level grade inside tunnel so exit reveals sky cleanly.
         // 3. Regular chunks: preserve authorial hill delta with soft outer altitude bounds only.
+        // All vertical deltas scale with `barScale` and obey a physical average-grade ceiling so
+        // compressed 1-3 bar chunks never generate near-vertical walls.
         const startY = lastY();
         let endY: number;
         const applyBuildClimb =
@@ -406,30 +408,52 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
           !chunkIsMuffled &&
           (sec.role === 'build' || isFinalChunkOfSection);
 
+        const isFinalCrestManeuver =
+          applyBuildClimb && isFinalChunkOfSection && isLastManeuverInChunk;
+        const maneuverWorldLen = Math.max(segmentLength, mSegCount * segmentLength);
+        const maxAvgGrade = isFinalCrestManeuver ? 0.22 : 0.30;
+        const maxAbsDeltaY = maneuverWorldLen * maxAvgGrade;
+
         if (applyBuildClimb) {
           const minClimbUnits =
             isFinalChunkOfSection && isLastManeuverInChunk ? HILL.HIGH : HILL.MEDIUM * 0.65;
-          const climbUnits = Math.max(minClimbUnits, Math.abs(m.elevation)) * hillScale;
-          endY = Math.min(16500, startY + climbUnits * segmentLength);
+          const climbUnits = Math.max(minClimbUnits, Math.abs(m.elevation)) * hillScale * barScale;
+          const clampedDeltaY = Math.min(maxAbsDeltaY, climbUnits * segmentLength);
+          endY = Math.min(16500, startY + clampedDeltaY);
           if (isFinalChunkOfSection && isLastManeuverInChunk) {
             sectionEndedWithCrest = true;
           }
         } else if (isPreDropSection && chunkIsMuffled) {
-          const gentleDelta = m.elevation * 0.3 * hillScale * segmentLength;
-          endY = Math.max(-4500, Math.min(6000, startY + gentleDelta));
+          const gentleDelta = m.elevation * 0.3 * hillScale * barScale * segmentLength;
+          const clampedDeltaY = Math.max(-maxAbsDeltaY, Math.min(maxAbsDeltaY, gentleDelta));
+          endY = Math.max(-4500, Math.min(6000, startY + clampedDeltaY));
         } else {
-          let rawDeltaY = m.elevation * hillScale * segmentLength;
+          let rawDeltaY = m.elevation * hillScale * barScale * segmentLength;
           // Planned vertical boundary guard: damp only excursions that push further past ±7500
           if (Math.abs(startY) > 7500 && rawDeltaY * startY > 0) {
             rawDeltaY *= 0.35;
           }
+          const clampedDeltaY = Math.max(-maxAbsDeltaY, Math.min(maxAbsDeltaY, rawDeltaY));
           const maxAlt = 16500;
           const minAlt = -12000;
-          endY = Math.max(minAlt, Math.min(maxAlt, startY + rawDeltaY));
+          endY = Math.max(minAlt, Math.min(maxAlt, startY + clampedDeltaY));
         }
 
-        const isFinalCrestManeuver =
-          applyBuildClimb && isFinalChunkOfSection && isLastManeuverInChunk;
+        // Attenuate horizontal curvature on steep uphills and pre-drop climbs over non-build chunks
+        // so blind hill crests never apply CURVE.HARD centrifugal forces exceeding normal steering authority.
+        const avgUphillGrade = (endY - startY) / maneuverWorldLen;
+        let uphillCurveCap = Infinity;
+        if (applyBuildClimb && sec.role !== 'build') {
+          uphillCurveCap = isFinalCrestManeuver ? CURVE.EASY * 0.75 : CURVE.EASY * 1.15;
+        } else if (avgUphillGrade > 0.14) {
+          uphillCurveCap = 3.2;
+        }
+        const clampUphillCurve = (val: number): number =>
+          uphillCurveCap < Infinity
+            ? Math.max(-uphillCurveCap, Math.min(uphillCurveCap, val))
+            : val;
+        const clampedStartCurve = clampUphillCurve(startCurve);
+        const clampedEndCurve = clampUphillCurve(endCurve);
 
         for (let n = 0; n < mSegCount; n++) {
           let c: number;
@@ -439,19 +463,20 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
             const segBarFloat = barCursor + (segments.length - chunkStartSeg) / segmentsPerBar;
             const segEnergy = sampleSmoothBarEnergy(beatMap.barEnergy, segBarFloat);
             const segCurveScale = computeRoleAwareCurveScale(sec.role, segEnergy, curveEnergyScale);
-            const localTargetCurve = m.curve === 0 ? 0 : m.curve * mirrorSign * segCurveScale;
+            const rawLocalCurve = m.curve === 0 ? 0 : m.curve * mirrorSign * segCurveScale;
+            const localTargetCurve = clampUphillCurve(rawLocalCurve);
 
             if (n < enterSegs) {
               const t = n / enterSegs;
               c = prevBlends
-                ? easeInOut(startCurve, localTargetCurve, t)
+                ? easeInOut(clampedStartCurve, localTargetCurve, t)
                 : easeIn(0, localTargetCurve, t);
             } else if (n < enterSegs + holdSegs) {
               c = localTargetCurve;
             } else {
               const leaveIdx = n - enterSegs - holdSegs;
               const t = leaveIdx / Math.max(1, leaveSegs);
-              c = easeInOut(localTargetCurve, endCurve, t);
+              c = easeInOut(localTargetCurve, clampedEndCurve, t);
             }
           }
 
@@ -576,7 +601,6 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
         draft.segmentCount,
         segmentsPerBeat,
         1.24,
-        false,
       );
     } else {
       if (hasStandard) {
@@ -605,12 +629,10 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
           subEnd++;
         }
         const subCount = subEnd - subStart;
-        if (subEnv === 'tunnel') {
-          populateChunkChevrons(segments, subStart, subCount, segmentsPerBeat, 1.18, true);
-        } else if (subEnv === 'viaduct') {
-          populateChunkChevrons(segments, subStart, subCount, segmentsPerBeat, 1.24, false);
+        if (subEnv === 'viaduct') {
+          populateChunkChevrons(segments, subStart, subCount, segmentsPerBeat, 1.24);
         } else if (subEnv === 'standard') {
-          populateChunkChevrons(segments, subStart, subCount, segmentsPerBeat, 1.3, false);
+          populateChunkChevrons(segments, subStart, subCount, segmentsPerBeat, 1.3);
         }
         subStart = subEnd;
       }
@@ -663,6 +685,9 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     totalBars,
     sceneryRng,
   );
+
+  // Clear any freestanding props inside tunnels and keep tunnel portal thresholds uncluttered
+  clearTunnelAndPortalProps(segments);
 
   // Static lateral intra-segment ordering (Band D -> C -> B -> A, overhead portals last)
   sortSegmentSprites(segments);
@@ -1455,6 +1480,30 @@ function tryPlaceWarningSign(
 }
 
 /**
+ * Guarantees zero freestanding props inside tunnel bores (curve guidance is rendered flush on walls)
+ * and clears Band A/B and overhead props from open segments directly adjacent to tunnel portals.
+ */
+function clearTunnelAndPortalProps(segments: RoadSegment[]): void {
+  const n = segments.length;
+  for (let i = 0; i < n; i++) {
+    const seg = segments[i]!;
+    if (seg.env === 'tunnel') {
+      seg.sprites.length = 0;
+      continue;
+    }
+    const nearPortal =
+      (i + 1 < n && segments[i + 1]!.env === 'tunnel') ||
+      (i + 2 < n && segments[i + 2]!.env === 'tunnel') ||
+      (i - 1 >= 0 && segments[i - 1]!.env === 'tunnel');
+    if (nearPortal && seg.sprites.length > 0) {
+      seg.sprites = seg.sprites.filter(
+        (sp) => !isOverheadProp(sp.kind) && Math.abs(sp.offset) >= 3.0,
+      );
+    }
+  }
+}
+
+/**
  * Geometry-driven Japanese-style curve signage & directional delineators (矢羽根).
  */
 function populateChunkChevrons(
@@ -1463,7 +1512,6 @@ function populateChunkChevrons(
   segCount: number,
   segmentsPerBeat: number,
   baseOffset = 1.3,
-  insideTunnelOnly = false,
 ): void {
   const endSeg = Math.min(segments.length, startSeg + segCount);
   const segmentsPerBar = Math.max(4, Math.round(segmentsPerBeat * 4));
@@ -1520,14 +1568,12 @@ function populateChunkChevrons(
       continue;
     }
 
-    if (!insideTunnelOnly) {
-      const preferredWarnSeg = bodyStart - leadSegs;
-      const minSearchSeg = Math.max(
-        startSeg > 0 ? startSeg - Math.round(segmentsPerBar * 0.5) : 0,
-        bodyStart - segmentsPerBar,
-      );
-      tryPlaceWarningSign(segments, preferredWarnSeg, minSearchSeg, signClearSegs, outsideOffset);
-    }
+    const preferredWarnSeg = bodyStart - leadSegs;
+    const minSearchSeg = Math.max(
+      startSeg > 0 ? startSeg - Math.round(segmentsPerBar * 0.5) : 0,
+      bodyStart - segmentsPerBar,
+    );
+    tryPlaceWarningSign(segments, preferredWarnSeg, minSearchSeg, signClearSegs, outsideOffset);
 
     if (lobePeak < mediumThreshold) {
       continue;
@@ -1540,12 +1586,7 @@ function populateChunkChevrons(
 
     for (let sIdx = bodyStart; sIdx <= bodyEnd; sIdx += stepSegs) {
       const seg = segments[sIdx];
-      if (
-        !seg ||
-        (insideTunnelOnly
-          ? seg.env !== 'tunnel'
-          : seg.env === 'bridge' || seg.env === 'tunnel')
-      ) {
+      if (!seg || seg.env === 'bridge' || seg.env === 'tunnel') {
         continue;
       }
       if (!seg.sprites.some((sp) => sp.kind === 'chevron')) {

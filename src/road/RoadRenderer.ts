@@ -118,12 +118,13 @@ export class RoadRenderer {
   private cachedHorizonCurbColor = '#4a4a6a';
   private cachedHorizonRoadColor = '#141928';
 
-  // Zero-GC state for minimal single-frame tunnel aperture surround masking
+  // Zero-GC state for minimal single-frame tunnel aperture surround masking & bore bounds
   private tunnelMaskEmitted = false;
-  private tunnelMaskMinX = 0;
-  private tunnelMaskMaxX = 0;
-  private tunnelMaskMinY = 0;
-  private tunnelMaskMaxY = 0;
+  private boreBoundsInit = false;
+  private boreMinX = 0;
+  private boreMaxX = 0;
+  private boreMinY = 0;
+  private boreMaxY = 0;
 
   // Pre-allocated 4-band depth fog palette (Phase 2, Zero GC)
   private static readonly FOG_BAND_T = [0, 0.22, 0.48, 0.72] as const;
@@ -326,14 +327,34 @@ export class RoadRenderer {
       }
     }
 
+    let isTunnelExitVisible = false;
+    if (isCameraInTunnel && leftCameraTunnel && cameraTunnelEndN >= 0) {
+      const endSeg = this.visible[cameraTunnelEndN]!;
+      if (cameraTunnelEndN === 0 || endSeg.p1.cameraZ <= cameraDepth) {
+        isTunnelExitVisible = true;
+      } else {
+        const endCeilY2 = endSeg.p2.screenY - Math.max(3, endSeg.p2.screenW * 1.16);
+        isTunnelExitVisible = endCeilY2 < this.clipY[cameraTunnelEndN]!;
+      }
+    }
+
     this.tunnelMaskEmitted = false;
-    this.tunnelMaskMinX = 0;
-    this.tunnelMaskMaxX = width;
-    this.tunnelMaskMinY = 0;
-    this.tunnelMaskMaxY = height;
+    this.boreBoundsInit = false;
+    this.boreMinX = 0;
+    this.boreMaxX = width;
+    this.boreMinY = 0;
+    this.boreMaxY = height;
 
     // Pass 2: painter's algorithm (back-to-front).
-    if (isCameraOnBridge) {
+    let pass2StartN = drawDistance - 1;
+    if (isCameraInTunnel && !isTunnelExitVisible) {
+      ctx.fillStyle = '#070510';
+      ctx.fillRect(0, 0, width, height);
+      this.tunnelMaskEmitted = true;
+      if (cameraTunnelEndN >= 0) {
+        pass2StartN = Math.min(drawDistance - 1, cameraTunnelEndN);
+      }
+    } else if (isCameraOnBridge) {
       // Pre-fill palette-harmonized bay water surface once below the horizon (avoids ~180 full-width overdraws on bridge climbs)
       const waterColors = palette.water ?? palette.grass;
       if (typeof ctx.createLinearGradient === 'function') {
@@ -368,8 +389,9 @@ export class RoadRenderer {
     let coalesceTopY = Number.POSITIVE_INFINITY;
     let coalesceEnv: RoadSegment['env'] | null = null;
     let coalesceCount = 0;
+    let coalesceFarSeg: RoadSegment | null = null;
 
-    for (let n = drawDistance - 1; n >= 0; n--) {
+    for (let n = pass2StartN; n >= 0; n--) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
       const seg = this.visible[n]!;
       const { p1, p2 } = seg;
@@ -377,21 +399,38 @@ export class RoadRenderer {
         coalesceTopY = Number.POSITIVE_INFINITY;
         coalesceEnv = null;
         coalesceCount = 0;
+        coalesceFarSeg = null;
         continue; // behind the projection plane
       }
 
+      const isInCurrentTunnel = isCameraInTunnel && n <= cameraTunnelEndN;
+      const isTunnelSeg = seg.env === 'tunnel';
       const firstTruckIdx = !isNextSeg && traffic ? traffic.getFirstTruckOnSegment(seg.index) : -1;
       const segClipY = this.clipY[n]!;
       const segForkZoneStartZ = isNextSeg ? undefined : view.forkZoneStartZ;
-      // Skip segments occluded behind a hill crest
-      if (p2.screenY < p1.screenY && p2.screenY < segClipY) {
+      const roadVisible = p2.screenY < p1.screenY && p2.screenY < segClipY;
+      const tunnelWallVisible =
+        isTunnelSeg && !roadVisible && p2.screenY - Math.max(3, p2.screenW * 1.16) < segClipY;
+
+      // Skip segments occluded behind a hill crest (tunnel walls/ceiling remain visible above crest/sag)
+      if (roadVisible || tunnelWallVisible) {
         if (coalesceEnv !== seg.env || p2.screenY < coalesceTopY - 0.5) {
           coalesceTopY = Number.POSITIVE_INFINITY;
           coalesceCount = 0;
+          coalesceFarSeg = null;
         }
         const effectiveTopY = Math.min(p2.screenY, coalesceTopY);
         const clampedBottomY = Math.min(p1.screenY, segClipY);
         const combinedDy = clampedBottomY - effectiveTopY;
+
+        const segArr = isNextSeg ? view.nextTrack!.segments : segments;
+        const segArrLen = segArr.length;
+        const prevEnv =
+          segArrLen > 0
+            ? (segArr[(seg.index - 1 + segArrLen) % segArrLen]?.env ?? 'standard')
+            : 'standard';
+        const nextEnv =
+          segArrLen > 0 ? (segArr[(seg.index + 1) % segArrLen]?.env ?? 'standard') : 'standard';
 
         let shouldDeferSlice = false;
         if (legacy) {
@@ -417,10 +456,44 @@ export class RoadRenderer {
           ) {
             shouldDeferSlice = true;
           }
+        } else if (
+          isTunnelSeg &&
+          p1.screenW < 64 &&
+          roadVisible &&
+          coalesceCount < 6 &&
+          combinedDy < 1.8 &&
+          !(seg.tunnelLight !== undefined ? seg.tunnelLight : seg.index % 16 === 0) &&
+          !(
+            p1.screenW >= 28 &&
+            (seg.index % 12 === 0 || (Math.abs(seg.curve) >= 2.2 && seg.index % 8 === 0))
+          ) &&
+          firstTruckIdx === -1 &&
+          prevEnv === 'tunnel' &&
+          nextEnv === 'tunnel'
+        ) {
+          const nextSeg = this.visible[n - 1];
+          const nextClipY = this.clipY[n - 1]!;
+          const farAnchor = coalesceFarSeg ?? seg;
+          if (
+            nextSeg &&
+            nextSeg.p1.cameraZ > cameraDepth &&
+            nextSeg.env === 'tunnel' &&
+            nextSeg.p2.screenY < nextSeg.p1.screenY &&
+            nextSeg.p2.screenY < nextClipY &&
+            Math.abs(nextSeg.p2.screenY - p1.screenY) <= 1.0 &&
+            Math.abs(nextSeg.curve - seg.curve) <= 0.45 &&
+            Math.abs(farAnchor.p2.screenX - nextSeg.p1.screenX) <= 14.0 &&
+            Math.abs(farAnchor.p2.screenW - nextSeg.p1.screenW) <= 8.0
+          ) {
+            shouldDeferSlice = true;
+          }
         }
 
         if (shouldDeferSlice) {
           if (!legacy) {
+            if (isTunnelSeg && coalesceFarSeg === null) {
+              coalesceFarSeg = seg;
+            }
             coalesceTopY = effectiveTopY;
             coalesceEnv = seg.env;
             coalesceCount++;
@@ -438,18 +511,8 @@ export class RoadRenderer {
                   : nRatio < 0.75
                     ? 2
                     : 3;
-          const segArr = isNextSeg ? view.nextTrack!.segments : segments;
-          const segArrLen = segArr.length;
-          const prevEnv =
-            segArrLen > 0
-              ? (segArr[(seg.index - 1 + segArrLen) % segArrLen]?.env ?? 'standard')
-              : 'standard';
-          const nextEnv =
-            segArrLen > 0
-              ? (segArr[(seg.index + 1) % segArrLen]?.env ?? 'standard')
-              : 'standard';
           const tSeg0 = sampleSubsystems ? performance.now() : 0;
-          const isInCurrentTunnel = isCameraInTunnel && n <= cameraTunnelEndN;
+          const farP2 = coalesceCount > 0 && isTunnelSeg && coalesceFarSeg ? coalesceFarSeg.p2 : undefined;
           this.renderSegment(
             ctx,
             width,
@@ -471,6 +534,9 @@ export class RoadRenderer {
             coalesceCount > 0 ? effectiveTopY : undefined,
             coalesceCount > 0,
             fogBand,
+            roadVisible,
+            farP2?.screenX,
+            farP2?.screenW,
           );
           if (sampleSubsystems) {
             sampleSlicesMs += performance.now() - tSeg0;
@@ -478,11 +544,13 @@ export class RoadRenderer {
           coalesceTopY = Number.POSITIVE_INFINITY;
           coalesceEnv = null;
           coalesceCount = 0;
+          coalesceFarSeg = null;
         }
       } else {
         coalesceTopY = Number.POSITIVE_INFINITY;
         coalesceEnv = null;
         coalesceCount = 0;
+        coalesceFarSeg = null;
       }
 
       const ppu = (p1.scale * width) / 2;
@@ -490,7 +558,7 @@ export class RoadRenderer {
       const refPpu = scaledPpu * (640 / Math.max(1, width));
       if (refPpu < (legacy ? 0.001 : 0.004)) continue;
 
-      const sprites = view.skipProps ? EMPTY_SPRITES : seg.sprites;
+      const sprites = view.skipProps || isInCurrentTunnel ? EMPTY_SPRITES : seg.sprites;
       if (sprites.length === 0 && firstTruckIdx === -1) continue;
 
       // Skip segment sprites/traffic if occluded behind a hill crest
@@ -837,7 +905,7 @@ export class RoadRenderer {
 
     // Phase 3 Edge case (b): extrapolate wires for nearest visible tower behind camera
     const tWires0 = sampleSubsystems ? performance.now() : 0;
-    if (!view.skipPylonWires && !view.skipProps) {
+    if (!view.skipPylonWires && !view.skipProps && !isCameraInTunnel) {
       this.extrapolateNearestPylonWires(ctx, width, height, legacy);
     }
     if (sampleSubsystems) {
@@ -1137,6 +1205,9 @@ export class RoadRenderer {
     overrideTopY?: number,
     isCoalesced = false,
     fogBand = 0,
+    drawRoadFloor = true,
+    overrideFarX2?: number,
+    overrideFarW2?: number,
   ): void {
     const { p1, p2, stripe } = seg;
     const grassColor = stripe === 0 ? this.fogGrass0[fogBand]! : this.fogGrass1[fogBand]!;
@@ -1146,15 +1217,19 @@ export class RoadRenderer {
     let x1 = p1.screenX;
     let y1 = p1.screenY;
     let w1 = p1.screenW;
-    const x2 = p2.screenX;
+    const x2 = overrideFarX2 !== undefined ? overrideFarX2 : p2.screenX;
     const topScreenY = overrideTopY !== undefined ? overrideTopY : p2.screenY;
     const y2 = topScreenY - 1; // 1px overlap hides anti-aliasing seams between slices
-    const w2 = p2.screenW;
+    const w2 = overrideFarW2 !== undefined ? overrideFarW2 : p2.screenW;
+
+    const isTunnel = seg.env === 'tunnel';
 
     // Clip near edge to segClipY (screen bottom or hill crest) along the projected edge so
     // lane lines, rumble strips, and road edges stay straight instead of flaring into a funnel.
+    // Tunnel geometry receives unclipped p1 (with floor-only clipping inside renderTunnelSegment)
+    // so steering near edges and straddling crests never collapse or tear 3D tunnel walls.
     let clipT = 1;
-    if (y1 > segClipY) {
+    if (!isTunnel && y1 > segClipY) {
       const spanY = p1.screenY - p2.screenY;
       if (spanY > 0.0001) {
         clipT = clamp01((segClipY - p2.screenY) / spanY);
@@ -1171,7 +1246,6 @@ export class RoadRenderer {
 
     const isBridge = seg.env === 'bridge';
     const isViaduct = seg.env === 'viaduct';
-    const isTunnel = seg.env === 'tunnel';
 
     if (isTunnel) {
       this.renderTunnelSegment(
@@ -1196,6 +1270,9 @@ export class RoadRenderer {
         isCameraInTunnel,
         prevEnv !== 'tunnel',
         nextEnv !== 'tunnel',
+        segClipY,
+        drawRoadFloor,
+        isCoalesced,
       );
       return;
     }
@@ -1845,115 +1922,261 @@ export class RoadRenderer {
     isCameraInTunnel: boolean,
     isTunnelEntry: boolean,
     isTunnelExit: boolean,
+    segClipY = Number.POSITIVE_INFINITY,
+    drawRoadFloor = true,
+    isCoalesced = false,
   ): void {
     const stripe = seg.stripe;
-    const tunnelH1 = Math.max(4, w1 * 1.18);
-    const tunnelH2 = Math.max(3, w2 * 1.18);
-    const ceilY1 = y1 - tunnelH1;
-    const ceilY2 = y2 - tunnelH2;
-    const innerL1 = x1 - w1 - r1;
-    const innerR1 = x1 + w1 + r1;
-    const innerL2 = x2 - w2 - r2;
-    const innerR2 = x2 + w2 + r2;
+    // Beat-stable tunnel walls (anchored strictly to road width, independent of beatPulse)
+    const wallL1 = x1 - w1 * 1.24;
+    const wallR1 = x1 + w1 * 1.24;
+    const wallL2 = x2 - w2 * 1.24;
+    const wallR2 = x2 + w2 * 1.24;
 
-    const outerPad1 = Math.max(2, w1 * 0.25);
-    const outerPad2 = Math.max(1, w2 * 0.25);
-    const outerL1 = innerL1 - outerPad1;
-    const outerR1 = innerR1 + outerPad1;
-    const outerL2 = innerL2 - outerPad2;
-    const outerR2 = innerR2 + outerPad2;
-    const outerCeilY1 = ceilY1 - outerPad1 * 0.85;
-    const outerCeilY2 = ceilY2 - outerPad2 * 0.85;
+    const tunnelH1 = Math.max(4, w1 * 1.16);
+    const tunnelH2 = Math.max(3, w2 * 1.16);
+    const wallBot1 = Math.min(y1, segClipY);
+    const wallBot2 = Math.min(y2, segClipY);
+    const rawCeilY1 = y1 - tunnelH1;
+    const rawCeilY2 = y2 - tunnelH2;
+    const rawDadoY1 = y1 - tunnelH1 * 0.3;
+    const rawDadoY2 = y2 - tunnelH2 * 0.3;
+    const rawHaunchY1 = y1 - tunnelH1 * 0.76;
+    const rawHaunchY2 = y2 - tunnelH2 * 0.76;
+    const ceilY1 = Math.min(rawCeilY1, wallBot1);
+    const ceilY2 = Math.min(rawCeilY2, wallBot2);
+    const dadoY1 = Math.min(rawDadoY1, wallBot1);
+    const dadoY2 = Math.min(rawDadoY2, wallBot2);
+    const haunchY1 = Math.min(rawHaunchY1, wallBot1);
+    const haunchY2 = Math.min(rawHaunchY2, wallBot2);
+    const crownL1 = wallL1 + w1 * 0.24;
+    const crownR1 = wallR1 - w1 * 0.24;
+    const crownL2 = wallL2 + w2 * 0.24;
+    const crownR2 = wallR2 - w2 * 0.24;
 
-    // 1. Exterior surround / approach terrain (zero ctx.clip)
+    if (
+      isCameraInTunnel &&
+      !isTunnelExit &&
+      this.tunnelMaskEmitted &&
+      wallL2 + w2 * 0.06 <= 0 &&
+      wallR2 - w2 * 0.06 >= width &&
+      haunchY2 + w2 * 0.06 <= 0 &&
+      wallBot2 >= height &&
+      wallL1 + w1 * 0.06 <= 0 &&
+      wallR1 - w1 * 0.06 >= width &&
+      haunchY1 + w1 * 0.06 <= 0 &&
+      wallBot1 >= height
+    ) {
+      this.boreMinX = 0;
+      this.boreMaxX = width;
+      this.boreMinY = 0;
+      this.boreMaxY = height;
+      this.boreBoundsInit = true;
+      return;
+    }
+
+    const outerPad1 = Math.max(2, w1 * 0.26);
+    const outerPad2 = Math.max(1, w2 * 0.26);
+    const outerL1 = wallL1 - outerPad1;
+    const outerR1 = wallR1 + outerPad1;
+    const outerL2 = wallL2 - outerPad2;
+    const outerR2 = wallR2 + outerPad2;
+    const outerCeilY1 = Math.min(rawCeilY1 - outerPad1 * 0.85, wallBot1);
+    const outerCeilY2 = Math.min(rawCeilY2 - outerPad2 * 0.85, wallBot2);
+
+    // Clip near floor edge along p2 -> p1 to segClipY without distorting upper 3D wall/ceiling geometry
+    const topFloorY = y2 + 1;
+    const hasFloorClip = y1 > segClipY && topFloorY < segClipY && y1 - topFloorY > 0.0001;
+    let roadX1 = x1;
+    let roadW1 = w1;
+    let roadR1 = r1;
+    let roadY1 = Math.min(y1, segClipY);
+    let roadWallL1 = wallL1;
+    let roadWallR1 = wallR1;
+    if (hasFloorClip) {
+      const floorClipT = clamp01((segClipY - topFloorY) / (y1 - topFloorY));
+      roadX1 = x2 + (x1 - x2) * floorClipT;
+      roadW1 = w2 + (w1 - w2) * floorClipT;
+      roadR1 = r2 + (r1 - r2) * floorClipT;
+      roadY1 = segClipY;
+      roadWallL1 = roadX1 - roadW1 * 1.24;
+      roadWallR1 = roadX1 + roadW1 * 1.24;
+    }
+
+    // 1. Exterior surround / approach terrain + zero-leak curve/crest occlusion (zero ctx.clip)
     if (isCameraInTunnel) {
-      ctx.fillStyle = '#070510';
+      let darkFillSet = false;
       if (!this.tunnelMaskEmitted) {
+        ctx.fillStyle = '#070510';
+        darkFillSet = true;
         // Emit the full-viewport surround mask once per frame on the farthest visible slice of
-        // the current tunnel so outdoor sky/horizon stay visible strictly through the exit mouth.
+        // the current tunnel so outdoor sky/horizon stay visible strictly through the octagonal exit mouth.
         const topH = Math.max(0, Math.min(height, ceilY2));
         if (topH > 0) {
           ctx.fillRect(0, 0, width, topH);
         }
-        const botY = Math.max(topH, Math.min(height, y2));
+        const botY = Math.max(topH, Math.min(height, wallBot2));
         const spanY = botY - topH;
-        const leftW = Math.max(0, Math.min(width, innerL2));
+        const leftW = Math.max(0, Math.min(width, wallL2));
         if (leftW > 0 && spanY > 0) {
           ctx.fillRect(0, topH, leftW, spanY);
         }
-        const rightX = Math.max(0, Math.min(width, innerR2));
+        const rightX = Math.max(0, Math.min(width, wallR2));
         if (rightX < width && spanY > 0) {
           ctx.fillRect(rightX, topH, width - rightX, spanY);
         }
         if (botY < height) {
           ctx.fillRect(0, botY, width, height - botY);
         }
-        this.tunnelMaskEmitted = true;
-        this.tunnelMaskMinX = leftW;
-        this.tunnelMaskMaxX = rightX;
-        this.tunnelMaskMinY = topH;
-        this.tunnelMaskMaxY = botY;
-      } else {
-        // On closer slices, paint only delta slivers when bends/crests narrow the exit aperture
-        const clipL = Math.min(innerL1, innerL2);
-        if (clipL > this.tunnelMaskMinX) {
-          const fillW = Math.min(this.tunnelMaskMaxX, clipL) - this.tunnelMaskMinX;
-          if (fillW > 0 && this.tunnelMaskMaxY > this.tunnelMaskMinY) {
-            ctx.fillRect(
-              this.tunnelMaskMinX,
-              this.tunnelMaskMinY,
-              fillW,
-              this.tunnelMaskMaxY - this.tunnelMaskMinY,
-            );
-          }
-          this.tunnelMaskMinX = clipL;
+        // Chamfered corner spandrels framing the octagonal exit mouth
+        if (w2 >= 4) {
+          ctx.beginPath();
+          ctx.moveTo(wallL2, ceilY2);
+          ctx.lineTo(crownL2, ceilY2);
+          ctx.lineTo(wallL2, haunchY2);
+          ctx.closePath();
+          ctx.moveTo(crownR2, ceilY2);
+          ctx.lineTo(wallR2, ceilY2);
+          ctx.lineTo(wallR2, haunchY2);
+          ctx.closePath();
+          ctx.fill();
         }
-        const clipR = Math.max(innerR1, innerR2);
-        if (clipR < this.tunnelMaskMaxX) {
-          const startX = Math.max(this.tunnelMaskMinX, clipR);
-          const fillW = this.tunnelMaskMaxX - startX;
-          if (fillW > 0 && this.tunnelMaskMaxY > this.tunnelMaskMinY) {
+        this.tunnelMaskEmitted = true;
+      }
+
+      const exitRimPad =
+        isTunnelExit && w2 >= 6 && rawCeilY2 < wallBot2 ? Math.max(1, Math.round(w2 * 0.065)) : 0;
+      const occludeL = Math.max(0, Math.min(width, Math.min(wallL1, wallL2 - exitRimPad)));
+      const occludeR = Math.max(0, Math.min(width, Math.max(wallR1, wallR2 + exitRimPad)));
+      const occludeTop = Math.max(0, Math.min(height, Math.min(ceilY1, ceilY2 - exitRimPad)));
+      const occludeBot = Math.max(0, Math.min(height, Math.max(wallBot1, wallBot2)));
+
+      if (!this.boreBoundsInit) {
+        this.boreMinX = occludeL;
+        this.boreMaxX = occludeR;
+        this.boreMinY = occludeTop;
+        this.boreMaxY = occludeBot;
+        this.boreBoundsInit = true;
+      } else {
+        // Occlude farther curved/crest bore pixels that swing outside this nearer slice's rock walls
+        let tightened = false;
+        if (occludeL > this.boreMinX && this.boreMaxY > this.boreMinY) {
+          const fillW = Math.min(this.boreMaxX, occludeL) - this.boreMinX;
+          if (fillW > 0) {
+            if (!darkFillSet) {
+              ctx.fillStyle = '#070510';
+              darkFillSet = true;
+            }
+            ctx.fillRect(
+              this.boreMinX,
+              this.boreMinY,
+              fillW,
+              this.boreMaxY - this.boreMinY,
+            );
+            tightened = true;
+          }
+          this.boreMinX = Math.min(this.boreMaxX, occludeL);
+        }
+        if (occludeR < this.boreMaxX && this.boreMaxY > this.boreMinY) {
+          const startX = Math.max(this.boreMinX, occludeR);
+          const fillW = this.boreMaxX - startX;
+          if (fillW > 0) {
+            if (!darkFillSet) {
+              ctx.fillStyle = '#070510';
+              darkFillSet = true;
+            }
             ctx.fillRect(
               startX,
-              this.tunnelMaskMinY,
+              this.boreMinY,
               fillW,
-              this.tunnelMaskMaxY - this.tunnelMaskMinY,
+              this.boreMaxY - this.boreMinY,
             );
+            tightened = true;
           }
-          this.tunnelMaskMaxX = clipR;
+          this.boreMaxX = Math.max(this.boreMinX, occludeR);
         }
-        const clipTop = Math.min(ceilY1, ceilY2);
-        if (clipTop > this.tunnelMaskMinY) {
-          const fillH = Math.min(this.tunnelMaskMaxY, clipTop) - this.tunnelMaskMinY;
-          if (fillH > 0 && this.tunnelMaskMaxX > this.tunnelMaskMinX) {
+        if (occludeTop > this.boreMinY && this.boreMaxX > this.boreMinX) {
+          const fillH = Math.min(this.boreMaxY, occludeTop) - this.boreMinY;
+          if (fillH > 0) {
+            if (!darkFillSet) {
+              ctx.fillStyle = '#070510';
+              darkFillSet = true;
+            }
             ctx.fillRect(
-              this.tunnelMaskMinX,
-              this.tunnelMaskMinY,
-              this.tunnelMaskMaxX - this.tunnelMaskMinX,
+              this.boreMinX,
+              this.boreMinY,
+              this.boreMaxX - this.boreMinX,
               fillH,
             );
+            tightened = true;
           }
-          this.tunnelMaskMinY = clipTop;
+          this.boreMinY = Math.min(this.boreMaxY, occludeTop);
         }
+        if (occludeBot < this.boreMaxY && this.boreMaxX > this.boreMinX) {
+          const startY = Math.max(this.boreMinY, occludeBot);
+          const fillH = this.boreMaxY - startY;
+          if (fillH > 0) {
+            if (!darkFillSet) {
+              ctx.fillStyle = '#070510';
+              darkFillSet = true;
+            }
+            ctx.fillRect(
+              this.boreMinX,
+              startY,
+              this.boreMaxX - this.boreMinX,
+              fillH,
+            );
+            tightened = true;
+          }
+          this.boreMaxY = Math.max(this.boreMinY, occludeBot);
+        }
+        if (tightened && w1 >= 14) {
+          if (!darkFillSet) {
+            ctx.fillStyle = '#070510';
+          }
+          const spandrelTopY = Math.min(ceilY1, ceilY2);
+          ctx.beginPath();
+          ctx.moveTo(wallL2, spandrelTopY);
+          ctx.lineTo(crownL2, spandrelTopY);
+          ctx.lineTo(wallL2, haunchY2);
+          ctx.closePath();
+          ctx.moveTo(crownR2, spandrelTopY);
+          ctx.lineTo(wallR2, spandrelTopY);
+          ctx.lineTo(wallR2, haunchY2);
+          ctx.closePath();
+          ctx.fill();
+        }
+        if (occludeL < this.boreMinX) this.boreMinX = occludeL;
+        if (occludeR > this.boreMaxX) this.boreMaxX = occludeR;
+        if (occludeTop < this.boreMinY) this.boreMinY = occludeTop;
+        if (occludeBot > this.boreMaxY) this.boreMaxY = occludeBot;
       }
     } else {
-      // Approaching from outside: ground terrain below horizon + smooth concrete exterior shell outside bore
-      ctx.fillStyle = grassColor;
-      ctx.fillRect(0, y2, width, y1 - y2);
+      // Approaching from outside: ground terrain below horizon + gapless concrete exterior shell
+      if (drawRoadFloor && wallBot1 > wallBot2) {
+        ctx.fillStyle = grassColor;
+        ctx.fillRect(0, wallBot2, width, wallBot1 - wallBot2);
+      }
 
       ctx.fillStyle = stripe === 0 ? '#1b162e' : '#151126';
       ctx.beginPath();
-      // Left outer casing flank
-      ctx.moveTo(outerL1, y1);
+      // Left outer casing flank (reaches inner wall at p2 so curves never leak sky)
+      ctx.moveTo(outerL1, wallBot1);
       ctx.lineTo(outerL1, outerCeilY1);
       ctx.lineTo(outerL2, outerCeilY2);
-      ctx.lineTo(outerL2, y2);
+      ctx.lineTo(crownL2, ceilY2);
+      ctx.lineTo(wallL2, haunchY2);
+      ctx.lineTo(wallL2, wallBot2);
+      if (hasFloorClip) ctx.lineTo(roadWallL1, wallBot1);
       ctx.closePath();
       // Right outer casing flank
-      ctx.moveTo(outerR2, y2);
-      ctx.lineTo(outerR2, outerCeilY2);
+      ctx.moveTo(outerR1, wallBot1);
       ctx.lineTo(outerR1, outerCeilY1);
-      ctx.lineTo(outerR1, y1);
+      ctx.lineTo(outerR2, outerCeilY2);
+      ctx.lineTo(crownR2, ceilY2);
+      ctx.lineTo(wallR2, haunchY2);
+      ctx.lineTo(wallR2, wallBot2);
+      if (hasFloorClip) ctx.lineTo(roadWallR1, wallBot1);
       ctx.closePath();
       // Top outer roof slab
       ctx.moveTo(outerL1, outerCeilY1);
@@ -1964,133 +2187,432 @@ export class RoadRenderer {
       ctx.fill();
     }
 
-    // 2. Interior tunnel walls (tiled concrete bays, Left & Right batched into 1 path)
-    ctx.fillStyle = stripe === 0 ? '#1b172c' : '#130f20';
-    ctx.beginPath();
-    ctx.moveTo(innerL1, y1);
-    ctx.lineTo(innerL1, ceilY1);
-    ctx.lineTo(innerL2, ceilY2);
-    ctx.lineTo(innerL2, y2);
-    ctx.closePath();
-    ctx.moveTo(innerR1, y1);
-    ctx.lineTo(innerR1, ceilY1);
-    ctx.lineTo(innerR2, ceilY2);
-    ctx.lineTo(innerR2, y2);
-    ctx.closePath();
-    ctx.fill();
+    // 2. Interior octagonal vaulted surfaces (LOD-tiered for 60 FPS)
+    const isRibSeg = seg.index % 12 === 0;
+    if (w1 < 68) {
+      // Far LOD: 1 batched wall+haunch path + ceiling crown (slashes GPU path tessellations by ~75%)
+      ctx.fillStyle = '#181429';
+      ctx.beginPath();
+      ctx.moveTo(wallL1, wallBot1);
+      ctx.lineTo(wallL1, haunchY1);
+      ctx.lineTo(crownL1, ceilY1);
+      ctx.lineTo(crownL2, ceilY2);
+      ctx.lineTo(wallL2, haunchY2);
+      ctx.lineTo(wallL2, wallBot2);
+      if (hasFloorClip) ctx.lineTo(roadWallL1, wallBot1);
+      ctx.closePath();
+      ctx.moveTo(wallR1, wallBot1);
+      ctx.lineTo(wallR1, haunchY1);
+      ctx.lineTo(crownR1, ceilY1);
+      ctx.lineTo(crownR2, ceilY2);
+      ctx.lineTo(wallR2, haunchY2);
+      ctx.lineTo(wallR2, wallBot2);
+      if (hasFloorClip) ctx.lineTo(roadWallR1, wallBot1);
+      ctx.closePath();
+      ctx.fill();
 
-    // 3. Interior ceiling vault slab
-    ctx.fillStyle = stripe === 0 ? '#100c1e' : '#0b0816';
-    polygon(ctx, innerL1, ceilY1, innerR1, ceilY1, innerR2, ceilY2, innerL2, ceilY2);
+      ctx.fillStyle = '#0d0a1a';
+      polygon(ctx, crownL1, ceilY1, crownR1, ceilY1, crownR2, ceilY2, crownL2, ceilY2);
+    } else {
+      // Mid/Near LOD: subtle lower tiled dado + matte upper wall/haunch + recessed crown
+      ctx.fillStyle = isRibSeg ? '#1f1a33' : stripe === 0 ? '#231e38' : '#1e1a30';
+      ctx.beginPath();
+      ctx.moveTo(wallL1, wallBot1);
+      ctx.lineTo(wallL1, dadoY1);
+      ctx.lineTo(wallL2, dadoY2);
+      ctx.lineTo(wallL2, wallBot2);
+      if (hasFloorClip) ctx.lineTo(roadWallL1, wallBot1);
+      ctx.closePath();
+      ctx.moveTo(wallR1, wallBot1);
+      ctx.lineTo(wallR1, dadoY1);
+      ctx.lineTo(wallR2, dadoY2);
+      ctx.lineTo(wallR2, wallBot2);
+      if (hasFloorClip) ctx.lineTo(roadWallR1, wallBot1);
+      ctx.closePath();
+      ctx.fill();
 
-    // 4. Roadway surface inside bore (rumble curbs, dark tunnel tarmac, lanes)
-    ctx.fillStyle = rumbleColor;
-    drawRumblePair(ctx, x1, y1, x2, y2, w1, w2, r1, r2);
+      ctx.fillStyle = isRibSeg ? '#120e20' : stripe === 0 ? '#161226' : '#130f21';
+      ctx.beginPath();
+      ctx.moveTo(wallL1, dadoY1);
+      ctx.lineTo(wallL1, haunchY1);
+      ctx.lineTo(crownL1, ceilY1);
+      ctx.lineTo(crownL2, ceilY2);
+      ctx.lineTo(wallL2, haunchY2);
+      ctx.lineTo(wallL2, dadoY2);
+      ctx.closePath();
+      ctx.moveTo(wallR1, dadoY1);
+      ctx.lineTo(wallR1, haunchY1);
+      ctx.lineTo(crownR1, ceilY1);
+      ctx.lineTo(crownR2, ceilY2);
+      ctx.lineTo(wallR2, haunchY2);
+      ctx.lineTo(wallR2, dadoY2);
+      ctx.closePath();
+      ctx.fill();
 
-    ctx.fillStyle = roadColor;
-    polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      ctx.fillStyle = isRibSeg ? '#090713' : stripe === 0 ? '#0c0918' : '#090714';
+      polygon(ctx, crownL1, ceilY1, crownR1, ceilY1, crownR2, ceilY2, crownL2, ceilY2);
 
-    if (stripe === 0 && w1 >= 6) {
-      ctx.fillStyle = laneColor;
-      drawLanes(ctx, x1, y1, x2, y2, w1, w2);
+      // Safety dado handrail & flush wall-mounted cat's-eye reflectors (clear of rumble curbs and crests)
+      if (stripe === 0 && (rawDadoY1 < wallBot1 || rawDadoY2 < wallBot2)) {
+        const railH1 = Math.max(1, w1 * 0.024);
+        const railH2 = Math.max(1, w2 * 0.024);
+        const railTop1 = rawDadoY1 < wallBot1 ? dadoY1 - railH1 : wallBot1;
+        const railTop2 = rawDadoY2 < wallBot2 ? dadoY2 - railH2 : wallBot2;
+        ctx.fillStyle = '#383058';
+        ctx.beginPath();
+        ctx.moveTo(wallL1, dadoY1);
+        ctx.lineTo(wallL1, railTop1);
+        ctx.lineTo(wallL2, railTop2);
+        ctx.lineTo(wallL2, dadoY2);
+        ctx.closePath();
+        ctx.moveTo(wallR1, dadoY1);
+        ctx.lineTo(wallR1, railTop1);
+        ctx.lineTo(wallR2, railTop2);
+        ctx.lineTo(wallR2, dadoY2);
+        ctx.closePath();
+        ctx.fill();
+
+        const reflW = Math.max(2, Math.round(w1 * 0.032));
+        const reflH = Math.max(1, Math.round(w1 * 0.026));
+        if (rawDadoY1 < wallBot1 && rawDadoY2 < wallBot2 && wallBot1 - dadoY1 >= reflH) {
+          const reflY = Math.round((dadoY1 + wallBot1 + dadoY2 + wallBot2) * 0.25 - reflH * 0.5);
+          if (reflY + reflH <= segClipY) {
+            const midWallL = (wallL1 + wallL2) * 0.5;
+            const midWallR = (wallR1 + wallR2) * 0.5;
+            ctx.fillStyle = '#ffaa00';
+            ctx.fillRect(Math.round(midWallL + 1), reflY, reflW, reflH);
+            ctx.fillRect(Math.round(midWallR - reflW - 1), reflY, reflW, reflH);
+          }
+        }
+      }
     }
 
-    // 5. Structural concrete ribs & rhythmic beat-synced fluorescent ceiling light bars
-    if (seg.index % 6 === 0 && w1 >= 12) {
-      const ribW1 = Math.max(2, w1 * 0.045);
-      const ribW2 = Math.max(1, w2 * 0.045);
-      ctx.fillStyle = '#292242';
+    // 3. Flush wall-mounted curve chevron panels on outer tunnel walls (zero freestanding poles)
+    if (Math.abs(seg.curve) >= 2.2 && seg.index % 8 === 0 && w1 >= 30) {
+      const isRightTurn = seg.curve > 0;
+      const wNearX = isRightTurn ? wallL1 : wallR1;
+      const wFarX = isRightTurn ? wallL2 : wallR2;
+      const topNearY = Math.min(y1 - tunnelH1 * 0.68, wallBot1);
+      const botNearY = Math.min(y1 - tunnelH1 * 0.36, wallBot1);
+      const topFarY = Math.min(y2 - tunnelH2 * 0.68, wallBot2);
+      const botFarY = Math.min(y2 - tunnelH2 * 0.36, wallBot2);
+
+      const qx0 = wNearX + (wFarX - wNearX) * 0.15;
+      const qx1 = wNearX + (wFarX - wNearX) * 0.85;
+      const qt0 = topNearY + (topFarY - topNearY) * 0.15;
+      const qb0 = botNearY + (botFarY - botNearY) * 0.15;
+      const qt1 = topNearY + (topFarY - topNearY) * 0.85;
+      const qb1 = botNearY + (botFarY - botNearY) * 0.85;
+
+      if (Math.abs(qx1 - qx0) >= 4 && qb0 - qt0 >= 7 && qb1 - qt1 >= 2) {
+        ctx.fillStyle = '#0b0816';
+        polygon(ctx, qx0, qt0, qx1, qt1, qx1, qb1, qx0, qb0);
+
+        const dxQ = qx1 - qx0;
+        const dtQ = qt1 - qt0;
+        const dbQ = qb1 - qb0;
+        const xA = qx0 + dxQ * 0.22;
+        const xB = qx0 + dxQ * 0.48;
+        const xC = qx0 + dxQ * 0.82;
+        const xD = qx0 + dxQ * 0.56;
+        const tA = qt0 + dtQ * 0.22;
+        const bA = qb0 + dbQ * 0.22;
+        const tB = qt0 + dtQ * 0.48;
+        const bB = qb0 + dbQ * 0.48;
+        const tC = qt0 + dtQ * 0.82;
+        const bC = qb0 + dbQ * 0.82;
+        const tD = qt0 + dtQ * 0.56;
+        const bD = qb0 + dbQ * 0.56;
+
+        ctx.fillStyle = '#00f5d4';
+        ctx.beginPath();
+        ctx.moveTo(xA, tA + (bA - tA) * 0.18);
+        ctx.lineTo(xB, tB + (bB - tB) * 0.18);
+        ctx.lineTo(xC, (tC + bC) * 0.5);
+        ctx.lineTo(xB, tB + (bB - tB) * 0.82);
+        ctx.lineTo(xA, tA + (bA - tA) * 0.82);
+        ctx.lineTo(xD, (tD + bD) * 0.5);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // 4. Mitered 3D perspective concrete arch ribs (flush with chamfered bore, zero overlap on curbs)
+    if (isRibSeg && w1 >= 32) {
+      const rib = Math.max(2, w1 * 0.055);
+      const inWallL1 = wallL1 + rib;
+      const inWallR1 = wallR1 - rib;
+      const inCeilY1 = Math.min(rawCeilY1 + rib * 0.85, wallBot1);
+      const inHaunchY1 = Math.min(rawHaunchY1 + rib * 0.35, wallBot1);
+      const inCrownL1 = crownL1 + rib * 0.45;
+      const inCrownR1 = crownR1 - rib * 0.45;
+
+      ctx.fillStyle = '#2e274b';
       ctx.beginPath();
-      ctx.moveTo(innerL1, y1);
-      ctx.lineTo(innerL1, ceilY1);
-      ctx.lineTo(innerL1 + ribW1, ceilY1);
-      ctx.lineTo(innerL1 + ribW1, y1);
-      ctx.closePath();
-      ctx.moveTo(innerR1 - ribW1, y1);
-      ctx.lineTo(innerR1 - ribW1, ceilY1);
-      ctx.lineTo(innerR1, ceilY1);
-      ctx.lineTo(innerR1, y1);
-      ctx.closePath();
-      ctx.moveTo(innerL1, ceilY1);
-      ctx.lineTo(innerR1, ceilY1);
-      ctx.lineTo(innerR2, ceilY2 + ribW2);
-      ctx.lineTo(innerL2, ceilY2 + ribW2);
+      ctx.moveTo(wallL1, wallBot1);
+      ctx.lineTo(wallL1, haunchY1);
+      ctx.lineTo(crownL1, ceilY1);
+      ctx.lineTo(crownR1, ceilY1);
+      ctx.lineTo(wallR1, haunchY1);
+      ctx.lineTo(wallR1, wallBot1);
+      ctx.lineTo(inWallR1, wallBot1);
+      ctx.lineTo(inWallR1, inHaunchY1);
+      ctx.lineTo(inCrownR1, inCeilY1);
+      ctx.lineTo(inCrownL1, inCeilY1);
+      ctx.lineTo(inWallL1, inHaunchY1);
+      ctx.lineTo(inWallL1, wallBot1);
       ctx.closePath();
       ctx.fill();
     }
 
-    const hasCeilingLight = seg.tunnelLight !== undefined ? seg.tunnelLight : seg.index % 16 === 0;
-    if (hasCeilingLight && w1 >= 6) {
-      const glowW = Math.max(3, (w1 + w2) * (0.46 + beatPulse * 0.08));
-      const barH = Math.max(1, Math.min(4, Math.abs(ceilY2 - ceilY1) * 0.65));
-      const midCeilX = (x1 + x2) * 0.5;
-      const midCeilY = Math.min(ceilY1, ceilY2) + Math.abs(ceilY2 - ceilY1) * 0.18;
+    // 5. Roadway surface & concrete shoulder gutter inside bore (floor-clipped cleanly at segClipY)
+    if (drawRoadFloor && roadY1 > y2) {
+      const tunR1 = Math.min(roadR1, roadW1 * 0.21);
+      const tunR2 = Math.min(r2, w2 * 0.21);
+      const sliceH = roadY1 - y2;
+      const rawDy = seg.p1.screenY - seg.p2.screenY;
+      const useFastTunnelRoad =
+        roadW1 < 68 &&
+        Math.abs(roadW1 - w2) <= 6.5 &&
+        Math.abs(roadX1 - x2) <= 4.5 &&
+        (isCoalesced || rawDy <= 2.4);
 
-      ctx.fillStyle = palette.horizonGlow ?? '#fff3cc';
-      ctx.fillRect(Math.round(midCeilX - glowW * 0.5), Math.round(midCeilY), Math.round(glowW), Math.round(barH));
+      if (useFastTunnelRoad) {
+        const mx = (roadX1 + x2) * 0.5;
+        const mw = (roadW1 + w2) * 0.5;
+        const mr = (tunR1 + tunR2) * 0.5;
+        const roadLeft = Math.round(mx - mw);
+        const roadRight = Math.round(mx + mw);
+        const roadSpan = Math.max(1, roadRight - roadLeft);
+        const curbW = Math.max(1, Math.round(mr));
 
-      if (w1 >= 22) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(
-          Math.round(midCeilX - glowW * 0.34),
-          Math.round(midCeilY),
-          Math.max(2, Math.round(glowW * 0.68)),
-          Math.max(1, Math.round(barH * 0.6)),
+        ctx.fillStyle = isCoalesced ? this.cachedHorizonCurbColor : rumbleColor;
+        ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
+        ctx.fillRect(roadRight, y2, curbW, sliceH);
+
+        ctx.fillStyle = isCoalesced ? this.cachedHorizonRoadColor : roadColor;
+        ctx.fillRect(roadLeft, y2, roadSpan, sliceH);
+
+        if (!isCoalesced && stripe === 0 && roadW1 >= 24) {
+          ctx.fillStyle = laneColor;
+          const lw = Math.max(1, mw / Math.max(32, 8 * LANES));
+          const laneStep = roadSpan / LANES;
+          let lx = roadLeft + laneStep;
+          for (let lane = 1; lane < LANES; lane++) {
+            ctx.fillRect(lx - lw * 0.5, y2, lw, sliceH);
+            lx += laneStep;
+          }
+        }
+      } else {
+        if (roadW1 >= 68) {
+          const gutterL1 = roadX1 - roadW1 - tunR1;
+          const gutterR1 = roadX1 + roadW1 + tunR1;
+          const gutterL2 = x2 - w2 - tunR2;
+          const gutterR2 = x2 + w2 + tunR2;
+          if (gutterL1 > roadWallL1 + 0.5 || roadWallR1 > gutterR1 + 0.5) {
+            ctx.fillStyle = '#1b162e';
+            ctx.beginPath();
+            ctx.moveTo(roadWallL1, roadY1);
+            ctx.lineTo(gutterL1, roadY1);
+            ctx.lineTo(gutterL2, y2);
+            ctx.lineTo(wallL2, y2);
+            ctx.closePath();
+            ctx.moveTo(gutterR1, roadY1);
+            ctx.lineTo(roadWallR1, roadY1);
+            ctx.lineTo(wallR2, y2);
+            ctx.lineTo(gutterR2, y2);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+
+        ctx.fillStyle = rumbleColor;
+        drawRumblePair(ctx, roadX1, roadY1, x2, y2, roadW1, w2, tunR1, tunR2);
+
+        ctx.fillStyle = roadColor;
+        polygon(
+          ctx,
+          roadX1 - roadW1,
+          roadY1,
+          roadX1 + roadW1,
+          roadY1,
+          x2 + w2,
+          y2,
+          x2 - w2,
+          y2,
         );
+
+        if (stripe === 0 && roadW1 >= 24) {
+          ctx.fillStyle = laneColor;
+          drawLanes(ctx, roadX1, roadY1, x2, y2, roadW1, w2);
+        }
       }
     }
 
-    // Wall-base amber reflector dashes along shoulders
-    if (w1 >= 18 && stripe === 0) {
-      const reflW = Math.max(2, Math.round(w1 * 0.04));
-      const reflH = Math.max(1, Math.round(w1 * 0.03));
-      const reflY = Math.round((y1 + y2) * 0.5 - reflH * 1.4);
-      ctx.fillStyle = '#ffaa00';
-      ctx.fillRect(Math.round(innerL1 + 1), reflY, reflW, reflH);
-      ctx.fillRect(Math.round(innerR1 - reflW - 1), reflY, reflW, reflH);
+    // 6. Perspective ceiling light fixtures along crown
+    const hasCeilingLight = seg.tunnelLight !== undefined ? seg.tunnelLight : seg.index % 16 === 0;
+    if (hasCeilingLight && w1 >= 6 && (rawCeilY1 < wallBot1 || rawCeilY2 < wallBot2)) {
+      const lightScale = 0.32 + beatPulse * 0.04;
+      if (w1 < 18) {
+        const glowW = Math.max(3, (w1 + w2) * lightScale);
+        const barH = Math.max(1, Math.min(3, Math.abs(ceilY2 - ceilY1) * 0.55));
+        const midCeilX = (x1 + x2) * 0.5;
+        const midCeilY = Math.min(ceilY1, ceilY2) + Math.abs(ceilY2 - ceilY1) * 0.2;
+        if (midCeilY + barH <= segClipY) {
+          ctx.fillStyle = palette.horizonGlow ?? '#fff3cc';
+          ctx.fillRect(
+            Math.round(midCeilX - glowW * 0.5),
+            Math.round(midCeilY),
+            Math.round(glowW),
+            Math.round(barH),
+          );
+        }
+      } else {
+        const halfW1 = w1 * lightScale;
+        const halfW2 = w2 * lightScale;
+        const ceilSpanY = ceilY2 - ceilY1;
+        const absCeilSpan = Math.abs(ceilSpanY);
+        const t0 = 0.22;
+        const t1 =
+          absCeilSpan > 1.5
+            ? Math.min(0.68, t0 + Math.max(1.5, Math.min(6, absCeilSpan * 0.45)) / absCeilSpan)
+            : 0.68;
+        const cyA = Math.min(wallBot1, ceilY1 + ceilSpanY * t0);
+        const cyB = Math.min(
+          wallBot2,
+          absCeilSpan > 1.5
+            ? ceilY1 + ceilSpanY * t1
+            : cyA + (ceilSpanY >= 0 ? 1 : -1) * Math.max(1.5, Math.min(3, w1 * 0.02)),
+        );
+        const cxA = x1 + (x2 - x1) * t0;
+        const cxB = x1 + (x2 - x1) * t1;
+        const hwA = halfW1 + (halfW2 - halfW1) * t0;
+        const hwB = halfW1 + (halfW2 - halfW1) * t1;
+
+        if (cyA <= segClipY && cyB <= segClipY) {
+          ctx.fillStyle = palette.horizonGlow ?? '#fff3cc';
+          polygon(ctx, cxA - hwA, cyA, cxA + hwA, cyA, cxB + hwB, cyB, cxB - hwB, cyB);
+
+          if (w1 >= 20) {
+            const tMid = (t0 + t1) * 0.5;
+            const tHalf = (t1 - t0) * 0.34;
+            const tCoreA = tMid - tHalf;
+            const tCoreB = tMid + tHalf;
+            const coreA = (halfW1 + (halfW2 - halfW1) * tCoreA) * 0.68;
+            const coreB = (halfW1 + (halfW2 - halfW1) * tCoreB) * 0.68;
+            const cyCoreA = Math.min(
+              wallBot1,
+              absCeilSpan > 1.5 ? ceilY1 + ceilSpanY * tCoreA : cyA + (cyB - cyA) * 0.16,
+            );
+            const cyCoreB = Math.min(
+              wallBot2,
+              absCeilSpan > 1.5 ? ceilY1 + ceilSpanY * tCoreB : cyA + (cyB - cyA) * 0.84,
+            );
+            const cxCoreA = x1 + (x2 - x1) * tCoreA;
+            const cxCoreB = x1 + (x2 - x1) * tCoreB;
+            ctx.fillStyle = '#ffffff';
+            polygon(
+              ctx,
+              cxCoreA - coreA,
+              cyCoreA,
+              cxCoreA + coreA,
+              cyCoreA,
+              cxCoreB + coreB,
+              cyCoreB,
+              cxCoreB - coreB,
+              cyCoreB,
+            );
+          }
+        }
+      }
     }
 
-    // 6. Monumental Tunnel Entrance & Exit Portals
-    if (isTunnelEntry && !isCameraInTunnel && w1 >= 8) {
-      const portalTop = Math.round(outerCeilY1);
-      const portalBot = Math.round(y1);
-      const portalH = Math.max(2, portalBot - portalTop);
-      const leftPillarW = Math.max(2, Math.round(innerL1 - outerL1));
-      const rightPillarW = Math.max(2, Math.round(outerR1 - innerR1));
-      const lintelH = Math.max(2, Math.round(ceilY1 - outerCeilY1));
+    // 7. Monumental Entrance Portal & Chamfered Exit Rim
+    if (
+      isTunnelEntry &&
+      !isCameraInTunnel &&
+      w1 >= 8 &&
+      rawCeilY1 - outerPad1 * 0.85 < wallBot1
+    ) {
+      const portalTop = outerCeilY1;
+      const portalBot = wallBot1;
+      const lintelH = Math.max(2, ceilY1 - outerCeilY1);
 
-      // Concrete portal pillars & lintel beam around open bore
+      // Sloped concrete wing-walls grounding entrance into roadside terrain
+      if (w1 >= 14 && rawDadoY1 < wallBot1) {
+        const wingPad = outerPad1 * 0.9;
+        ctx.fillStyle = '#1f1a36';
+        ctx.beginPath();
+        ctx.moveTo(outerL1 - wingPad, portalBot);
+        ctx.lineTo(outerL1, dadoY1);
+        ctx.lineTo(outerL1, portalBot);
+        ctx.closePath();
+        ctx.moveTo(outerR1 + wingPad, portalBot);
+        ctx.lineTo(outerR1, dadoY1);
+        ctx.lineTo(outerR1, portalBot);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Chamfered concrete portal fascia around octagonal bore
       ctx.fillStyle = '#2d2645';
-      ctx.fillRect(Math.round(outerL1), portalTop, leftPillarW, portalH);
-      ctx.fillRect(Math.round(innerR1), portalTop, rightPillarW, portalH);
-      ctx.fillRect(Math.round(outerL1), portalTop, Math.round(outerR1 - outerL1), lintelH);
+      ctx.beginPath();
+      ctx.moveTo(outerL1, portalBot);
+      ctx.lineTo(outerL1, portalTop);
+      ctx.lineTo(outerR1, portalTop);
+      ctx.lineTo(outerR1, portalBot);
+      ctx.lineTo(wallR1, portalBot);
+      ctx.lineTo(wallR1, haunchY1);
+      ctx.lineTo(crownR1, ceilY1);
+      ctx.lineTo(crownL1, ceilY1);
+      ctx.lineTo(wallL1, haunchY1);
+      ctx.lineTo(wallL1, portalBot);
+      ctx.closePath();
+      ctx.fill();
 
       // Hazard warning stripe & illuminated green lane status beacons above bore
-      if (w1 >= 18) {
+      if (w1 >= 18 && rawCeilY1 < wallBot1) {
+        const stripeH = Math.max(1, Math.round(lintelH * 0.16));
         const stripeY = Math.round(ceilY1 - Math.max(2, lintelH * 0.25));
-        ctx.fillStyle = '#ffd166';
-        ctx.fillRect(Math.round(innerL1), stripeY, Math.round(innerR1 - innerL1), Math.max(1, Math.round(lintelH * 0.16)));
+        if (stripeY + stripeH <= wallBot1) {
+          ctx.fillStyle = '#ffd166';
+          ctx.fillRect(
+            Math.round(crownL1),
+            stripeY,
+            Math.round(crownR1 - crownL1),
+            stripeH,
+          );
+        }
 
         const beaconSize = Math.max(2, Math.round(lintelH * 0.26));
         const beaconY = Math.round(portalTop + lintelH * 0.32);
-        ctx.fillStyle = '#00f5d4';
-        ctx.fillRect(Math.round(x1 - w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
-        ctx.fillRect(Math.round(x1 + w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+        if (beaconY + beaconSize <= wallBot1) {
+          ctx.fillStyle = '#00f5d4';
+          ctx.fillRect(Math.round(x1 - w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+          ctx.fillRect(Math.round(x1 + w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+        }
       }
     }
 
-    if (isTunnelExit && w2 >= 6) {
-      // Bright backlit portal arch rim framing the sky opening at the end of the tunnel
-      const rimThick = Math.max(1, Math.round(w2 * 0.07));
+    if (isTunnelExit && w2 >= 6 && rawCeilY2 < wallBot2) {
+      // Bright backlit chamfered portal arch rim framing the sky opening at the end of the tunnel
+      const rimThick = Math.max(1, Math.round(w2 * 0.065));
       ctx.fillStyle = palette.horizonGlow ?? palette.skyHorizon;
-      ctx.fillRect(
-        Math.round(innerL2 - rimThick),
-        Math.round(ceilY2 - rimThick),
-        Math.round(innerR2 - innerL2 + rimThick * 2),
-        rimThick,
-      );
-      ctx.fillRect(Math.round(innerL2 - rimThick), Math.round(ceilY2), rimThick, Math.max(2, Math.round(y2 - ceilY2)));
-      ctx.fillRect(Math.round(innerR2), Math.round(ceilY2), rimThick, Math.max(2, Math.round(y2 - ceilY2)));
+      ctx.beginPath();
+      ctx.moveTo(wallL2 - rimThick, wallBot2);
+      ctx.lineTo(wallL2 - rimThick, haunchY2 - rimThick * 0.4);
+      ctx.lineTo(crownL2 - rimThick * 0.5, ceilY2 - rimThick);
+      ctx.lineTo(crownR2 + rimThick * 0.5, ceilY2 - rimThick);
+      ctx.lineTo(wallR2 + rimThick, haunchY2 - rimThick * 0.4);
+      ctx.lineTo(wallR2 + rimThick, wallBot2);
+      ctx.lineTo(wallR2, wallBot2);
+      ctx.lineTo(wallR2, haunchY2);
+      ctx.lineTo(crownR2, ceilY2);
+      ctx.lineTo(crownL2, ceilY2);
+      ctx.lineTo(wallL2, haunchY2);
+      ctx.lineTo(wallL2, wallBot2);
+      ctx.closePath();
+      ctx.fill();
     }
   }
 }

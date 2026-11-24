@@ -122,6 +122,7 @@ interface SpectralFeatures {
   frameLowEnergy: Float32Array;
   frameMidHighEnergy: Float32Array;
   frameHighEnergy: Float32Array;
+  frameAirEnergy: Float32Array;
   frameCentroid: Float32Array;
   fps: number;
   numFrames: number;
@@ -141,12 +142,14 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
   const frameLowEnergy = new Float32Array(numFrames);
   const frameMidHighEnergy = new Float32Array(numFrames);
   const frameHighEnergy = new Float32Array(numFrames);
+  const frameAirEnergy = new Float32Array(numFrames);
   const frameCentroid = new Float32Array(numFrames);
 
   const halfN = FFT_SIZE >> 1;
   const binHz = sampleRate / FFT_SIZE;
   const lowMaxBin = Math.max(2, Math.min(halfN - 1, Math.ceil(150 / binHz)));
   const highMinBin = Math.max(lowMaxBin + 1, Math.min(halfN - 1, Math.ceil(2000 / binHz)));
+  const airMinBin = Math.max(highMinBin + 1, Math.min(halfN - 1, Math.ceil(3500 / binHz)));
   const fluxMaxBin = Math.min(halfN - 1, Math.floor(8000 / binHz));
 
   const re = new Float32Array(FFT_SIZE);
@@ -170,6 +173,7 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
     let lowE = 0;
     let midHighE = 0;
     let highE = 0;
+    let airE = 0;
     let weightedBinSum = 0;
     let magSum = 0;
 
@@ -191,6 +195,9 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
         midHighE += m * m;
         if (k >= highMinBin) {
           highE += m * m;
+          if (k >= airMinBin) {
+            airE += m * m;
+          }
         }
       }
       weightedBinSum += k * m;
@@ -205,6 +212,7 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
     frameLowEnergy[frameIdx] = Math.sqrt(lowE / lowMaxBin);
     frameMidHighEnergy[frameIdx] = Math.sqrt(midHighE / Math.max(1, fluxMaxBin - lowMaxBin));
     frameHighEnergy[frameIdx] = Math.sqrt(highE / Math.max(1, fluxMaxBin - highMinBin + 1));
+    frameAirEnergy[frameIdx] = Math.sqrt(airE / Math.max(1, fluxMaxBin - airMinBin + 1));
     frameCentroid[frameIdx] = magSum > 1e-6 ? (weightedBinSum / magSum) * binHz : 0;
   };
 
@@ -284,6 +292,7 @@ function extractSpectralFeatures(pcm: Float32Array, sampleRate: number): Spectra
     frameLowEnergy,
     frameMidHighEnergy,
     frameHighEnergy,
+    frameAirEnergy,
     frameCentroid,
     fps,
     numFrames,
@@ -861,6 +870,7 @@ function computeBarEnergyAndSections(
     frameRms,
     frameLowEnergy,
     frameHighEnergy,
+    frameAirEnergy,
     rhythmEnv,
     frameCentroid,
     fps,
@@ -872,6 +882,7 @@ function computeBarEnergyAndSections(
   const rawRms = new Float32Array(totalBars);
   const rawLow = new Float32Array(totalBars);
   const rawHigh = new Float32Array(totalBars);
+  const rawAir = new Float32Array(totalBars);
   const rawFlux = new Float32Array(totalBars);
   const rawCentroid = new Float32Array(totalBars);
 
@@ -884,6 +895,7 @@ function computeBarEnergyAndSections(
     let sRms = 0;
     let sLow = 0;
     let sHigh = 0;
+    let sAir = 0;
     let sFlux = 0;
     let sCent = 0;
     let cnt = 0;
@@ -891,6 +903,7 @@ function computeBarEnergyAndSections(
       sRms += frameRms[f]!;
       sLow += frameLowEnergy[f]!;
       sHigh += frameHighEnergy[f]!;
+      sAir += frameAirEnergy[f]!;
       sFlux += rhythmEnv[f]!;
       sCent += frameCentroid[f]!;
       cnt++;
@@ -899,6 +912,7 @@ function computeBarEnergyAndSections(
       rawRms[b] = sRms / cnt;
       rawLow[b] = sLow / cnt;
       rawHigh[b] = sHigh / cnt;
+      rawAir[b] = sAir / cnt;
       rawFlux[b] = sFlux / cnt;
       rawCentroid[b] = sCent / cnt;
     }
@@ -944,16 +958,28 @@ function computeBarEnergyAndSections(
   }
 
   // Preserve true spectral brightness ratio relative to track p95 without min-subtraction,
-  // preventing benign slight dips on uniformly bright tracks from stretching down to 0.
+  // while detecting both low-pass muffled passages and band-pass/lo-fi breakdowns lacking >3.5kHz air.
   const sortedCent = new Float32Array(rawCentroid).sort();
   const sortedHigh = new Float32Array(rawHigh).sort();
+  const sortedAir = new Float32Array(rawAir).sort();
+  const sortedLow = new Float32Array(rawLow).sort();
   const p95Cent = percentile(sortedCent, 0.95);
   const p95High = percentile(sortedHigh, 0.95);
+  const p95Air = percentile(sortedAir, 0.95);
+  const p95Low = percentile(sortedLow, 0.95);
   const barBrightness: number[] = new Array<number>(totalBars);
   for (let b = 0; b < totalBars; b++) {
     const centRatio = Math.max(0, Math.min(1, rawCentroid[b]! / Math.max(250, p95Cent)));
     const highRatio = Math.max(0, Math.min(1, rawHigh[b]! / Math.max(1e-4, p95High)));
-    const bright = Math.max(0, Math.min(1, 0.7 * centRatio + 0.3 * highRatio));
+    const airRatio = Math.max(0, Math.min(1, rawAir[b]! / Math.max(1e-4, p95Air)));
+    const lowRatio = Math.max(0, Math.min(1, rawLow[b]! / Math.max(1e-4, p95Low)));
+    const lpfBright = 0.65 * centRatio + 0.35 * highRatio;
+    const bpfBright = p95Air >= 1e-4 ? 0.35 * highRatio + 0.65 * airRatio : highRatio;
+    const bpfBlend = Math.max(0, Math.min(1, (0.36 - lowRatio) / 0.16));
+    const bright = Math.max(
+      0,
+      Math.min(1, lpfBright + (Math.min(lpfBright, bpfBright) - lpfBright) * bpfBlend),
+    );
     barBrightness[b] = Math.round(bright * 1000) / 1000;
   }
 

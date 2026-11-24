@@ -26,6 +26,7 @@ export class SongRoadSyncController {
   readonly crossedDropBars = new Set<number>();
   horizonStitchCooldown = 0;
   private rollingStart = false;
+  private smoothedScale = 1.0;
 
   private readonly anchorScratch = { distRemaining: 0, beatsRemaining: 0, isDropAnchor: false };
 
@@ -36,6 +37,7 @@ export class SongRoadSyncController {
   ): void {
     this.crossedDropBars.clear();
     this.rollingStart = rollingStart;
+    this.smoothedScale = 1.0;
     if (resetCooldown) {
       this.horizonStitchCooldown = minCooldownSec;
     } else if (minCooldownSec > 0) {
@@ -62,8 +64,10 @@ export class SongRoadSyncController {
     audioBeatIndex: number,
     bpm: number,
     sectionRole: SectionRole,
+    dt = 1 / 120,
   ): number {
     if (!isSongTrack(track) || hasCustomTrack || carSpeedRatio < 0.05) {
+      this.smoothedScale = 1.0;
       return carSpeed;
     }
 
@@ -83,6 +87,8 @@ export class SongRoadSyncController {
     for (let i = 0; i < track.dropMarkers.length; i++) {
       const dm = track.dropMarkers[i]!;
       if (this.crossedDropBars.has(dm.barIndex)) continue;
+      // Avoid braking a rolling-start car right after a stage fork for ultra-early 1-2 bar pickups
+      if (this.rollingStart && dm.barIndex < 3) continue;
       if (dm.worldZ > position) {
         const dropBeat = dm.barIndex * 4;
         const beatsRemaining = dropBeat - audioBeatIndex;
@@ -120,6 +126,8 @@ export class SongRoadSyncController {
     const rawScale = paceInv + lagBeats * tuning.syncElasticGain;
     const continuousScale = Math.max(baseMinScale, Math.min(baseMaxScale, rawScale));
 
+    let targetScale = continuousScale;
+
     if (hasNextAnchor) {
       const safeBpm = bpm > 0 ? bpm : 120;
       const timeRemainingSec = this.anchorScratch.beatsRemaining * (60 / safeBpm);
@@ -128,27 +136,30 @@ export class SongRoadSyncController {
         const ratio = targetSpeed / Math.max(1, carSpeed);
         let minScale = baseMinScale;
         let maxScale = baseMaxScale;
-        // Expand drop-crest authority inside the final 16-beat approach so even 95%+ Overdrive cars
-        // crest cleanly on the drop downbeat (`MP-06`).
+        // Gently expand drop-crest authority inside the final 16-beat approach without ever
+        // braking the world speed below 76% of the speedometer.
         if (this.anchorScratch.isDropAnchor && this.anchorScratch.beatsRemaining <= 16) {
           const lockProximity = Math.max(
             0,
             Math.min(1, (16 - this.anchorScratch.beatsRemaining) / 10),
           );
-          minScale = baseMinScale * (1 - lockProximity) + 0.42 * lockProximity;
-          maxScale = baseMaxScale * (1 - lockProximity) + 1.45 * lockProximity;
+          minScale = baseMinScale * (1 - lockProximity) + 0.76 * lockProximity;
+          maxScale = baseMaxScale * (1 - lockProximity) + 1.32 * lockProximity;
         }
         const anchorScale = Math.max(minScale, Math.min(maxScale, ratio));
         if (this.anchorScratch.beatsRemaining > 28) {
           const blend = Math.max(0, Math.min(1, (32 - this.anchorScratch.beatsRemaining) / 4));
-          return carSpeed * (continuousScale * (1 - blend) + anchorScale * blend);
+          targetScale = continuousScale * (1 - blend) + anchorScale * blend;
+        } else {
+          targetScale = anchorScale;
         }
-        return carSpeed * anchorScale;
       }
     }
 
-    // 2. Continuous alignment between anchors
-    return carSpeed * continuousScale;
+    // 2. Smooth scale transitions so anchor engagement/release never causes a slingshot jump
+    const blendRate = 1 - Math.exp(-3.5 * Math.max(0, dt));
+    this.smoothedScale += (targetScale - this.smoothedScale) * blendRate;
+    return carSpeed * this.smoothedScale;
   }
 
   /**

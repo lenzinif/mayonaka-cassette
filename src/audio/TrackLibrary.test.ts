@@ -147,7 +147,7 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
     }
   });
 
-  it('M1: IndexedDB v4 upgrade preserves source="manual" BeatMaps while purging legacy source="analysis" entries lacking barBrightness', async () => {
+  it('M1: IndexedDB v5 upgrade preserves source="manual" BeatMaps while purging cached source="analysis" entries for barBrightness reanalysis', async () => {
     const manualMap: BeatMap = {
       ...DEFAULT_SYNTH_BEATMAP,
       contentHash: 'sha256:user-manual-bpm',
@@ -162,16 +162,23 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
     };
     delete legacyAnalysisMap.barBrightness;
 
-    const freshAnalysisMap: BeatMap = {
+    const v4AnalysisMap: BeatMap = {
       ...DEFAULT_SYNTH_BEATMAP,
-      contentHash: 'sha256:fresh-analysis-with-bright',
+      contentHash: 'sha256:v4-analysis-with-bright',
       source: 'analysis',
+    };
+
+    const bundledMap: BeatMap = {
+      ...DEFAULT_SYNTH_BEATMAP,
+      contentHash: 'sha256:bundled-entry',
+      source: 'bundled',
     };
 
     const records = new Map<string, BeatMap>([
       [manualMap.contentHash, manualMap],
       [legacyAnalysisMap.contentHash, legacyAnalysisMap],
-      [freshAnalysisMap.contentHash, freshAnalysisMap],
+      [v4AnalysisMap.contentHash, v4AnalysisMap],
+      [bundledMap.contentHash, bundledMap],
     ]);
 
     const mockStore = {
@@ -206,10 +213,15 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
 
     const g = globalThis as unknown as { indexedDB?: unknown };
     const prevIdb = g.indexedDB;
+    let upgradeFromVersion = 4;
+    let triggerBlocked = false;
     g.indexedDB = {
       open: vi.fn(() => {
         const fakeDb = {
-          objectStoreNames: { contains: () => true },
+          objectStoreNames: { contains: () => upgradeFromVersion > 0 },
+          createObjectStore: vi.fn(),
+          close: vi.fn(),
+          onversionchange: null as null | (() => void),
         };
         const req = {
           result: fakeDb,
@@ -217,9 +229,14 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
           onupgradeneeded: null as null | ((e: { oldVersion: number }) => void),
           onsuccess: null as null | (() => void),
           onerror: null as null | (() => void),
+          onblocked: null as null | (() => void),
         };
         queueMicrotask(() => {
-          req.onupgradeneeded?.({ oldVersion: 3 });
+          if (triggerBlocked) {
+            req.onblocked?.();
+            return;
+          }
+          req.onupgradeneeded?.({ oldVersion: upgradeFromVersion });
           req.onsuccess?.();
         });
         return req;
@@ -233,8 +250,27 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
       await new Promise((r) => setTimeout(r, 10));
 
       expect(records.has(manualMap.contentHash)).toBe(true); // Manual correction preserved!
-      expect(records.has(freshAnalysisMap.contentHash)).toBe(true); // Fresh v4 record preserved!
-      expect(records.has(legacyAnalysisMap.contentHash)).toBe(false); // Legacy analysis entry purged for lazy reanalysis!
+      expect(records.has(bundledMap.contentHash)).toBe(true); // Bundled map preserved!
+      expect(records.has(v4AnalysisMap.contentHash)).toBe(false); // Old v4 analysis entry purged for updated barBrightness!
+      expect(records.has(legacyAnalysisMap.contentHash)).toBe(false); // Legacy analysis entry purged!
+
+      // Upgrade from oldVersion=3 -> v5 also purges stale analysis records
+      records.set(v4AnalysisMap.contentHash, v4AnalysisMap);
+      upgradeFromVersion = 3;
+      await (lib as unknown as { openDb: () => Promise<unknown> }).openDb();
+      await new Promise((r) => setTimeout(r, 10));
+      expect(records.has(v4AnalysisMap.contentHash)).toBe(false);
+
+      // Fresh DB install (oldVersion=0) skips cursor scan; blocked upgrade resolves cleanly to null
+      mockStore.openCursor.mockClear();
+      upgradeFromVersion = 0;
+      const freshDb = await (lib as unknown as { openDb: () => Promise<unknown> }).openDb();
+      expect(freshDb).not.toBeNull();
+      expect(mockStore.openCursor).not.toHaveBeenCalled();
+
+      triggerBlocked = true;
+      const blockedDb = await (lib as unknown as { openDb: () => Promise<unknown> }).openDb();
+      expect(blockedDb).toBeNull();
     } finally {
       g.indexedDB = prevIdb;
     }

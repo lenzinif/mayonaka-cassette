@@ -1214,6 +1214,144 @@ describe('Drop Onset & Climax Lightning Sync', () => {
       tuning.bgLightningOnBeat = prevLightning;
     }
   });
+
+  it('suppresses lightning on flat artificial breakdown->drop transitions and low-contrast percentile peaks', () => {
+    const prevRain = tuning.bgRain;
+    const prevLightning = tuning.bgLightningOnBeat;
+    tuning.bgRain = 1;
+    tuning.bgLightningOnBeat = 1;
+    try {
+      const flatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:flat-track-no-anonymous-lightning',
+        bpm: 120,
+        firstBeatOffsetSec: 0,
+        // Flat groove (0.74..0.92 with tiny bar-to-bar deltas) + one genuine +0.34 surge at bar 14
+        barEnergy: [
+          0.75, 0.76, 0.75, 0.74, // breakdown (bars 0..3)
+          0.73, 0.76, 0.77, 0.78, // artificial breakdown->drop at bar 4 (dE = -0.01)
+          0.79, 0.80, 0.82, 0.85, // steady ramp
+          0.91, 0.52, 0.86, 0.82, // bar 12: flat peak 0.85->0.91 (dE=0.06, suppressed); bar 14: real +0.34 surge!
+        ],
+        sections: [
+          { startBar: 0, bars: 4, role: 'breakdown' as const },
+          { startBar: 4, bars: 12, role: 'drop' as const },
+        ],
+      };
+      const audio = new FunkAudioEngine(flatMap);
+      const game = new Game({ input: new FakeInput(), audio });
+      const bgAcc = (game as unknown as { background: { lightningStrikeCount: number } }).background;
+
+      // Step through bars 1..13 (includes flat breakdown->drop at bar 4 and flat 0.85->0.91 peak at bar 12)
+      for (let bar = 1; bar <= 13; bar++) {
+        (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = bar * 2.0 + 0.05;
+        game.update(0.02);
+      }
+      expect(bgAcc.lightningStrikeCount).toBe(0);
+
+      // Bar 14 has a genuine +0.34 spectral surge (0.52 -> 0.86) -> fires once
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 14 * 2.0 + 0.05;
+      game.update(0.02);
+      expect(bgAcc.lightningStrikeCount).toBe(1);
+    } finally {
+      tuning.bgRain = prevRain;
+      tuning.bgLightningOnBeat = prevLightning;
+    }
+  });
+
+  it('keeps elastic sync smooth (>= 0.76 scale, no slingshot jumps) on rolling-start 1-bar pickup tracks', () => {
+    const pickupMap = {
+      ...DEFAULT_SYNTH_BEATMAP,
+      contentHash: 'sha256:rolling-start-1bar-pickup-sync',
+      bpm: 134,
+      firstBeatOffsetSec: 0,
+      barEnergy: [0.2, ...new Array<number>(19).fill(0.8)],
+      sections: [
+        { startBar: 0, bars: 1, role: 'intro' as const },
+        { startBar: 1, bars: 11, role: 'drop' as const },
+        { startBar: 12, bars: 4, role: 'breakdown' as const },
+        { startBar: 16, bars: 4, role: 'drop' as const },
+      ],
+    };
+    const input = new FakeInput();
+    input.setDown('accelerate', true);
+    const audio = new FunkAudioEngine(pickupMap);
+    const game = new Game({ input, audio });
+
+    // Simulate rolling start at Overdrive top speed
+    game.hasStartedDriving = true;
+    game.car.speed = tuning.maxSpeed * 1.02;
+    game.car.gearbox.gear = 6;
+    game.car.gearbox.update(game.car.speed, tuning.maxSpeed);
+    game.syncController.resetForTrack(true, true, 2.0);
+
+    const dt = 1 / 120;
+    let prevScale = 1.0;
+    let maxStepJump = 0;
+    let minScale = Infinity;
+    for (let step = 0; step < 120 * 28; step++) {
+      game.car.x = 0;
+      game.car.prevX = 0;
+      const prevPos = game.position;
+      game.update(dt);
+      const effSpeed = (game.position - prevPos) / dt;
+      if (game.car.speed > 1000 && effSpeed > 0) {
+        const scale = effSpeed / game.car.speed;
+        minScale = Math.min(minScale, scale);
+        maxStepJump = Math.max(maxStepJump, Math.abs(scale - prevScale));
+        prevScale = scale;
+      }
+    }
+    expect(minScale).toBeGreaterThanOrEqual(0.75);
+    expect(maxStepJump).toBeLessThan(0.05);
+  });
+
+  it('prevents double lightning strikes on simultaneous dropSync + bar downbeat and ignores rain-off dropSyncs', () => {
+    const prevRain = tuning.bgRain;
+    const prevLightning = tuning.bgLightningOnBeat;
+    try {
+      tuning.bgRain = 1;
+      tuning.bgLightningOnBeat = 1;
+      const syncMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:drop-sync-no-double-lightning',
+        bpm: 120,
+        firstBeatOffsetSec: 0,
+        barEnergy: [0.22, 0.24, 0.25, 0.26, 0.85, 0.82, 0.80, 0.78],
+        sections: [
+          { startBar: 0, bars: 4, role: 'build' as const },
+          { startBar: 4, bars: 4, role: 'drop' as const },
+        ],
+      };
+      const audio = new FunkAudioEngine(syncMap);
+      const game = new Game({ input: new FakeInput(), audio });
+      const bgAcc = (game as unknown as { background: { lightningStrikeCount: number } }).background;
+      const gamePriv = game as unknown as {
+        barsSinceLastLightning: number;
+        handleDropSync: (barIndex: number, deltaBeats: number) => void;
+      };
+
+      // Approach bar 4 downbeat and fire dropSync on the same frame as justCrossedBar
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 7.95;
+      game.update(0.02);
+      const beforeStrikes = bgAcc.lightningStrikeCount;
+
+      gamePriv.handleDropSync(4, 0.1);
+      (audio as unknown as { virtualTrackSec: number }).virtualTrackSec = 8.05;
+      game.update(0.02);
+      expect(bgAcc.lightningStrikeCount).toBe(beforeStrikes + 1);
+
+      // With bgRain off, handleDropSync must neither strike nor reset cooldown
+      tuning.bgRain = 0;
+      gamePriv.barsSinceLastLightning = 7;
+      gamePriv.handleDropSync(4, 0);
+      expect(bgAcc.lightningStrikeCount).toBe(beforeStrikes + 1);
+      expect(gamePriv.barsSinceLastLightning).toBe(7);
+    } finally {
+      tuning.bgRain = prevRain;
+      tuning.bgLightningOnBeat = prevLightning;
+    }
+  });
 });
 
 describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () => {

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { detectMuffledSpans } from '@src/road/EnvironmentArchetypes';
 import { analyzePcm } from './analysis.worker';
 import {
   barDurationSec,
@@ -253,6 +254,110 @@ describe('BeatMap helpers', () => {
     expect(beatMap.barBrightness?.[27]).toBeGreaterThan(0.65);
     expect(sectionAtBar(beatMap, 24)?.role).not.toBe('drop');
     expect(sectionAtBar(beatMap, 25)?.role).toBe('drop');
+  });
+
+  it('detects band-pass / lo-fi muffled breakdowns (no sub-bass, no >3.5kHz air) via barBrightness and detectMuffledSpans', () => {
+    const sr = ANALYSIS_SAMPLE_RATE;
+    const bpm = 120;
+    const durationSec = 72; // 36 bars
+    const firstBeatOffsetSec = 0.05;
+    const totalSamples = Math.floor(durationSec * sr);
+    const pcm = new Float32Array(totalSamples);
+    const beatDur = 60 / bpm;
+    const totalBeats = Math.floor((durationSec - firstBeatOffsetSec) / beatDur);
+
+    for (let b = 0; b < totalBeats; b++) {
+      const barIdx = Math.floor(b / 4);
+      const beatInBar = b % 4;
+      const startSample = Math.floor((firstBeatOffsetSec + b * beatDur) * sr);
+      // Bars 12..17: band-pass muffled breakdown (~700 Hz only, zero sub-bass <150Hz, zero >3.5kHz air)
+      const isBandPassMuffled = barIdx >= 12 && barIdx <= 17;
+
+      const len = Math.floor(0.14 * sr);
+      for (let i = 0; i < len && startSample + i < totalSamples; i++) {
+        const t = i / sr;
+        const env = Math.exp(-t * 24);
+        let sample = 0;
+        if (isBandPassMuffled) {
+          sample += 0.25 * env * Math.sin(2 * Math.PI * 700 * t);
+        } else {
+          const kickAmp = beatInBar === 0 ? 0.9 : 0.72;
+          sample += kickAmp * env * Math.sin(2 * Math.PI * 62 * t);
+          if (beatInBar === 1 || beatInBar === 3) {
+            sample +=
+              0.42 *
+              env *
+              (Math.sin(2 * Math.PI * 2600 * t) * 0.45 + Math.sin(2 * Math.PI * 4600 * t) * 0.55);
+          }
+        }
+        pcm[startSample + i] = pcm[startSample + i]! + sample;
+      }
+    }
+
+    const { beatMap } = analyzePcm(pcm, sr, {
+      contentHash: 'sha256:bpf-muffled-breakdown',
+      title: 'BPF Muffled Test',
+      artist: 'Tester',
+    });
+
+    expect(beatMap.barBrightness).toBeDefined();
+    for (let b = 12; b <= 17; b++) {
+      expect(beatMap.barBrightness?.[b]).toBeLessThan(0.3);
+    }
+    const spans = detectMuffledSpans(beatMap, beatMap.barEnergy.length);
+    expect(spans.some((sp) => sp.startBar <= 12 && sp.endBar >= 18)).toBe(true);
+  });
+
+  it('does not falsely flag bright bassless breakdowns (>3.5kHz air intact) as muffled tunnels', () => {
+    const sr = ANALYSIS_SAMPLE_RATE;
+    const bpm = 120;
+    const durationSec = 72; // 36 bars
+    const firstBeatOffsetSec = 0.05;
+    const totalSamples = Math.floor(durationSec * sr);
+    const pcm = new Float32Array(totalSamples);
+    const beatDur = 60 / bpm;
+    const totalBeats = Math.floor((durationSec - firstBeatOffsetSec) / beatDur);
+
+    for (let b = 0; b < totalBeats; b++) {
+      const barIdx = Math.floor(b / 4);
+      const beatInBar = b % 4;
+      const startSample = Math.floor((firstBeatOffsetSec + b * beatDur) * sr);
+      // Bars 12..17: bass drops out cleanly, but crisp hats/air (>3.5kHz) stay full-level
+      const isBasslessBright = barIdx >= 12 && barIdx <= 17;
+
+      const len = Math.floor(0.14 * sr);
+      for (let i = 0; i < len && startSample + i < totalSamples; i++) {
+        const t = i / sr;
+        const env = Math.exp(-t * 24);
+        let sample = 0;
+        if (!isBasslessBright) {
+          const kickAmp = beatInBar === 0 ? 0.9 : 0.72;
+          sample += kickAmp * env * Math.sin(2 * Math.PI * 62 * t);
+        } else {
+          sample += 0.22 * env * Math.sin(2 * Math.PI * 1400 * t);
+        }
+        if (beatInBar === 1 || beatInBar === 3) {
+          sample +=
+            0.42 *
+            env *
+            (Math.sin(2 * Math.PI * 2600 * t) * 0.45 + Math.sin(2 * Math.PI * 4600 * t) * 0.55);
+        }
+        pcm[startSample + i] = pcm[startSample + i]! + sample;
+      }
+    }
+
+    const { beatMap } = analyzePcm(pcm, sr, {
+      contentHash: 'sha256:bright-bassless-breakdown',
+      title: 'Bright Bassless Test',
+      artist: 'Tester',
+    });
+
+    expect(beatMap.barBrightness).toBeDefined();
+    for (let b = 12; b <= 17; b++) {
+      expect(beatMap.barBrightness?.[b]).toBeGreaterThanOrEqual(0.65);
+    }
+    const spans = detectMuffledSpans(beatMap, beatMap.barEnergy.length);
+    expect(spans).toEqual([]);
   });
 });
 
