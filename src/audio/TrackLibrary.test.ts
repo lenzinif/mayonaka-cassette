@@ -147,7 +147,7 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
     }
   });
 
-  it('M1: IndexedDB v5 upgrade preserves source="manual" BeatMaps while purging cached source="analysis" entries for barBrightness reanalysis', async () => {
+  it('M1: IndexedDB v6 upgrade preserves source="manual" BeatMaps while purging cached source="analysis" entries for orthogonal spectral reanalysis', async () => {
     const manualMap: BeatMap = {
       ...DEFAULT_SYNTH_BEATMAP,
       contentHash: 'sha256:user-manual-bpm',
@@ -213,7 +213,7 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
 
     const g = globalThis as unknown as { indexedDB?: unknown };
     const prevIdb = g.indexedDB;
-    let upgradeFromVersion = 4;
+    let upgradeFromVersion = 5;
     let triggerBlocked = false;
     g.indexedDB = {
       open: vi.fn(() => {

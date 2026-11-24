@@ -1,8 +1,10 @@
 import {
   beatDurationSec,
   sectionAtBar,
+  spectralSpanAtBar,
   type BeatMap,
   type SectionRole,
+  type SpectralSpanKind,
 } from './BeatMap';
 
 export interface BeatClockState {
@@ -22,10 +24,14 @@ export interface BeatClockState {
   beatPulse: number;
   /** Stronger pulse `[0, 1]` peaking on downbeats (beat 1 of each bar). */
   downbeatPulse: number;
-  /** Current structural section role (`intro`, `build`, `drop`, `breakdown`, `outro`). */
+  /** Current structural section role (`intro`, `build`, `groove`, `drop`, `breakdown`, `outro`). */
   sectionRole: SectionRole;
   /** Current bar's normalised energy `[0, 1]` from `BeatMap.barEnergy`. */
   barEnergy: number;
+  /** True when the current bar is a genuine musical impact bar (`BeatMap.impactBars` or drop start). */
+  isImpactBar: boolean;
+  /** Active orthogonal spectral span kind covering the current bar, or `null` if open. */
+  spectralKind: SpectralSpanKind | null;
   /** True when a new beat boundary was crossed since the previous `sample()` call. */
   justCrossedBeat: boolean;
   /** True when a new bar (downbeat) boundary was crossed since the previous `sample()` call. */
@@ -71,6 +77,8 @@ export class BeatClock {
     downbeatPulse: 0,
     sectionRole: 'intro',
     barEnergy: 0.5,
+    isImpactBar: false,
+    spectralKind: null,
     justCrossedBeat: false,
     justCrossedBar: false,
   };
@@ -121,7 +129,24 @@ export class BeatClock {
 
     const clampedBar = Math.max(0, Math.min(map.barEnergy.length - 1, barIndex));
     const barEnergy = map.barEnergy[clampedBar] ?? 0.5;
-    const sec = sectionAtBar(map, Math.max(0, barIndex));
+    const safeBar = Math.max(0, barIndex);
+    const sec = sectionAtBar(map, safeBar);
+
+    let isImpactBar = false;
+    if (barIndex >= 0) {
+      if (map.impactBars !== undefined) {
+        const impacts = map.impactBars;
+        for (let i = 0; i < impacts.length; i++) {
+          if (impacts[i] === barIndex) {
+            isImpactBar = true;
+            break;
+          }
+        }
+      } else if (sec && sec.role === 'drop' && sec.startBar === barIndex) {
+        isImpactBar = true;
+      }
+    }
+    const activeSpan = barIndex >= 0 ? spectralSpanAtBar(map, barIndex) : undefined;
 
     this.state.trackTimeSec = trackTimeSec;
     this.state.beatFloat = beatFloat;
@@ -133,6 +158,8 @@ export class BeatClock {
     this.state.downbeatPulse = downbeatPulse;
     this.state.sectionRole = sec?.role ?? 'drop';
     this.state.barEnergy = barEnergy;
+    this.state.isImpactBar = isImpactBar;
+    this.state.spectralKind = activeSpan ? activeSpan.kind : null;
     this.state.justCrossedBeat = justCrossedBeat;
     this.state.justCrossedBar = justCrossedBar;
 
