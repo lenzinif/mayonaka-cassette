@@ -1,6 +1,7 @@
 import { tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
 import type { PlayerCar } from '@src/entities/PlayerCar';
+import { isStreamingTrack, type StreamingTrack } from '@src/road/HorizonAssembler';
 import {
   getEffectivePropOffset,
   getEffectiveTruckLaneOffset,
@@ -9,6 +10,7 @@ import {
   type PropKind,
   type Track,
 } from '@src/road/RoadSegment';
+import type { SongBlueprint } from '@src/road/SongBlueprint';
 import { isSongTrack, type SongTrack } from '@src/road/SongRoadGenerator';
 
 export interface KeiTruck {
@@ -200,6 +202,8 @@ export class TrafficManager {
    */
   private segmentHeads: Int32Array = new Int32Array(0);
   private collisionCooldown = 0;
+  private streamingSeedHash = 0;
+  private streamingNextTruckId = 1;
   private readonly forkBoundsScratch: ForkCrossSection = {
     t: 0,
     outerLimit: 1,
@@ -386,11 +390,26 @@ export class TrafficManager {
   }
 
   /** Places the first pooled truck directly ahead of `playerWorldZ` at `laneX` and clears cooldown for collision testing. */
-  placeTruckAheadForTest(playerWorldZ: number, laneX: number, trackLen: number): void {
+  placeTruckAheadForTest(playerWorldZ: number, laneX: number, trackLen: number, isStreaming = false): void {
     this.collisionCooldown = 0;
+    if (this.trucks.length === 0) {
+      const id = this.streamingNextTruckId++;
+      const z = isStreaming ? playerWorldZ + 90 : (playerWorldZ + 90) % Math.max(1, trackLen);
+      const t = this.acquireTruck(
+        0,
+        id,
+        z,
+        laneX,
+        0.45,
+        0,
+        Math.floor(z / 200),
+        laneX < 0 ? -1 : 1,
+      );
+      this.trucks.push(t);
+    }
     const truck = this.trucks[0];
     if (!truck || trackLen <= 0) return;
-    const targetZ = (playerWorldZ + 90) % trackLen;
+    const targetZ = isStreaming ? playerWorldZ + 90 : (playerWorldZ + 90) % trackLen;
     truck.z = targetZ;
     truck.prevZ = targetZ;
     truck.baseLaneOffset = laneX;
@@ -400,6 +419,149 @@ export class TrafficManager {
     truck.tiltAngle = 0;
     truck.prevTiltAngle = 0;
     truck.knockedTimer = 0;
+  }
+
+  /**
+   * Resets active trucks and spatial buckets for a `StreamingTrack` driven by `HorizonAssembler`.
+   * Zero-GC: reuses pre-allocated `truckPool` entries as bars materialize at the horizon.
+   */
+  resetForStreaming(track: StreamingTrack, seed = 'default-traffic'): void {
+    this.trucks.length = 0;
+    this.collisionCooldown = 0;
+    this.streamingNextTruckId = 1;
+    let h = 2166136261 >>> 0;
+    for (let i = 0; i < seed.length; i++) {
+      h ^= seed.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    this.streamingSeedHash = h;
+
+    const segCount = track.segments.length;
+    if (this.segmentHeads.length < segCount) {
+      this.segmentHeads = new Int32Array(segCount);
+    }
+    this.segmentHeads.fill(-1);
+
+    // Seed 1 initial deterministic Kei Truck safely ahead in the visible horizon (outer lane ±0.58)
+    // so stage start & post-transition always have live traffic ready (idle until hasStartedDriving).
+    if (tuning.trafficDensity > 0) {
+      const startZ = (track.stageStartAbsSeg + 115) * track.segmentLength;
+      const laneOffset: -0.58 | 0.58 = (h & 1) === 0 ? -0.58 : 0.58;
+      const truck = this.acquireTruck(
+        0,
+        this.streamingNextTruckId++,
+        startZ,
+        laneOffset,
+        0.44,
+        (h >>> 8) % 3,
+        Math.floor(startZ / track.segmentLength) & track.ringMask,
+        laneOffset < 0 ? -1 : 1,
+      );
+      this.trucks.push(truck);
+      this.rebuildSpatialIndex(track);
+    }
+  }
+
+  /**
+   * Deterministic zero-GC bar-window traffic spawner invoked by `HorizonAssembler`
+   * whenever a new musical bar materializes beyond `drawDistance`.
+   */
+  onHorizonBarMaterialized(
+    barIndex: number,
+    anchorAbsSeg: number,
+    blueprint: SongBlueprint,
+    track: StreamingTrack,
+  ): void {
+    const density = Math.max(0, tuning.trafficDensity);
+    if (density <= 0) return;
+    const MAX_STREAMING_TRUCKS = 24;
+    if (this.trucks.length >= MAX_STREAMING_TRUCKS) return;
+    const safeStartBars = Math.max(4, Math.min(6, Math.floor(blueprint.totalBars * 0.3)));
+    if (barIndex < safeStartBars || barIndex >= blueprint.forkStartBar - 1) return;
+
+    // Avoid portal boundaries (±1 bar around tunnel/bridge/viaduct transitions)
+    const curEnv = blueprint.barEnv[barIndex] ?? 'standard';
+    const prevEnv = blueprint.barEnv[Math.max(0, barIndex - 1)] ?? 'standard';
+    const nextEnv = blueprint.barEnv[Math.min(blueprint.totalBars - 1, barIndex + 1)] ?? 'standard';
+    if (curEnv !== prevEnv || curEnv !== nextEnv) return;
+
+    // Avoid drop/impact crest bars
+    for (let i = 0; i < blueprint.syncAnchors.length; i++) {
+      const a = blueprint.syncAnchors[i]!;
+      if (Math.abs(a.barIndex - barIndex) <= 1 && a.kind !== 'fork') return;
+    }
+
+    // Locate owning chunk for trafficProfile
+    let profile: 'clear' | 'sparse' | 'normal' | 'weaving' = 'normal';
+    for (let i = 0; i < blueprint.chunks.length; i++) {
+      const ch = blueprint.chunks[i]!;
+      if (barIndex >= ch.startBar && barIndex < ch.startBar + ch.bars) {
+        profile = ch.trafficProfile;
+        break;
+      }
+    }
+    if (profile === 'clear') return;
+
+    // Deterministic per-bar hash
+    let h = (this.streamingSeedHash ^ Math.imul(barIndex + 1, 0x9e3779b9)) >>> 0;
+    h = Math.imul(h ^ (h >>> 15), 0x85ebca6b) >>> 0;
+    const u0 = ((h ^ (h >>> 13)) >>> 0) / 4294967296;
+
+    const spawnProb =
+      profile === 'weaving'
+        ? Math.min(0.92, 0.65 * density)
+        : profile === 'normal'
+          ? Math.min(0.75, 0.42 * density)
+          : Math.min(0.45, 0.22 * density);
+    if (u0 >= spawnProb) return;
+
+    const seg = track.segments[anchorAbsSeg & track.ringMask]!;
+    if (Math.abs(seg.curve) >= 3.2) return;
+    // Reject steep hill crests where visibility is limited
+    const prevSeg = track.segments[(anchorAbsSeg - 1) & track.ringMask]!;
+    const sPrev = prevSeg.p2.worldY - prevSeg.p1.worldY;
+    const sCur = seg.p2.worldY - seg.p1.worldY;
+    if (sPrev - sCur > 18) return;
+
+    const laneIdx = ((h >>> 4) % LANE_OFFSETS.length + LANE_OFFSETS.length) % LANE_OFFSETS.length;
+    const laneOffset = LANE_OFFSETS[laneIdx]!;
+    const z = anchorAbsSeg * track.segmentLength;
+
+    // Prevent crowding against existing active trucks
+    for (let i = 0; i < this.trucks.length; i++) {
+      const other = this.trucks[i]!;
+      const dist = Math.abs(other.z - z);
+      if (dist < track.segmentLength * 8) return;
+      if (other.baseLaneOffset === laneOffset && dist < track.segmentLength * 14) return;
+    }
+
+    const speedRatio = 0.36 + (((h >>> 8) & 0xff) / 255) * 0.18;
+    const variant = (h >>> 16) % 3;
+    const poolIdx = this.trucks.length;
+    const truckId = this.streamingNextTruckId++;
+    const forkBranch: -1 | 1 =
+      laneOffset < -0.2 ? -1 : laneOffset > 0.2 ? 1 : truckId % 2 === 0 ? 1 : -1;
+    const truck = this.acquireTruck(
+      poolIdx,
+      truckId,
+      z,
+      laneOffset,
+      speedRatio,
+      variant,
+      anchorAbsSeg & track.ringMask,
+      forkBranch,
+    );
+    this.trucks.push(truck);
+  }
+
+  /** Shifts all active streaming truck Z coordinates by `-shiftZ` during an atomic origin rebase. */
+  shiftStreamingTrucks(shiftZ: number): void {
+    if (shiftZ === 0) return;
+    for (let i = 0; i < this.trucks.length; i++) {
+      const t = this.trucks[i]!;
+      t.z -= shiftZ;
+      if (t.prevZ !== undefined) t.prevZ -= shiftZ;
+    }
   }
 
   /**
@@ -486,17 +648,42 @@ export class TrafficManager {
     this.segmentHeads.fill(-1);
 
     const maxSpeed = tuning.maxSpeed;
-    const wrappedCurrZ = ((currPlayerWorldZ % trackLen) + trackLen) % trackLen;
-    const wrappedPrevZ = ((prevPlayerWorldZ % trackLen) + trackLen) % trackLen;
+    const streaming = isStreamingTrack(track);
+    const ringMask = streaming ? track.ringMask : 0;
+    const wrappedCurrZ = streaming
+      ? currPlayerWorldZ
+      : ((currPlayerWorldZ % trackLen) + trackLen) % trackLen;
+    const wrappedPrevZ = streaming
+      ? prevPlayerWorldZ
+      : ((prevPlayerWorldZ % trackLen) + trackLen) % trackLen;
 
-    for (let i = 0; i < this.trucks.length; i++) {
+    const minActiveZ = streaming ? currPlayerWorldZ - segLen * 14 : -Infinity;
+    const maxActiveZ = streaming ? track.headAbsSeg * segLen + segLen * 16 : Infinity;
+
+    for (let i = this.trucks.length - 1; i >= 0; i--) {
       const t = this.trucks[i]!;
       t.prevZ = t.z;
       t.prevLaneOffset = t.laneOffset;
       t.prevTiltAngle = t.tiltAngle;
       const speedPenalty = t.knockedTimer > 0 && Math.abs(t.laneOffset) > 1 ? 0.65 : 1.0;
-      t.z = (t.z + t.speedRatio * speedPenalty * maxSpeed * dt) % trackLen;
-      if (t.z < 0) t.z += trackLen;
+      if (streaming) {
+        t.z += t.speedRatio * speedPenalty * maxSpeed * dt;
+        if (t.z < minActiveZ || t.z > maxActiveZ) {
+          // Recycle out-of-window truck cleanly via swap-with-last (zero GC)
+          const lastIdx = this.trucks.length - 1;
+          if (i !== lastIdx) {
+            const last = this.trucks[lastIdx]!;
+            this.trucks[i] = last;
+            this.truckPool[i] = last;
+            this.truckPool[lastIdx] = t;
+          }
+          this.trucks.pop();
+          continue;
+        }
+      } else {
+        t.z = (t.z + t.speedRatio * speedPenalty * maxSpeed * dt) % trackLen;
+        if (t.z < 0) t.z += trackLen;
+      }
 
       // Lateral knockback & recovery dynamics
       if (Math.abs(t.lateralVel) > 0.001) {
@@ -512,8 +699,10 @@ export class TrafficManager {
       } else {
         // AI Truck evasive steering: react only when the faster player is approaching from behind (`0 < aheadDist < 750`)
         let aheadDist = t.z - wrappedCurrZ;
-        if (aheadDist > trackLen * 0.5) aheadDist -= trackLen;
-        if (aheadDist < -trackLen * 0.5) aheadDist += trackLen;
+        if (!streaming) {
+          if (aheadDist > trackLen * 0.5) aheadDist -= trackLen;
+          if (aheadDist < -trackLen * 0.5) aheadDist += trackLen;
+        }
 
         const truckEffectiveX = getEffectiveTruckLaneOffset(
           t.laneOffset,
@@ -564,7 +753,9 @@ export class TrafficManager {
         }
       }
 
-      const segIdx = ((Math.floor(t.z / segLen) % segCount) + segCount) % segCount;
+      const segIdx = streaming
+        ? Math.floor(t.z / segLen) & ringMask
+        : ((Math.floor(t.z / segLen) % segCount) + segCount) % segCount;
       t.segmentIndex = segIdx;
       t.nextInSegment = this.segmentHeads[segIdx]!;
       this.segmentHeads[segIdx] = i;
@@ -577,10 +768,13 @@ export class TrafficManager {
     //    - Combined lateral half-extent: COMBINED_HALF_X = 0.34 road half-widths.
     const COMBINED_HALF_Z = 185;
     const COMBINED_HALF_X = 0.34;
-    const playerSegIdx = Math.floor(wrappedCurrZ / segLen);
+    const playerAbsSegIdx = Math.floor(wrappedCurrZ / segLen);
+    const playerSegIdx = streaming ? playerAbsSegIdx & ringMask : playerAbsSegIdx;
 
     for (let offset = -1; offset <= 1; offset++) {
-      const checkSeg = (playerSegIdx + offset + segCount) % segCount;
+      const checkSeg = streaming
+        ? (playerAbsSegIdx + offset) & ringMask
+        : (playerSegIdx + offset + segCount) % segCount;
       let tIdx = this.segmentHeads[checkSeg]!;
       while (tIdx !== -1) {
         const truck = this.trucks[tIdx]!;
@@ -589,14 +783,15 @@ export class TrafficManager {
           continue;
         }
 
-        // Shortest signed longitudinal distance on the looping track (playerZ - truckZ)
+        // Shortest signed longitudinal distance (playerZ - truckZ)
         let currDeltaZ = wrappedCurrZ - truck.z;
-        if (currDeltaZ > trackLen * 0.5) currDeltaZ -= trackLen;
-        if (currDeltaZ < -trackLen * 0.5) currDeltaZ += trackLen;
-
         let prevDeltaZ = wrappedPrevZ - truck.z;
-        if (prevDeltaZ > trackLen * 0.5) prevDeltaZ -= trackLen;
-        if (prevDeltaZ < -trackLen * 0.5) prevDeltaZ += trackLen;
+        if (!streaming) {
+          if (currDeltaZ > trackLen * 0.5) currDeltaZ -= trackLen;
+          if (currDeltaZ < -trackLen * 0.5) currDeltaZ += trackLen;
+          if (prevDeltaZ > trackLen * 0.5) prevDeltaZ -= trackLen;
+          if (prevDeltaZ < -trackLen * 0.5) prevDeltaZ += trackLen;
+        }
 
         const truckEffectiveX = getEffectiveTruckLaneOffset(
           truck.laneOffset,
@@ -689,7 +884,7 @@ export class TrafficManager {
             car.applyImpact(playerPushDir * 4.4, minKeepSpeed);
 
             // Truck jolts forward and wobbles slightly
-            truck.z = (truck.z + segLen * 1.6) % trackLen;
+            truck.z = streaming ? truck.z + segLen * 1.6 : (truck.z + segLen * 1.6) % trackLen;
             truck.prevZ = truck.z;
             truck.lateralVel = -playerPushDir * 1.1;
             truck.tiltAngle = -playerPushDir * 0.2;
@@ -722,14 +917,16 @@ export class TrafficManager {
     );
     if (Math.abs(car.x) <= forkBounds.outerLimit + 0.02) return;
 
-    const prevSegIdx = Math.floor(wrappedPrevZ / segLen);
+    const prevAbsSegIdx = Math.floor(wrappedPrevZ / segLen);
     // Avoid sweeping across the finish-line seam if the stage just wrapped around
-    const rawSegDiff = playerSegIdx - prevSegIdx;
+    const rawSegDiff = playerAbsSegIdx - prevAbsSegIdx;
     const steps =
       rawSegDiff >= 0 && rawSegDiff < 8 ? Math.min(4, rawSegDiff + 1) : 1;
 
     for (let s = 0; s < steps; s++) {
-      const seg = track.segments[(prevSegIdx + s) % segCount]!;
+      const seg = streaming
+        ? track.segments[(prevAbsSegIdx + s) & ringMask]!
+        : track.segments[(prevAbsSegIdx + s) % segCount]!;
       for (let i = 0; i < seg.sprites.length; i++) {
         const sp = seg.sprites[i]!;
         // Only props in bands A and B (|offset| < 3.0) are collidable; near-field C and far-field D never collide
@@ -766,13 +963,17 @@ export class TrafficManager {
   private rebuildSpatialIndex(track: Track): void {
     const segCount = track.segments.length;
     const segLen = track.segmentLength;
+    const streaming = isStreamingTrack(track);
+    const ringMask = streaming ? track.ringMask : 0;
     if (this.segmentHeads.length < segCount) {
       this.segmentHeads = new Int32Array(segCount);
     }
     this.segmentHeads.fill(-1);
     for (let i = 0; i < this.trucks.length; i++) {
       const t = this.trucks[i]!;
-      const segIdx = Math.floor(t.z / segLen) % segCount;
+      const segIdx = streaming
+        ? Math.floor(t.z / segLen) & ringMask
+        : ((Math.floor(t.z / segLen) % segCount) + segCount) % segCount;
       t.segmentIndex = segIdx;
       t.nextInSegment = this.segmentHeads[segIdx]!;
       this.segmentHeads[segIdx] = i;

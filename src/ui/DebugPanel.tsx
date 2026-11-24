@@ -873,6 +873,22 @@ export function DebugPanel({
                   <strong className="text-[var(--ff-cream)]">{snap?.drawnPylonSpans ?? 0}</strong>
                 </span>
               </div>
+              <div className="flex justify-between text-[10px] text-[var(--ff-muted)]">
+                <span>
+                  Horizon Stretch:{' '}
+                  <strong className="text-[var(--ff-mint)]">
+                    {(snap?.horizonStretchRatio ?? 1).toFixed(2)}×
+                  </strong>
+                </span>
+                <span>
+                  Sync Anchor:{' '}
+                  <strong className="text-[var(--ff-gold)]">
+                    {snap?.activeAnchorKind
+                      ? `${snap.activeAnchorKind}@B${snap.activeAnchorBar ?? 0}`
+                      : 'FREE'}
+                  </strong>
+                </span>
+              </div>
               <div className="grid grid-cols-3 gap-1 text-[9px] select-none">
                 {BAR_SEEK_SHORTCUTS.map(([bar, label]) => (
                   <button

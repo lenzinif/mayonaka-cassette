@@ -1,6 +1,7 @@
 import { DEFAULT_SYNTH_BEATMAP } from '@src/audio/FunkAudioEngine';
 import { resetTuning, tuning } from '@src/config/tuning';
 import { PlayerCar } from '@src/entities/PlayerCar';
+import { HorizonAssembler } from '@src/road/HorizonAssembler';
 import { easeInOut } from '@src/road/RoadProjection';
 import {
   createPoint,
@@ -9,6 +10,7 @@ import {
   getTruckForkBranch,
   type RoadSegment,
 } from '@src/road/RoadSegment';
+import { compileSongBlueprint } from '@src/road/SongBlueprint';
 import { generateSongRoad, type SongTrack } from '@src/road/SongRoadGenerator';
 import { buildTestTrack, HILL } from '@src/road/TrackBuilder';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -301,6 +303,30 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
     tm.shiftVisibleWindowTrucks(track, 0, -1200, 2000);
     expect(tm.trucks[0]!.z).toBeGreaterThanOrEqual(0);
     expect(tm.trucks[0]!.z).toBeLessThan(track.length);
+  });
+
+  it('spawns and recycles streaming Kei Trucks per bar window on a StreamingTrack with bounded pool size', () => {
+    const bp = compileSongBlueprint(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+    const asm = new HorizonAssembler(bp);
+    const tm = new TrafficManager();
+    tm.resetForStreaming(asm.track, bp.contentHash);
+    asm.onHorizonBarMaterialized = (b, seg, blueprint, st) => {
+      tm.onHorizonBarMaterialized(b, seg, blueprint, st);
+    };
+
+    const car = new PlayerCar();
+    car.speed = bp.referenceSpeed;
+    let pos = 0;
+    let sawActiveTruck = false;
+    for (let step = 0; step < 600; step++) {
+      const prevPos = pos;
+      pos += bp.referenceSpeed * (1 / 60);
+      asm.advance(pos, pos / bp.barLengthWorld, bp.referenceSpeed, 200, 1 / 60);
+      tm.update(1 / 60, asm.track, car, prevPos + 800, pos + 800);
+      if (tm.trucks.length > 0) sawActiveTruck = true;
+      expect(tm.trucks.length).toBeLessThanOrEqual(24);
+    }
+    expect(sawActiveTruck).toBe(true);
   });
 
   it('keeps trucks stationary and does not collide before the player starts driving (hasStartedDriving = false)', () => {

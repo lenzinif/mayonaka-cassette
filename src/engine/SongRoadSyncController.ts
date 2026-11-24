@@ -2,6 +2,7 @@ import type { BeatMap, SectionRole } from '@src/audio/BeatMap';
 import { FORK_APPROACH_BARS } from '@src/config/constants';
 import { tuning } from '@src/config/tuning';
 import type { TrafficManager } from '@src/entities/TrafficAndProps';
+import { isStreamingTrack } from '@src/road/HorizonAssembler';
 import type { SegmentEnvironment, Track } from '@src/road/RoadSegment';
 import {
   getSectionPaceFactor,
@@ -100,7 +101,62 @@ export class SongRoadSyncController {
     sectionRole: SectionRole,
     dt = 1 / 120,
   ): number {
-    if (!isSongTrack(track) || hasCustomTrack || carSpeedRatio < 0.05) {
+    if (hasCustomTrack || carSpeedRatio < 0.05) {
+      this.smoothedScale = 1.0;
+      this.activeAnchorKind = null;
+      this.activeAnchorBar = -1;
+      return carSpeed;
+    }
+
+    // Tranche 2 (StreamingTrack): HorizonAssembler handles macro phase continuously at the horizon;
+    // A1 is reduced to gentle local last-mile refinement on already-materialized anchors.
+    if (isStreamingTrack(track)) {
+      const worldBaseSpeed = mapCarSpeedToWorldBaseSpeed(carSpeed);
+      const safeBpm = bpm > 0 ? bpm : 120;
+      const camAbsSeg = Math.floor(position / track.segmentLength);
+      const slotBar = track.slotBarFloat[camAbsSeg & track.ringMask] ?? 0;
+      const roadBeat = slotBar * 4;
+      const lagBeats = audioBeatIndex - roadBeat;
+      const continuousScale = Math.max(
+        0.90,
+        Math.min(1.12, 1 + lagBeats * tuning.syncElasticGain * 0.65),
+      );
+
+      let targetScale = continuousScale;
+      let foundKind: SyncAnchorKind | null = null;
+      let foundBar = -1;
+
+      for (let i = 0; i < track.materializedAnchorCount; i++) {
+        const anchor = track.materializedAnchors[i]!;
+        if (anchor.crossedState !== 0) continue;
+        if (this.rollingStart && anchor.barIndex < 3) continue;
+        if (anchor.worldZ > position) {
+          const beatsRemaining = anchor.barIndex * 4 - audioBeatIndex;
+          const distRemaining = anchor.worldZ - position;
+          if (beatsRemaining > 0.02 && beatsRemaining <= 16 && distRemaining > 0) {
+            const timeRemainingSec = beatsRemaining * (60 / safeBpm);
+            if (timeRemainingSec > 0.01) {
+              const targetSpeed = distRemaining / timeRemainingSec;
+              const ratio = targetSpeed / Math.max(1, worldBaseSpeed);
+              const minS = anchor.kind === 'fork' ? 0.91 : 0.84;
+              const maxS = anchor.kind === 'fork' ? 1.15 : 1.24;
+              targetScale = Math.max(minS, Math.min(maxS, ratio));
+              foundKind = anchor.kind;
+              foundBar = anchor.barIndex;
+              break;
+            }
+          }
+        }
+      }
+
+      this.activeAnchorKind = foundKind;
+      this.activeAnchorBar = foundBar;
+      const blendRate = 1 - Math.exp(-4.0 * Math.max(0, dt));
+      this.smoothedScale += (targetScale - this.smoothedScale) * blendRate;
+      return worldBaseSpeed * this.smoothedScale;
+    }
+
+    if (!isSongTrack(track)) {
       this.smoothedScale = 1.0;
       this.activeAnchorKind = null;
       this.activeAnchorBar = -1;
@@ -219,7 +275,7 @@ export class SongRoadSyncController {
     audioBeatIndex: number,
     traffic: TrafficManager,
   ): number {
-    if (!isSongTrack(track) || hasCustomTrack) return 0;
+    if (isStreamingTrack(track) || !isSongTrack(track) || hasCustomTrack) return 0;
     if (carSpeedRatio < 0.12) return 0;
     if (forkActive) return 0;
     if (this.horizonStitchCooldown > 0) return 0;
@@ -344,6 +400,23 @@ export class SongRoadSyncController {
     audioBeatIndex: number,
     onDropSync: (barIndex: number, deltaBeats: number) => void,
   ): void {
+    if (isStreamingTrack(track)) {
+      for (let i = 0; i < track.materializedAnchorCount; i++) {
+        const anchor = track.materializedAnchors[i]!;
+        if (anchor.crossedState !== 0) continue;
+        if (prevPosition <= anchor.worldZ && position >= anchor.worldZ) {
+          const deltaBeats = audioBeatIndex - anchor.barIndex * 4;
+          if (anchor.rewardsSyncBonus && Math.abs(deltaBeats) <= 1.25) {
+            anchor.crossedState = 2;
+            onDropSync(anchor.barIndex, deltaBeats);
+          } else {
+            anchor.crossedState = 1;
+          }
+        }
+      }
+      return;
+    }
+
     if (!isSongTrack(track)) return;
     const anchors = track.syncAnchors;
     const maxFlags = this.crossedAnchorFlags.length;
@@ -369,6 +442,25 @@ export class SongRoadSyncController {
     position: number,
     audioBeatIndex: number,
   ): void {
+    if (isStreamingTrack(track)) {
+      const camAbsSeg = Math.floor(position / track.segmentLength);
+      const barFloat = track.slotBarFloat[camAbsSeg & track.ringMask] ?? 0;
+      const bar = Math.max(0, Math.min(track.totalBars - 1, Math.floor(barFloat)));
+      this.roadBarIndex = bar;
+      this.totalBars = track.totalBars;
+      this.syncDeltaBeats = Math.round((barFloat * 4 - audioBeatIndex) * 10) / 10;
+
+      const chunks = track.blueprint.chunks;
+      for (let i = 0; i < chunks.length; i++) {
+        const chunk = chunks[i]!;
+        if (bar >= chunk.startBar && bar < chunk.startBar + chunk.bars) {
+          this.currentChunkId = chunk.chunkId;
+          break;
+        }
+      }
+      return;
+    }
+
     if (!isSongTrack(track)) {
       this.roadBarIndex = 0;
       this.totalBars = activeRoadBeatMap.barEnergy.length;
