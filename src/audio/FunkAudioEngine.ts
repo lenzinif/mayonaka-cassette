@@ -99,6 +99,7 @@ function createBundledTrackBeatMap(params: {
   const roleEnergy: Record<BeatSection['role'], number> = {
     intro: 0.34,
     build: 0.62,
+    groove: 0.72,
     drop: 0.92,
     breakdown: 0.42,
     outro: 0.3,
@@ -106,6 +107,7 @@ function createBundledTrackBeatMap(params: {
   const roleBrightness: Record<BeatSection['role'], number> = {
     intro: 0.56,
     build: 0.66,
+    groove: 0.76,
     drop: 0.88,
     breakdown: 0.55,
     outro: 0.52,
@@ -1323,8 +1325,8 @@ export class FunkAudioEngine {
     const audibleTrackSec = Math.max(0, this.virtualTrackSec - latencySec);
     const clockState = this.beatClock.sample(audibleTrackSec);
 
-    // Trigger automatic filter excitement when crossing into a drop bar
-    if (clockState.justCrossedBar && clockState.sectionRole === 'drop') {
+    // Trigger automatic filter excitement on genuine musical impact bars
+    if (clockState.justCrossedBar && clockState.isImpactBar) {
       this.triggerFilterBlip(0.8);
     }
 

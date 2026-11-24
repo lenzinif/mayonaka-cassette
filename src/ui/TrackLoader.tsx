@@ -26,6 +26,7 @@ export interface TrackLoaderProps {
 const SECTION_BAR_COLORS: Readonly<Record<SectionRole, string>> = {
   intro: 'bg-[#2C365E]',
   build: 'bg-[#FFD166]',
+  groove: 'bg-[#05D9E8]',
   drop: 'bg-[#FF3B7F]',
   breakdown: 'bg-[#2EE8C4]',
   outro: 'bg-[#2C365E]',
@@ -34,6 +35,7 @@ const SECTION_BAR_COLORS: Readonly<Record<SectionRole, string>> = {
 const SECTION_BADGE_STYLES: Readonly<Record<SectionRole, string>> = {
   intro: 'bg-[#2C365E] text-[#FFF5E4]',
   build: 'bg-[#FFD166] text-[#0B0E1E]',
+  groove: 'bg-[#05D9E8] text-[#0B0E1E]',
   drop: 'bg-[#FF3B7F] text-[#FFF5E4]',
   breakdown: 'bg-[#2EE8C4] text-[#0B0E1E]',
   outro: 'bg-[#2C365E] text-[#FFF5E4]',

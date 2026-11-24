@@ -87,4 +87,15 @@ describe('CassetteTapeWidget', () => {
 
     expect(text).toContain('[2/4]');
   });
+
+  it('renders groove section role badge cleanly', () => {
+    const text = renderClean(
+      createElement(CassetteTapeWidget, {
+        ...defaultProps,
+        sectionRole: 'groove',
+      }),
+    );
+
+    expect(text).toContain('groove');
+  });
 });

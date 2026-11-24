@@ -4,6 +4,7 @@ import {
   sectionAtBar,
   type BeatMap,
   type SectionRole,
+  type SpectralSpanKind,
 } from '@src/audio/BeatMap';
 import {
   FunkAudioEngine,
@@ -86,6 +87,7 @@ export interface TelemetrySnapshot {
   beatInBar: number;
   beatPulse: number;
   sectionRole: SectionRole;
+  spectralKind?: SpectralSpanKind | null;
   barEnergy: number;
   filterCutoffHz: number;
   trackTitle: string;
@@ -365,6 +367,7 @@ export class Game {
   private beatInBar = 0;
   private audioBeatIndex = 0;
   private sectionRole: SectionRole = 'intro';
+  private spectralKind: SpectralSpanKind | null = null;
   private barEnergy = 0.5;
   private barsSinceLastLightning = 99;
   private lastLightningWasDropEntry = false;
@@ -1348,6 +1351,7 @@ export class Game {
     this.beatInBar = clockState.beatInBar;
     this.audioBeatIndex = Math.max(0, clockState.beatFloat);
     this.sectionRole = clockState.sectionRole;
+    this.spectralKind = clockState.spectralKind;
     this.barEnergy = clockState.barEnergy;
 
     if (clockState.justCrossedBar && this.sectionRole !== prevRole) {
@@ -1388,14 +1392,17 @@ export class Game {
     if (clockState.justCrossedBar && tuning.bgRain === 1) {
       this.barsSinceLastLightning++;
 
-      // Extreme Case 1: Entering a real Drop section (must come from a build or show a genuine energy lift,
-      // preventing strikes on artificial plateau-split breakdown->drop boundaries in flat tracks)
+      // Extreme Case 1: Genuine musical impact bar (`impactBars`, including contrasting drops
+      // and LPF/HPF filter reopenings), with legacy fallback for BeatMaps without `impactBars`.
+      const hasExplicitImpacts = this.activeRoadBeatMap.impactBars !== undefined;
       const isDropEntry =
         this.barsSinceLastLightning >= 4 &&
-        this.sectionRole === 'drop' &&
-        prevRole !== 'drop' &&
-        (prevRole === 'build' ||
-          (this.barEnergy - prevBarEnergy >= 0.16 && this.barEnergy >= 0.55));
+        (hasExplicitImpacts
+          ? clockState.isImpactBar
+          : this.sectionRole === 'drop' &&
+            prevRole !== 'drop' &&
+            (prevRole === 'build' ||
+              (this.barEnergy - prevBarEnergy >= 0.16 && this.barEnergy >= 0.55)));
       // Extreme Case 2: Peak spectral energy bar with genuine local prominence & refractory period
       const isExtremeSpectralPeak =
         this.sectionRole !== 'intro' &&
@@ -2030,6 +2037,7 @@ export class Game {
       beatInBar: this.beatInBar,
       beatPulse: this.beatPulse,
       sectionRole: this.sectionRole,
+      spectralKind: this.spectralKind,
       barEnergy: this.barEnergy,
       filterCutoffHz: this.audio.cutoffHz,
       trackTitle: this.activeRoadBeatMap.title,

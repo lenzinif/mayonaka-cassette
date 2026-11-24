@@ -1,4 +1,10 @@
-import { barDurationSec, type BeatMap, type BeatSection, type SectionRole } from '@src/audio/BeatMap';
+import {
+  barDurationSec,
+  getImpactBars,
+  type BeatMap,
+  type BeatSection,
+  type SectionRole,
+} from '@src/audio/BeatMap';
 import { FORK_APPROACH_BARS, RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { DEFAULT_TUNING, tuning } from '@src/config/tuning';
 import { SeededRandom } from '@src/core/SeededRandom';
@@ -236,7 +242,17 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
   // ==========================================================================
   const segments: RoadSegment[] = [];
   const draftChunks: GeometryChunkDraft[] = [];
-  const dropMarkers: DropMarker[] = [];
+  const impactBars = getImpactBars(beatMap).filter((b) => b >= 0 && b < totalBars);
+  const impactBarSet = new Set<number>(impactBars);
+  const dropMarkers: DropMarker[] = impactBars.map((barIndex) => {
+    const segIdx = barIndex * segmentsPerBar;
+    return {
+      barIndex,
+      segmentIndex: segIdx,
+      worldZ: segIdx * segmentLength,
+    };
+  });
+  const phraseBars = beatMap.phraseBars ?? [];
 
   const lastY = (): number => {
     const last = segments[segments.length - 1];
@@ -287,17 +303,12 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
   for (let secIdx = 0; secIdx < sections.length; secIdx++) {
     const sec = sections[secIdx]!;
     const nextSec = sections[secIdx + 1];
-    const isPreDropSection = sec.role !== 'drop' && nextSec?.role === 'drop';
-    let justCrestedIntoDrop = sec.role === 'drop' && prevSectionCrested;
-
-    if (sec.role === 'drop') {
-      const dropSegIdx = sec.startBar * segmentsPerBar;
-      dropMarkers.push({
-        barIndex: sec.startBar,
-        segmentIndex: dropSegIdx,
-        worldZ: dropSegIdx * segmentLength,
-      });
-    }
+    const isPreDropSection =
+      sec.role !== 'drop' &&
+      nextSec !== undefined &&
+      (nextSec.role === 'drop' || impactBarSet.has(nextSec.startBar));
+    let justCrestedIntoDrop =
+      (sec.role === 'drop' || impactBarSet.has(sec.startBar)) && prevSectionCrested;
 
     let barCursor = sec.startBar;
     const secEndBar = sec.startBar + sec.bars;
@@ -311,8 +322,15 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
       const chunkIsMuffled = isRangeMuffled(barCursor, barCursor + actualBars);
 
       const requiresPreDropCrest = isPreDropSection && isFinalChunkOfSection && !chunkIsMuffled;
-      const requiresPostCrestReveal = sec.role === 'drop' && justCrestedIntoDrop;
+      const requiresPostCrestReveal =
+        (sec.role === 'drop' || impactBarSet.has(barCursor)) && justCrestedIntoDrop;
       justCrestedIntoDrop = false;
+
+      let phraseIndex = 0;
+      for (let p = 0; p < phraseBars.length; p++) {
+        if (phraseBars[p]! <= barCursor) phraseIndex++;
+        else break;
+      }
 
       const avgEnergy = averageBarEnergy(beatMap.barEnergy, barCursor, actualBars);
       const chunk = selectChunk(
@@ -329,6 +347,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
         requiresPostCrestReveal,
         chunkIsMuffled,
         isPreDropSection,
+        phraseIndex,
       );
       recentChunkIds.push(chunk.id);
       if (recentChunkIds.length > 3) {
@@ -540,6 +559,7 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     totalBars,
     segmentsPerBar,
     sceneryRng,
+    beatMap.phraseBars,
   );
 
   for (let i = 0; i < segments.length; i++) {
@@ -780,6 +800,7 @@ export function getSectionPaceFactor(
     case 'outro':
       return 0.92;
     case 'build':
+    case 'groove':
     case 'drop':
     default:
       return 1.0;
@@ -1014,6 +1035,9 @@ function computeRoleAwareCurveScale(
   if (role === 'intro' || role === 'outro') {
     return Math.max(0.65, Math.min(1.15, 1 + (energy - 0.5) * curveEnergyScale * 0.7));
   }
+  if (role === 'groove') {
+    return Math.max(0.8, Math.min(1.22, 1 + (energy - 0.5) * curveEnergyScale * 0.85));
+  }
   return Math.max(0.72, Math.min(1.35, 1 + (energy - 0.5) * curveEnergyScale));
 }
 
@@ -1035,6 +1059,7 @@ function selectChunk(
   requiresPostCrestReveal: boolean,
   chunkIsMuffled: boolean,
   isPreDropSection: boolean,
+  phraseIndex = 0,
 ): RoadChunk {
   const rolePool = getChunksForRole(role, catalog);
   const pool = rolePool.length > 0 ? rolePool : catalog;
@@ -1120,11 +1145,21 @@ function selectChunk(
       }
     }
 
+    // Phrase-driven variety on sustained `groove` sections: gently alternate cruise/scenic vs wangan
+    let phraseStyleBias = 1.0;
+    if (role === 'groove') {
+      const preferExpress = phraseIndex % 2 === 1;
+      const hasExpress = chunk.styleTags.includes('wangan') || chunk.styleTags.includes('technical');
+      const hasCruise = chunk.styleTags.includes('cruise') || chunk.styleTags.includes('scenic');
+      if (preferExpress && hasExpress) phraseStyleBias = 1.22;
+      else if (!preferExpress && hasCruise) phraseStyleBias = 1.22;
+    }
+
     // Muffled sections prefer tunnel-compatible choreography
     const muffleBias =
       chunkIsMuffled && chunk.allowedStructures.includes('tunnel') ? 1.65 : chunkIsMuffled ? 0.65 : 1.0;
 
-    return energyWeight * noveltyWeight * dnaWeight * elevationBias * muffleBias;
+    return energyWeight * noveltyWeight * dnaWeight * elevationBias * phraseStyleBias * muffleBias;
   });
 }
 
