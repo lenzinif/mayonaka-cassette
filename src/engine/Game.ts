@@ -1223,6 +1223,7 @@ export class Game {
       this.audioBeatIndex,
       this.audio.beatMap.bpm,
       this.sectionRole,
+      dt,
     );
     const nextPos = this.position + effectiveSpeed * dt;
 
@@ -1387,12 +1388,19 @@ export class Game {
     if (clockState.justCrossedBar && tuning.bgRain === 1) {
       this.barsSinceLastLightning++;
 
-      // Extreme Case 1: Entering the Drop section (maximum musical tension release)
-      const isDropEntry = this.sectionRole === 'drop' && prevRole !== 'drop';
-      // Extreme Case 2: Peak spectral energy bar (top 10% highest energy) with refractory period
+      // Extreme Case 1: Entering a real Drop section (must come from a build or show a genuine energy lift,
+      // preventing strikes on artificial plateau-split breakdown->drop boundaries in flat tracks)
+      const isDropEntry =
+        this.barsSinceLastLightning >= 4 &&
+        this.sectionRole === 'drop' &&
+        prevRole !== 'drop' &&
+        (prevRole === 'build' ||
+          (this.barEnergy - prevBarEnergy >= 0.16 && this.barEnergy >= 0.55));
+      // Extreme Case 2: Peak spectral energy bar with genuine local prominence & refractory period
       const isExtremeSpectralPeak =
         this.sectionRole !== 'intro' &&
-        this.barEnergy >= 0.88 &&
+        this.barEnergy >= 0.90 &&
+        this.barEnergy - prevBarEnergy >= 0.14 &&
         this.barsSinceLastLightning >= 12;
       // Extreme Case 3: Sudden massive spectral novelty surge (+0.28 in a single bar),
       // or a delayed post-pickup drop climax when the drop section started 1-2 bars earlier on a low-energy bar
@@ -1400,6 +1408,7 @@ export class Game {
         this.barEnergy - prevBarEnergy >= 0.28 &&
         (this.barsSinceLastLightning >= 8 ||
           (this.sectionRole === 'drop' &&
+            prevRole === 'drop' &&
             this.lastLightningWasDropEntry &&
             this.barsSinceLastLightning <= 2 &&
             prevBarEnergy < 0.48 &&
@@ -1589,21 +1598,42 @@ export class Game {
     this.view.nextTrack =
       this.forkChoice === 'right' ? this.activeNextTrackLookahead : undefined;
 
+    const cameraSegForWeather = findSegment(this.track, renderPos);
+    const inTunnel = cameraSegForWeather?.env === 'tunnel';
+    let isDeepInTunnel = false;
+    if (inTunnel && this.renderRoad && !this.view.nextTrack) {
+      const segs = this.track.segments;
+      const segCount = segs.length;
+      if (segCount > 0) {
+        const baseIdx = cameraSegForWeather.index;
+        const lookaheadCount = Math.max(1, Math.min(this.view.drawDistance, segCount));
+        isDeepInTunnel = true;
+        for (let i = 1; i < lookaheadCount; i++) {
+          if (segs[(baseIdx + i) % segCount]!.env !== 'tunnel') {
+            isDeepInTunnel = false;
+            break;
+          }
+        }
+      }
+    }
+
     const tBg0 = performance.now();
-    if (this.renderBg) {
-      this.background.render(
-        ctx,
-        width,
-        height,
-        this.renderPalette,
-        this.beatPulse,
-        this.downbeatPulse,
-        alpha,
-        grooveIntensity,
-      );
-    } else {
-      ctx.fillStyle = this.renderPalette.skyTop;
-      ctx.fillRect(0, 0, width, height);
+    if (!isDeepInTunnel) {
+      if (this.renderBg) {
+        this.background.render(
+          ctx,
+          width,
+          height,
+          this.renderPalette,
+          this.beatPulse,
+          this.downbeatPulse,
+          alpha,
+          grooveIntensity,
+        );
+      } else {
+        ctx.fillStyle = this.renderPalette.skyTop;
+        ctx.fillRect(0, 0, width, height);
+      }
     }
     if (this.syncGpuProbe) flushCanvasGpu(ctx);
     const tRoad0 = performance.now();
@@ -1628,8 +1658,7 @@ export class Game {
       drawPlayerCar(ctx, this.car, width, height, alpha);
     }
     const tFgWeather0 = performance.now();
-    const cameraSegForWeather = findSegment(this.track, renderPos);
-    if (this.renderBg && cameraSegForWeather?.env !== 'tunnel') {
+    if (this.renderBg && !inTunnel) {
       this.background.renderForegroundWeather(ctx, width, height);
     }
     const tParts0 = performance.now();
@@ -1848,7 +1877,23 @@ export class Game {
       this.handleCarEvent,
     );
     this.audio.triggerFilterBlip(1.0);
-    this.background.triggerLightningStrike();
+    const prevDropRole =
+      barIndex > 0 ? sectionAtBar(this.activeRoadBeatMap, barIndex - 1)?.role : undefined;
+    const dropEnergy = this.activeRoadBeatMap.barEnergy[barIndex] ?? this.barEnergy;
+    const preDropEnergy =
+      barIndex > 0 ? (this.activeRoadBeatMap.barEnergy[barIndex - 1] ?? 0) : 0;
+    const hasDropContrast =
+      prevDropRole === 'build' || (dropEnergy - preDropEnergy >= 0.16 && dropEnergy >= 0.55);
+    if (
+      tuning.bgRain === 1 &&
+      tuning.bgLightningOnBeat === 1 &&
+      hasDropContrast &&
+      this.barsSinceLastLightning >= 4
+    ) {
+      this.background.triggerLightningStrike();
+      this.barsSinceLastLightning = 0;
+      this.lastLightningWasDropEntry = true;
+    }
     this.bridge.emit({
       type: 'dropSync',
       barIndex,

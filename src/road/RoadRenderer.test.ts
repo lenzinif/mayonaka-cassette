@@ -1065,8 +1065,9 @@ describe('RoadRenderer — Rendering Environments', () => {
       // 1. Approaching tunnel from outside (position = 0): draws entrance portal & bore walls
       renderer.render(ctx, track, { ...defaultView, position: 0, drawDistance: 60 }, PALETTE_NIGHT_FUNK);
       expect(clipCalls).toBe(0);
-      expect(fills).toContain('#1b172c'); // Tunnel interior wall
-      expect(fills).toContain('#100c1e'); // Tunnel ceiling vault
+      expect(fills).toContain('#231e38'); // Tunnel lower dado concrete wall
+      expect(fills).toContain('#161226'); // Tunnel upper chamfer wall
+      expect(fills).toContain('#0c0918'); // Tunnel ceiling crown
       expect(fills).toContain('#2d2645'); // Entrance portal concrete arch
       expect(fills).toContain('#ffd166'); // Portal hazard chevron bar
 
@@ -1093,6 +1094,7 @@ describe('RoadRenderer — Rendering Environments', () => {
 
       let inPath = false;
       let currentPts: Array<{ x: number; y: number }> = [];
+      let ceilingLightDraws = 0;
       const ctx = {
         canvas: { width: 640, height: 360 },
         fillStyle: '#000',
@@ -1120,6 +1122,8 @@ describe('RoadRenderer — Rendering Environments', () => {
         fill: () => {
           if (ctx.fillStyle === '#1b162e' || ctx.fillStyle === '#151126') {
             outerPathVertices.push(...currentPts);
+          } else if (ctx.fillStyle === '#ffffff') {
+            ceilingLightDraws++;
           }
           inPath = false;
         },
@@ -1129,6 +1133,7 @@ describe('RoadRenderer — Rendering Environments', () => {
             darkMaskRects.push({ x, y, w, h });
           } else if (ctx.fillStyle === '#ffffff') {
             ceilingLightRects.push({ x, y, w, h });
+            ceilingLightDraws++;
           }
         },
         createLinearGradient: () => ({ addColorStop: noop }),
@@ -1173,6 +1178,7 @@ describe('RoadRenderer — Rendering Environments', () => {
       for (const s of segments) s.curve = 0;
       darkMaskRects.length = 0;
       ceilingLightRects.length = 0;
+      ceilingLightDraws = 0;
       renderer.render(
         ctx,
         track,
@@ -1183,11 +1189,339 @@ describe('RoadRenderer — Rendering Environments', () => {
       // 4 initial surround rects + at most 0..2 tightening rects (far below 200*4=800), AND ceiling lights only on tunnelLight segments (segs 16 in T1, 48 & 64 in T2)
       expect(darkMaskRects.length).toBeLessThanOrEqual(8);
       expect(darkMaskRects.length).toBeGreaterThanOrEqual(3);
-      expect(ceilingLightRects.length).toBe(3);
+      expect(ceilingLightDraws).toBe(3);
 
       // Specifically check Tunnel 2 (at n >= 37 while Tunnel 1 ends at n = 16) did NOT re-paint full-screen #070510 over the open sky gap!
       const secondFullTopMasks = darkMaskRects.filter((r) => r.x === 0 && r.y === 0 && r.w === 640);
       expect(secondFullTopMasks.length).toBe(1);
+    });
+
+    it('culls outdoor segments when tunnel exit is past drawDistance and renders flush wall chevrons without pylon wire bleed', () => {
+      const renderer = new RoadRenderer();
+      let clipCalls = 0;
+      let strokeCalls = 0;
+      const darkMaskRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const fills: string[] = [];
+      const noop = () => {};
+
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        clip: () => {
+          clipCalls++;
+        },
+        fill: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        stroke: () => {
+          strokeCalls++;
+        },
+        fillRect: (x: number, y: number, w: number, h: number) => {
+          if (ctx.fillStyle === '#070510') {
+            darkMaskRects.push({ x, y, w, h });
+          }
+          fills.push(ctx.fillStyle as string);
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 160; i++) {
+        const inTunnel = i >= 10 && i < 110;
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: inTunnel ? 3.2 : 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: inTunnel ? [] : [{ kind: 'pylon', offset: 4.5, variant: 0, chainId: 1 }],
+          fog: 1,
+          env: inTunnel ? 'tunnel' : 'standard',
+          tunnelLight: inTunnel && i % 16 === 0,
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // Deep inside curved tunnel (position = 15 * segmentLength, exit at seg 110 > 15 + 60):
+      // Exit is beyond drawDistance -> 1 full-screen #070510 backdrop, zero outdoor segments/pylon wires, flush wall chevrons!
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 15 * segmentLength, drawDistance: 60 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(clipCalls).toBe(0);
+      expect(strokeCalls).toBe(0);
+      expect(renderer.stats.drawnProps).toBe(0);
+      expect(darkMaskRects[0]).toEqual({ x: 0, y: 0, w: 640, h: 360 });
+      expect(fills).toContain('#00f5d4'); // Flush wall-mounted curve chevron panel
+    });
+
+    it('renders tunnel walls, ceiling, and backlit exit rim continuously across grazing sags and crest exits', () => {
+      const renderer = new RoadRenderer();
+      const fills: string[] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        stroke: noop,
+        fillRect: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      // Build a tunnel climbing to a gentle crest right at exit (seg 24), then descending open road
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      let prevY = 0;
+      for (let i = 0; i < 60; i++) {
+        const nextY = i < 24 ? prevY + 120 : prevY - 120;
+        const p1 = createPoint(prevY, i * segmentLength);
+        const p2 = createPoint(nextY, (i + 1) * segmentLength);
+        prevY = nextY;
+        segments.push({
+          index: i,
+          p1,
+          p2,
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 4 && i < 25 ? 'tunnel' : 'standard',
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // Drive inside tunnel climbing toward the exit crest (seg 24 has p2.screenY >= segClipY while ceilY2 < segClipY)
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 8 * segmentLength, drawDistance: 45 },
+        PALETTE_NIGHT_FUNK,
+      );
+
+      // Even though seg 24 is on the crest lip (p2.screenY >= segClipY), all tunnel slices 9..24 (16 slices)
+      // plus open crest approach remain drawn and the backlit exit rim renders cleanly!
+      expect(renderer.stats.drawnSegments).toBeGreaterThanOrEqual(16);
+      expect(fills).toContain(PALETTE_NIGHT_FUNK.horizonGlow!);
+    });
+
+    it('keeps foreground steered tunnel walls extending to viewport edges and crest walls unclipped', () => {
+      const renderer = new RoadRenderer();
+      const wallXs: number[] = [];
+      let currentStyle = '#000';
+      const noop = () => {};
+      const recordVertex = (x: number) => {
+        if (
+          currentStyle === '#231e38' ||
+          currentStyle === '#1e1a30' ||
+          currentStyle === '#1f1a33' ||
+          currentStyle === '#161226' ||
+          currentStyle === '#130f21' ||
+          currentStyle === '#120e20'
+        ) {
+          wallXs.push(x);
+        }
+      };
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        get fillStyle() {
+          return currentStyle;
+        },
+        set fillStyle(val: string) {
+          currentStyle = val;
+        },
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: (x: number) => recordVertex(x),
+        lineTo: (x: number) => recordVertex(x),
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: noop,
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      const segmentLength = 200;
+      const flatSegments: RoadSegment[] = [];
+      for (let i = 0; i < 60; i++) {
+        flatSegments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: 'tunnel',
+        });
+      }
+      const flatTrack: Track = {
+        segments: flatSegments,
+        segmentLength,
+        length: flatSegments.length * segmentLength,
+      };
+
+      renderer.render(
+        ctx,
+        flatTrack,
+        { ...defaultView, position: 10 * segmentLength, playerX: 0.95, drawDistance: 35 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(Math.max(...wallXs)).toBeGreaterThanOrEqual(640);
+    });
+
+    it('never emits a full-screen blackout mask on the penultimate exit segment (cameraTunnelEndN === 1, cameraZ <= cameraDepth)', () => {
+      const renderer = new RoadRenderer();
+      const darkMaskRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: (x: number, y: number, w: number, h: number) => {
+          if (ctx.fillStyle === '#070510') {
+            darkMaskRects.push({ x, y, w, h });
+          }
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 60; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 4 && i < 20 ? 'tunnel' : 'standard',
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // Camera on seg 18 with basePercent = 0.998 -> seg 19 (exit seg) has p1.cameraZ = 0.4 <= cameraDepth
+      renderer.render(
+        ctx,
+        track,
+        {
+          ...defaultView,
+          position: 18 * segmentLength + segmentLength * 0.998,
+          drawDistance: 45,
+        },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(
+        darkMaskRects.some((r) => r.x === 0 && r.y === 0 && r.w === 640 && r.h === 360),
+      ).toBe(false);
+    });
+
+    it('preserves ribs, chevrons, aligned road floor, and backlit rim bounds across curved far tunnels', () => {
+      const renderer = new RoadRenderer();
+      const fills: string[] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        stroke: noop,
+        fillRect: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      let prevY = 0;
+      for (let i = 0; i < 160; i++) {
+        const nextY = prevY - (i >= 10 && i < 110 ? 18 : 0);
+        segments.push({
+          index: i,
+          p1: createPoint(prevY, i * segmentLength),
+          p2: createPoint(nextY, (i + 1) * segmentLength),
+          curve: i >= 10 && i < 110 ? 4.0 : 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 10 && i < 110 ? 'tunnel' : 'standard',
+          tunnelLight: i % 16 === 0,
+        });
+        prevY = nextY;
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      // Drive inside a long curved tunnel with drawDistance = 130 (exit at seg 110 visible & rim-padded)
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 15 * segmentLength, drawDistance: 130 },
+        PALETTE_NIGHT_FUNK,
+      );
+      expect(fills).toContain('#2e274b'); // Arch ribs preserved (not dropped by over-eager coalescing)
+      expect(fills).toContain('#00f5d4'); // Curve wall chevrons preserved
+      expect(fills).toContain(PALETTE_NIGHT_FUNK.horizonGlow!); // Backlit exit rim drawn cleanly
     });
   });
 });

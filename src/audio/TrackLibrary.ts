@@ -8,7 +8,7 @@ import {
 import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
 
 const IDB_NAME = 'mayonaka-cassette-audio';
-const IDB_VERSION = 4;
+const IDB_VERSION = 5;
 const BEATMAP_STORE = 'beatmaps';
 const SCORE_STORE = 'scores';
 const LS_SCORES_KEY = 'mayonaka-cassette-best-scores-v1';
@@ -641,7 +641,7 @@ export class TrackLibrary {
           const db = req.result;
           if (!db.objectStoreNames.contains(BEATMAP_STORE)) {
             db.createObjectStore(BEATMAP_STORE, { keyPath: 'contentHash' });
-          } else if (event.oldVersion > 0 && event.oldVersion < 4) {
+          } else if (event.oldVersion > 0 && event.oldVersion < 5) {
             const store = req.transaction?.objectStore(BEATMAP_STORE);
             if (store && typeof store.openCursor === 'function') {
               const cursorReq = store.openCursor();
@@ -649,7 +649,7 @@ export class TrackLibrary {
                 const cursor = cursorReq.result;
                 if (!cursor) return;
                 const val = cursor.value as Partial<BeatMap> | undefined;
-                if (val && val.source === 'analysis' && val.barBrightness === undefined) {
+                if (val && val.source === 'analysis') {
                   cursor.delete();
                 }
                 cursor.continue();
@@ -660,8 +660,15 @@ export class TrackLibrary {
             db.createObjectStore(SCORE_STORE, { keyPath: 'contentHash' });
           }
         };
-        req.onsuccess = () => resolve(req.result);
+        req.onsuccess = () => {
+          const db = req.result;
+          db.onversionchange = () => {
+            db.close?.();
+          };
+          resolve(db);
+        };
         req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
       } catch {
         resolve(null);
       }
