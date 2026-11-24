@@ -813,9 +813,16 @@ describe('SongRoadGenerator', () => {
       for (let s = tunnelStartSeg; s < tunnelEndSeg; s++) {
         const seg = road.segments[s]!;
         expect(seg.env).toBe('tunnel');
-        // Zero exterior props/pylons/vignettes inside tunnel (only optional interior chevrons)
-        for (const sp of seg.sprites) {
-          expect(sp.kind).toBe('chevron');
+        // Zero freestanding props inside tunnel bores (curve guidance is rendered flush on tunnel walls)
+        expect(seg.sprites).toEqual([]);
+      }
+      // Portal approach/exit clearance: 2 open segments before entrance & 1 after exit have no Band A/B or overhead props
+      for (const adjIdx of [tunnelStartSeg - 2, tunnelStartSeg - 1, tunnelEndSeg]) {
+        const adj = road.segments[adjIdx]!;
+        expect(adj.env).not.toBe('tunnel');
+        for (const sp of adj.sprites) {
+          expect(isOverheadProp(sp.kind)).toBe(false);
+          expect(Math.abs(sp.offset)).toBeGreaterThanOrEqual(3.0);
         }
       }
       // Drop entry segment right after tunnel exit is back to open sky!
@@ -946,16 +953,14 @@ describe('SongRoadGenerator', () => {
       }
       expect(openSceneryCount).toBeGreaterThan(5);
 
-      // Inside tunnel [12, 16), zero outdoor props, and tunnelLight marks appear cleanly at beat/cadence stride
+      // Inside tunnel [12, 16), zero freestanding props, and tunnelLight marks appear cleanly at beat/cadence stride
       const tunStart = 12 * road.segmentsPerBar;
       const tunEnd = 16 * road.segmentsPerBar;
       let tunnelLightCount = 0;
       for (let s = tunStart; s < tunEnd; s++) {
         const seg = road.segments[s]!;
         expect(seg.env).toBe('tunnel');
-        for (const sp of seg.sprites) {
-          expect(sp.kind).toBe('chevron');
-        }
+        expect(seg.sprites).toEqual([]);
         if (seg.tunnelLight) tunnelLightCount++;
       }
       // 4 bars = 16 beats; with cadence 1 or 2 beats, expect 8..16 beat-synced lights (far fewer than % 4's ~88)
@@ -1107,6 +1112,48 @@ describe('SongRoadGenerator', () => {
       // Additive tail steering preserves the authorial HILL.HIGH outro bump (~12000) before fork
       expect(peakPreForkY).toBeGreaterThan(8000);
       expect(road.segments[road.segments.length - 1]!.p2.worldY).toBeCloseTo(0, 3);
+    });
+
+    it('caps slope and attenuates CURVE.HARD on compressed 1-3 bar pre-drop climbs and breakdown->drop transitions', () => {
+      const customMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:compressed-pre-drop-slope-and-curve-safety',
+        bpm: 134,
+        barEnergy: new Array<number>(28).fill(0.8),
+        barBrightness: new Array<number>(28).fill(0.8),
+        sections: [
+          { startBar: 0, bars: 1, role: 'intro' },      // 1-bar compressed intro -> drop
+          { startBar: 1, bars: 11, role: 'drop' },
+          { startBar: 12, bars: 5, role: 'breakdown' }, // 4-bar + 1-bar compressed tail -> drop
+          { startBar: 17, bars: 4, role: 'drop' },
+          { startBar: 21, bars: 3, role: 'breakdown' }, // 3-bar compressed breakdown -> drop
+          { startBar: 24, bars: 4, role: 'drop' },
+        ],
+      };
+
+      const road = generateSongRoad(customMap);
+
+      let maxAbsSlope = 0;
+      for (let i = 0; i < road.segments.length; i++) {
+        const seg = road.segments[i]!;
+        const slope = (seg.p2.worldY - seg.p1.worldY) / road.segmentLength;
+        maxAbsSlope = Math.max(maxAbsSlope, Math.abs(slope));
+      }
+      // Physical grade ceiling keeps every segment <= 0.50 even on 1-bar compressed pre-drop chunks
+      expect(maxAbsSlope).toBeLessThanOrEqual(0.5);
+
+      // Breakdown->drop pre-drop climb chunks must never apply CURVE.HARD (> 2.4) on uphill crests
+      for (const ch of road.chunks) {
+        if (ch.role !== 'breakdown') continue;
+        const nextBar = ch.startBar + ch.bars;
+        const isPreDrop = road.dropMarkers.some((dm) => dm.barIndex === nextBar);
+        if (!isPreDrop) continue;
+        let maxUphillCurve = 0;
+        for (let s = ch.startSegment; s < ch.startSegment + ch.segmentCount; s++) {
+          maxUphillCurve = Math.max(maxUphillCurve, Math.abs(road.segments[s]!.curve));
+        }
+        expect(maxUphillCurve).toBeLessThanOrEqual(2.4);
+      }
     });
   });
 });
