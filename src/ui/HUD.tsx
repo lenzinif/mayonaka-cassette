@@ -86,6 +86,7 @@ export function HUD({
 
   // Keyboard shortcut listeners
   useEffect(() => {
+    if (!gameStarted) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
@@ -103,7 +104,7 @@ export function HUD({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [handleToggleCleanHud]);
+  }, [gameStarted, handleToggleCleanHud]);
 
   // Telemetry event listeners & tape slack triggers
   useEffect(() => {

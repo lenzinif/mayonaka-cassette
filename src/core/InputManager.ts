@@ -167,6 +167,7 @@ export class InputManager implements InputSource {
 
   private readonly pressQueue: InputPressEvent[] = [];
   private readonly drainedPresses: InputPressEvent[] = [];
+  private enabled = true;
 
   constructor(
     private readonly target: Window = window,
@@ -177,6 +178,23 @@ export class InputManager implements InputSource {
     target.addEventListener('blur', this.onBlur);
     target.addEventListener('gamepadconnected', this.onGamepadConnected);
     target.addEventListener('gamepaddisconnected', this.onGamepadDisconnected);
+  }
+
+  get isEnabled(): boolean {
+    return this.enabled;
+  }
+
+  /**
+   * Enables or disables gameplay input capture.
+   * Disabling immediately flushes held keys, queued press edges, and gamepad state
+   * so menu/modal navigation never leaks into driving controls.
+   */
+  setEnabled(enabled: boolean): void {
+    if (this.enabled === enabled) return;
+    this.enabled = enabled;
+    if (!enabled) {
+      this.onBlur();
+    }
   }
 
   isDown(action: Action): boolean {
@@ -204,6 +222,7 @@ export class InputManager implements InputSource {
    * continuous button states, and enqueues high-resolution timestamped rising-edge events.
    */
   poll = (): void => {
+    if (!this.enabled) return;
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     if (
       !this.gamepadConnected &&
@@ -374,7 +393,7 @@ export class InputManager implements InputSource {
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
-    if (e.defaultPrevented) return;
+    if (!this.enabled || e.defaultPrevented) return;
     const tag = (e.target as HTMLElement | null)?.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
 

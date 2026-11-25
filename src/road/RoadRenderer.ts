@@ -802,7 +802,8 @@ export class RoadRenderer {
         let truckClipActive = false;
         let tIdx = firstTruckIdx;
         while (tIdx !== -1) {
-          const truck = traffic.trucks[tIdx]!;
+          const truck = traffic.trucks[tIdx];
+          if (!truck) break;
           let prevTruckZ = truck.prevZ ?? truck.z;
           if (!isStreaming) {
             if (truck.z < prevTruckZ && prevTruckZ - truck.z > trackLength * 0.5) {

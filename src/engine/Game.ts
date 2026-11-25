@@ -420,6 +420,7 @@ export class Game {
   private activeRoadBeatMap: BeatMap;
 
   private isPaused = false;
+  private inputLocked = false;
   private renderDirty = true;
   private lastRenderCtx: CanvasRenderingContext2D | null = null;
   renderBg = true;
@@ -483,6 +484,29 @@ export class Game {
 
   get paused(): boolean {
     return this.isPaused;
+  }
+
+  get isInputLocked(): boolean {
+    return this.inputLocked;
+  }
+
+  /**
+   * Locks or unlocks gameplay input processing (pause toggle, unpause-on-drive,
+   * steering, throttle, shifting) while the Main Menu or full-screen modals are active.
+   */
+  setInputLocked(locked: boolean): void {
+    this.inputLocked = locked;
+    if (locked) {
+      this.input.consumePresses?.();
+      this.controls.left = false;
+      this.controls.right = false;
+      this.controls.accelerate = false;
+      this.controls.brake = false;
+      this.controls.drift = false;
+      this.controls.steerAxis = undefined;
+      this.controls.throttleAxis = undefined;
+      this.controls.brakeAxis = undefined;
+    }
   }
 
   get currentFov(): number {
@@ -1187,7 +1211,7 @@ export class Game {
 
     // 1. Process timestamped discrete key presses (Beat-Shift, Tofu Mode, Auto-Shift, Fork Choice, Pause)
     const presses = this.input.consumePresses?.();
-    if (presses && presses.length > 0) {
+    if (!this.inputLocked && presses && presses.length > 0) {
       for (let i = 0; i < presses.length; i++) {
         const p = presses[i]!;
         if (p.action === 'pause') {
@@ -1297,14 +1321,25 @@ export class Game {
     }
 
     // 2. Poll continuous driving controls (digital buttons + analog Gamepad axes)
-    this.controls.left = this.input.isDown('left');
-    this.controls.right = this.input.isDown('right');
-    this.controls.accelerate = this.input.isDown('accelerate');
-    this.controls.brake = this.input.isDown('brake');
-    this.controls.drift = this.input.isDown('drift');
-    this.controls.steerAxis = this.input.getSteerAxis?.();
-    this.controls.throttleAxis = this.input.getThrottleAxis?.();
-    this.controls.brakeAxis = this.input.getBrakeAxis?.();
+    if (this.inputLocked) {
+      this.controls.left = false;
+      this.controls.right = false;
+      this.controls.accelerate = false;
+      this.controls.brake = false;
+      this.controls.drift = false;
+      this.controls.steerAxis = undefined;
+      this.controls.throttleAxis = undefined;
+      this.controls.brakeAxis = undefined;
+    } else {
+      this.controls.left = this.input.isDown('left');
+      this.controls.right = this.input.isDown('right');
+      this.controls.accelerate = this.input.isDown('accelerate');
+      this.controls.brake = this.input.isDown('brake');
+      this.controls.drift = this.input.isDown('drift');
+      this.controls.steerAxis = this.input.getSteerAxis?.();
+      this.controls.throttleAxis = this.input.getThrottleAxis?.();
+      this.controls.brakeAxis = this.input.getBrakeAxis?.();
+    }
 
     if (!this.hasStartedDriving) {
       const throttleInput =
@@ -1843,9 +1878,6 @@ export class Game {
       drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
     }
 
-    if (this.isPaused && this.hasStartedDriving) {
-      drawPauseOverlay(ctx, width, height);
-    }
     if (this.syncGpuProbe) flushCanvasGpu(ctx);
 
     const tEnd = performance.now();
@@ -2366,76 +2398,4 @@ export class Game {
     const minFps = maxVal > 0 ? Math.round(1000 / maxVal) : this.lastFps;
     return { p95FrameMs, maxFrameMs, minFps };
   }
-}
-
-/**
- * 80s arcade pause overlay drawn directly on the Canvas (AGENTS.md §4.9 & §5 M8).
- */
-export function drawPauseOverlay(
-  ctx: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-): void {
-  ctx.save();
-  ctx.fillStyle = 'rgba(6, 1, 18, 0.78)';
-  ctx.fillRect(0, 0, width, height);
-
-  const boxW = 260;
-  const boxH = 88;
-  const boxX = Math.round((width - boxW) * 0.5);
-  const boxY = Math.round((height - boxH) * 0.5 - 12);
-
-  ctx.fillStyle = 'rgba(13, 2, 33, 0.96)';
-  const roundRectSupported = typeof (ctx as unknown as { roundRect?: unknown }).roundRect === 'function';
-  if (roundRectSupported) {
-    ctx.beginPath();
-    (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void }).roundRect(
-      boxX,
-      boxY,
-      boxW,
-      boxH,
-      6,
-    );
-    ctx.fill();
-    ctx.strokeStyle = '#05d9e8';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-
-    ctx.beginPath();
-    (ctx as unknown as { roundRect: (x: number, y: number, w: number, h: number, r: number) => void }).roundRect(
-      boxX + 3,
-      boxY + 3,
-      boxW - 6,
-      boxH - 6,
-      4,
-    );
-    ctx.strokeStyle = '#ff2a6d';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  } else {
-    ctx.fillRect(boxX, boxY, boxW, boxH);
-    ctx.strokeStyle = '#05d9e8';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(boxX, boxY, boxW, boxH);
-
-    ctx.strokeStyle = '#ff2a6d';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(boxX + 3, boxY + 3, boxW - 6, boxH - 6);
-  }
-
-  ctx.fillStyle = '#ff2a6d';
-  ctx.font = '900 20px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('PAUSED', Math.round(width * 0.5), boxY + 28);
-
-  ctx.fillStyle = '#05d9e8';
-  ctx.font = '700 9px monospace';
-  ctx.fillText('PRESS [P], [ESC] OR GAMEPAD [START]', Math.round(width * 0.5), boxY + 52);
-
-  ctx.fillStyle = '#f472b6';
-  ctx.font = '700 8px monospace';
-  ctx.fillText('CLICK ANYWHERE TO RESUME', Math.round(width * 0.5), boxY + 68);
-
-  ctx.restore();
 }
