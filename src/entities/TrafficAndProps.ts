@@ -641,12 +641,8 @@ export class TrafficManager {
       this.collisionCooldown = Math.max(0, this.collisionCooldown - dt);
     }
 
-    // 1. Advance all AI Kei Trucks (forward Z + lateral knockback recovery) and rebuild spatial index
-    if (this.segmentHeads.length < segCount) {
-      this.segmentHeads = new Int32Array(segCount);
-    }
-    this.segmentHeads.fill(-1);
-
+    // 1. Advance all AI Kei Trucks (forward Z + lateral knockback recovery), recycling out-of-window
+    //    streaming trucks via swap-with-last before rebuilding spatial buckets so indices never go stale.
     const maxSpeed = tuning.maxSpeed;
     const streaming = isStreamingTrack(track);
     const ringMask = streaming ? track.ringMask : 0;
@@ -752,14 +748,11 @@ export class TrafficManager {
           t.tiltAngle = 0;
         }
       }
-
-      const segIdx = streaming
-        ? Math.floor(t.z / segLen) & ringMask
-        : ((Math.floor(t.z / segLen) % segCount) + segCount) % segCount;
-      t.segmentIndex = segIdx;
-      t.nextInSegment = this.segmentHeads[segIdx]!;
-      this.segmentHeads[segIdx] = i;
     }
+
+    // Rebuild per-segment spatial linked lists AFTER all swap-with-last removals complete
+    // so every bucket head and `nextInSegment` index is strictly within `[0, this.trucks.length - 1]`.
+    this.rebuildSpatialIndex(track);
 
     if (this.collisionCooldown > 0) return;
 
@@ -777,7 +770,8 @@ export class TrafficManager {
         : (playerSegIdx + offset + segCount) % segCount;
       let tIdx = this.segmentHeads[checkSeg]!;
       while (tIdx !== -1) {
-        const truck = this.trucks[tIdx]!;
+        const truck = this.trucks[tIdx];
+        if (!truck) break;
         if (truck.knockedTimer > 2.4) {
           tIdx = truck.nextInSegment;
           continue;

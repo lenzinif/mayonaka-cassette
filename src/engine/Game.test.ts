@@ -465,7 +465,37 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
 
     game.render(mockCtx, 1, 60);
     expect(fillRectCalls.length).toBeGreaterThan(0);
-    expect(fillTextCalls.some((c) => c[0] === 'PAUSED')).toBe(true);
+    // Pause UI is owned by the React Mayonaka Hi-Fi PauseMenu, not a legacy canvas box
+    expect(fillTextCalls.some((c) => c[0] === 'PAUSED')).toBe(false);
+  });
+
+  it('locks gameplay input while menus/modals are active so WASD cannot unpause or drive', () => {
+    const input = new FakeInput();
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(60);
+    const game = new Game({ input, bridge });
+
+    game.setPaused(true);
+    game.setInputLocked(true);
+
+    // Pressing accelerate, brake, shiftUp, or pause while locked must not unpause or drive
+    input.setDown('accelerate', true);
+    input.press('accelerate');
+    input.press('brake');
+    input.press('shiftUp');
+    input.press('pause');
+    game.update(1 / 60);
+
+    expect(game.paused).toBe(true);
+    expect(game.hasStartedDriving).toBe(false);
+    expect(game.car.speed).toBe(0);
+    expect(game.position).toBe(0);
+
+    // Unlocking input does not replay stale queued presses from menu navigation
+    input.setDown('accelerate', false);
+    game.setInputLocked(false);
+    game.update(1 / 60);
+    expect(game.paused).toBe(true);
+    expect(game.hasStartedDriving).toBe(false);
   });
 
   it('measures real-time physics and render profiling metrics for M8 Performance Profiler', () => {

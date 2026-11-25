@@ -325,8 +325,84 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
       tm.update(1 / 60, asm.track, car, prevPos + 800, pos + 800);
       if (tm.trucks.length > 0) sawActiveTruck = true;
       expect(tm.trucks.length).toBeLessThanOrEqual(24);
+
+      // Every spatial bucket head and linked-list pointer must stay strictly within [0, trucks.length - 1]
+      for (let s = 0; s < asm.track.segments.length; s++) {
+        let idx = tm.getFirstTruckOnSegment(s);
+        let hops = 0;
+        while (idx !== -1) {
+          expect(idx).toBeGreaterThanOrEqual(0);
+          expect(idx).toBeLessThan(tm.trucks.length);
+          const truck = tm.trucks[idx];
+          expect(truck).toBeDefined();
+          expect(truck!.segmentIndex).toBe(s);
+          idx = truck!.nextInSegment;
+          hops++;
+          expect(hops).toBeLessThanOrEqual(tm.trucks.length);
+        }
+      }
     }
     expect(sawActiveTruck).toBe(true);
+  });
+
+  it('keeps spatial bucket indices valid when swap-with-last recycles an earlier streaming truck', () => {
+    const bp = compileSongBlueprint(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+    const asm = new HorizonAssembler(bp);
+    const tm = new TrafficManager();
+    tm.resetForStreaming(asm.track, bp.contentHash);
+
+    // Seed two streaming trucks: index 0 behind minActiveZ (will be recycled), index 1 ahead (survives)
+    const segLen = asm.track.segmentLength;
+    const playerZ = 40 * segLen;
+    tm.trucks.length = 0;
+    tm.trucks.push(
+      {
+        id: 101,
+        z: 10 * segLen, // < playerZ - 14 * segLen -> recycled via swap-with-last
+        prevZ: 10 * segLen,
+        baseLaneOffset: -0.58,
+        laneOffset: -0.58,
+        prevLaneOffset: -0.58,
+        lateralVel: 0,
+        tiltAngle: 0,
+        prevTiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.4,
+        variant: 0,
+        segmentIndex: 10,
+        nextInSegment: -1,
+        forkBranch: -1,
+      },
+      {
+        id: 102,
+        z: 60 * segLen, // in-window -> swapped into index 0
+        prevZ: 60 * segLen,
+        baseLaneOffset: 0.58,
+        laneOffset: 0.58,
+        prevLaneOffset: 0.58,
+        lateralVel: 0,
+        tiltAngle: 0,
+        prevTiltAngle: 0,
+        knockedTimer: 0,
+        speedRatio: 0.4,
+        variant: 1,
+        segmentIndex: 60,
+        nextInSegment: -1,
+        forkBranch: 1,
+      },
+    );
+
+    const car = new PlayerCar();
+    car.speed = bp.referenceSpeed;
+    tm.update(1 / 60, asm.track, car, playerZ - 100, playerZ);
+
+    expect(tm.trucks).toHaveLength(1);
+    expect(tm.trucks[0]!.id).toBe(102);
+
+    // Surviving truck's segment bucket must point to its new index (0), never the stale pre-swap index (1)
+    const survivingSeg = tm.trucks[0]!.segmentIndex;
+    expect(tm.getFirstTruckOnSegment(survivingSeg)).toBe(0);
+    expect(tm.trucks[0]!.nextInSegment).toBe(-1);
   });
 
   it('keeps trucks stationary and does not collide before the player starts driving (hasStartedDriving = false)', () => {

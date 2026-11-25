@@ -229,4 +229,54 @@ describe('InputManager (Keyboard + Gamepad API M8)', () => {
 
     input.dispose();
   });
+
+  it('ignores input and flushes held keys when disabled via setEnabled(false)', () => {
+    const target = new MockEventTarget() as unknown as Window;
+    const input = new InputManager(target);
+
+    // Hold KeyW while enabled
+    target.dispatchEvent({
+      type: 'keydown',
+      code: 'KeyW',
+      timeStamp: 100,
+      preventDefault: () => {},
+    } as unknown as Event);
+    expect(input.isDown('accelerate')).toBe(true);
+
+    // Disable input (e.g. MainMenu or modal active): held state & press queue flush immediately
+    input.setEnabled(false);
+    expect(input.isEnabled).toBe(false);
+    expect(input.isDown('accelerate')).toBe(false);
+    expect(input.consumePresses()).toHaveLength(0);
+
+    // Subsequent keydowns while disabled are ignored and do not call preventDefault
+    let prevented = false;
+    target.dispatchEvent({
+      type: 'keydown',
+      code: 'KeyS',
+      timeStamp: 200,
+      preventDefault: () => {
+        prevented = true;
+      },
+    } as unknown as Event);
+    expect(prevented).toBe(false);
+    expect(input.isDown('brake')).toBe(false);
+    expect(input.consumePresses()).toHaveLength(0);
+
+    // Re-enabling restores normal capture
+    input.setEnabled(true);
+    target.dispatchEvent({
+      type: 'keydown',
+      code: 'KeyW',
+      timeStamp: 300,
+      preventDefault: () => {
+        prevented = true;
+      },
+    } as unknown as Event);
+    expect(prevented).toBe(true);
+    expect(input.isDown('accelerate')).toBe(true);
+    expect(input.consumePresses()).toContainEqual({ action: 'accelerate', timeStamp: 300 });
+
+    input.dispose();
+  });
 });
