@@ -1188,6 +1188,7 @@ export class Game {
    * (preserving pure geometry), and notifies HUD and DebugPanel immediately.
    */
   setStagePaletteIndex(index: number): void {
+    if (this.hasStartedDriving) return;
     this.palette = getStagePalette(index);
     this.renderPalette = this.palette;
     this.paletteTransitionFrom = null;
@@ -1543,16 +1544,23 @@ export class Game {
 
     this.drivingAudioParams.holdOutroLoop = holdOutro;
     if (holdOutro && isStreamingTrack(this.track)) {
-      const endZ = this.track.stageFinishWorldZ ?? this.track.length;
-      const distRemaining = Math.max(0, endZ - this.position);
-      const effectiveCruiseSpeed = Math.max(
-        this.track.referenceSpeed * 0.5,
-        this.horizonAssembler?.estimatedSpeed ?? this.track.referenceSpeed,
-        mapCarSpeedToWorldBaseSpeed(this.car.speed),
-      );
-      const beatSec = beatDurationSec(this.activeRoadBeatMap);
-      const timeRemainingSec = distRemaining / effectiveCruiseSpeed;
-      this.drivingAudioParams.roadBeatsRemaining = Math.max(0, timeRemainingSec / beatSec);
+      if (this.track.stageFinishWorldZ !== undefined) {
+        const distRemaining = Math.max(0, this.track.stageFinishWorldZ - this.position);
+        const effectiveCruiseSpeed = Math.max(
+          this.track.referenceSpeed * 0.5,
+          this.horizonAssembler?.estimatedSpeed ?? this.track.referenceSpeed,
+          mapCarSpeedToWorldBaseSpeed(this.car.speed),
+        );
+        // Account for SongRoadSyncController's fork anchor convergence speedup (up to 1.15x)
+        // so highway 5th/6th gear cruising absorbs minor speed dips silently via road sync
+        // and Stage 1 Tape Drag only engages on genuine stalls/braking in the final bars.
+        const recoverableSpeed = effectiveCruiseSpeed * 1.12;
+        const beatSec = beatDurationSec(this.activeRoadBeatMap);
+        const timeRemainingSec = distRemaining / recoverableSpeed;
+        this.drivingAudioParams.roadBeatsRemaining = Math.max(0, timeRemainingSec / beatSec);
+      } else {
+        this.drivingAudioParams.roadBeatsRemaining = undefined;
+      }
     } else if (holdOutro && isSongTrack(this.track)) {
       const totalRoadBeats = this.track.totalBars * 4;
       const currentRoadBeat = worldZToBeat(this.track, this.position);
