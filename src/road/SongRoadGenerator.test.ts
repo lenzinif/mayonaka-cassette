@@ -1326,5 +1326,20 @@ describe('SongRoadGenerator', () => {
       const distinctArchetypes = new Set(road.chunks.map((c) => c.archetype));
       expect(distinctArchetypes.size).toBeGreaterThanOrEqual(2);
     });
+
+    it('preserves 3-bar [1, 4] lpf_muffled intro tunnel spans emitted by offline worker', () => {
+      const introMuffledMap: BeatMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:short-muffled-intro-tunnel',
+        barEnergy: new Array<number>(16).fill(0.75),
+        barBrightness: Array.from({ length: 16 }, (_, b) => (b < 4 ? 0.14 : 0.85)),
+        spectralSpans: [{ startBar: 1, endBar: 4, kind: 'lpf_muffled' }],
+        sections: [
+          { startBar: 0, bars: 4, role: 'intro' },
+          { startBar: 4, bars: 12, role: 'drop' },
+        ],
+      };
+      expect(detectMuffledSpans(introMuffledMap, 16)).toEqual([{ startBar: 1, endBar: 4 }]);
+    });
   });
 });

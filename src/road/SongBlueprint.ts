@@ -608,6 +608,7 @@ export function compileSongBlueprint(
     totalBars,
     nominalSegmentsPerBar,
     sceneryRng,
+    beatMap.phraseBars,
   );
 
   // Compress per-segment env plan cleanly to per-bar env (1 entry per bar)
