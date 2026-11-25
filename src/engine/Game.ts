@@ -1,6 +1,7 @@
 import type { BeatJudgementTier } from '@src/audio/BeatClock';
 import {
   barToTime,
+  beatDurationSec,
   sectionAtBar,
   type BeatMap,
   type SectionRole,
@@ -348,6 +349,8 @@ export class Game {
   } | null = null;
   private horizonAssembler: HorizonAssembler | null = null;
   private lastInternalPosition = 0;
+  private suppressLibraryPrewarm = false;
+  private unsubscribeLibrary?: () => void;
   private activeNextTrackLookahead: SongTrack | undefined = undefined;
   private cachedForkLeftOption: ForkOptionInfo | null = null;
   private cachedForkRightOption: ForkOptionInfo | null = null;
@@ -573,6 +576,7 @@ export class Game {
         : Math.max(1, this.activeRoadBeatMap.barEnergy.length);
     const clampedBar = Math.max(0, Math.min(maxBars - 1, Math.floor(barIndex)));
     if (this.horizonAssembler && isStreamingTrack(this.track)) {
+      this.horizonAssembler.track.stageStartAbsSeg = 0;
       this.traffic.resetForStreaming(this.horizonAssembler.track, this.activeRoadBeatMap.contentHash);
       this.horizonAssembler.resetAtBar(
         clampedBar,
@@ -881,7 +885,17 @@ export class Game {
       this.background.prewarmPalette(getStagePalette(i));
     }
     this.prewarmNextLookaheadTrack();
+    this.unsubscribeLibrary = this.library.subscribe(() => {
+      if (!this.suppressLibraryPrewarm) {
+        this.prewarmNextLookaheadTrack();
+      }
+    });
     this.updateRoadProgressTelemetry();
+  }
+
+  dispose(): void {
+    this.unsubscribeLibrary?.();
+    this.unsubscribeLibrary = undefined;
   }
 
   get isAutopilotActive(): boolean {
@@ -1146,7 +1160,13 @@ export class Game {
     this.prevDynamicFov = tuning.fieldOfView;
     this.fovBoostPulse = 0;
     this.resetPerfBenchmark();
-    const first = this.library.selectTrack(0);
+    let first: ReturnType<TrackLibrary['selectTrack']>;
+    this.suppressLibraryPrewarm = true;
+    try {
+      first = this.library.selectTrack(0);
+    } finally {
+      this.suppressLibraryPrewarm = false;
+    }
     this.audio.loadTrack(first.beatMap, first.audioBuffer);
     this.loadBeatMapRoad(first.beatMap, true);
     const best = this.library.getBestScore(first.contentHash);
@@ -1524,8 +1544,15 @@ export class Game {
     this.drivingAudioParams.holdOutroLoop = holdOutro;
     if (holdOutro && isStreamingTrack(this.track)) {
       const endZ = this.track.stageFinishWorldZ ?? this.track.length;
-      const beatLenWorld = Math.max(1, this.track.barLengthWorld / 4);
-      this.drivingAudioParams.roadBeatsRemaining = Math.max(0, (endZ - this.position) / beatLenWorld);
+      const distRemaining = Math.max(0, endZ - this.position);
+      const effectiveCruiseSpeed = Math.max(
+        this.track.referenceSpeed * 0.5,
+        this.horizonAssembler?.estimatedSpeed ?? this.track.referenceSpeed,
+        mapCarSpeedToWorldBaseSpeed(this.car.speed),
+      );
+      const beatSec = beatDurationSec(this.activeRoadBeatMap);
+      const timeRemainingSec = distRemaining / effectiveCruiseSpeed;
+      this.drivingAudioParams.roadBeatsRemaining = Math.max(0, timeRemainingSec / beatSec);
     } else if (holdOutro && isSongTrack(this.track)) {
       const totalRoadBeats = this.track.totalBars * 4;
       const currentRoadBeat = worldZToBeat(this.track, this.position);
@@ -1927,6 +1954,8 @@ export class Game {
 
   private prewarmNextLookaheadTrack(): void {
     if (this.hasCustomTrack || !this.library.hasNextTrack) {
+      this.nextBlueprintCache = null;
+      this.horizonAssembler?.setNextBlueprint(null, this.position, tuning.drawDistance);
       return;
     }
     const nextItem = this.library.nextTrackItem;
@@ -1943,7 +1972,7 @@ export class Game {
         stageId: nextPalette.id,
         blueprint: nextBp,
       };
-      this.horizonAssembler?.setNextBlueprint(nextBp);
+      this.horizonAssembler?.setNextBlueprint(nextBp, this.position, tuning.drawDistance);
       this.background.prewarmPalette(nextPalette);
     }
   }
@@ -2045,7 +2074,13 @@ export class Game {
               this.paletteTransitionSnapshot,
             )
           : this.renderPalette;
-      const nextItem = this.library.advanceToNextTrack()!;
+      let nextItem: NonNullable<ReturnType<TrackLibrary['advanceToNextTrack']>>;
+      this.suppressLibraryPrewarm = true;
+      try {
+        nextItem = this.library.advanceToNextTrack()!;
+      } finally {
+        this.suppressLibraryPrewarm = false;
+      }
       this.runManager.stageNumber++;
       this.palette = getStagePalette(this.runManager.stageNumber - 1);
       this.paletteTransitionFrom = prevRenderPalette;

@@ -256,8 +256,20 @@ export class HorizonAssembler {
     return this.estSpeed;
   }
 
-  setNextBlueprint(nextBlueprint: SongBlueprint | null): void {
+  setNextBlueprint(
+    nextBlueprint: SongBlueprint | null,
+    currentPosition?: number,
+    drawDistance?: number,
+  ): void {
     this.track.nextBlueprint = nextBlueprint;
+    if (
+      this.emittingNextStage &&
+      this.activeForkChoice === 'right' &&
+      currentPosition !== undefined &&
+      drawDistance !== undefined
+    ) {
+      this.rewindAndEmitNextStageHorizon(currentPosition, drawDistance);
+    }
   }
 
   /**
@@ -350,14 +362,14 @@ export class HorizonAssembler {
       Math.round(remainingBars * blueprint.nominalSegmentsPerBar) * blueprint.segmentLength;
 
     if (clampedBar >= blueprint.forkStartBar) {
-      const forkSpanBars = Math.max(1, blueprint.totalBars - blueprint.forkStartBar);
+      const remainingForkBars = Math.max(0.5, blueprint.totalBars - clampedBar);
       const barsIntoFork = clampedBar - blueprint.forkStartBar;
       const forkStartSeg =
         startAbsSeg - Math.round(barsIntoFork * blueprint.nominalSegmentsPerBar);
       this.track.forkZoneStartZ = Math.max(0, forkStartSeg * blueprint.segmentLength);
       this.track.stageFinishWorldZ =
-        this.track.forkZoneStartZ +
-        Math.round(forkSpanBars * blueprint.nominalSegmentsPerBar) * blueprint.segmentLength;
+        (startAbsSeg + Math.round(remainingForkBars * blueprint.nominalSegmentsPerBar)) *
+        blueprint.segmentLength;
       this.track.length = this.track.stageFinishWorldZ;
     } else {
       this.track.forkZoneStartZ = undefined;
@@ -504,12 +516,48 @@ export class HorizonAssembler {
       );
     }
 
-    // Re-sync anchor/transition cursors to current `emitBarFloat`
+    // Materialize early Stage 2 anchors (e.g. 1-bar pickup drops) already emitted during lookahead
+    // before advancing `nextAnchorCursor` past `emitBarFloat`.
     this.nextAnchorCursor = 0;
     while (
       this.nextAnchorCursor < newBlueprint.syncAnchors.length &&
       newBlueprint.syncAnchors[this.nextAnchorCursor]!.barIndex < this.emitBarFloat - 1e-4
     ) {
+      const bpAnchor = newBlueprint.syncAnchors[this.nextAnchorCursor]!;
+      let matchedSeg = -1;
+      for (let s = this.track.tailAbsSeg; s < this.track.headAbsSeg; s++) {
+        const slotBar = this.track.slotBarFloat[s & STREAMING_RING_MASK] ?? 0;
+        if (slotBar >= bpAnchor.barIndex - 1e-4) {
+          matchedSeg = s;
+          break;
+        }
+      }
+      if (matchedSeg >= 0) {
+        if (this.track.materializedAnchorCount >= MAX_MATERIALIZED_ANCHORS) {
+          this.compactMaterializedAnchors();
+        }
+        if (this.track.materializedAnchorCount < MAX_MATERIALIZED_ANCHORS) {
+          const slotAnchor = this.track.materializedAnchors[this.track.materializedAnchorCount]!;
+          slotAnchor.kind = bpAnchor.kind;
+          slotAnchor.barIndex = bpAnchor.barIndex;
+          slotAnchor.absSeg = matchedSeg;
+          slotAnchor.worldZ = matchedSeg * segLen;
+          slotAnchor.rewardsSyncBonus = bpAnchor.rewardsSyncBonus;
+          slotAnchor.crossedState = 0;
+          this.track.materializedAnchorCount++;
+        }
+        const matchedSegment = this.track.segments[matchedSeg & STREAMING_RING_MASK]!;
+        if (
+          (bpAnchor.kind === 'drop' || bpAnchor.kind === 'impact') &&
+          matchedSegment.env === 'standard'
+        ) {
+          matchedSegment.sprites.push(
+            this.allocSprite('billboard', -1.65, 0, 1),
+            this.allocSprite('billboard', 1.65, 1, 1),
+          );
+          sortSingleSegmentSprites(matchedSegment.sprites);
+        }
+      }
       this.nextAnchorCursor++;
     }
     this.lastZoneTransitionIdx = 0;
@@ -519,8 +567,6 @@ export class HorizonAssembler {
     ) {
       this.lastZoneTransitionIdx++;
     }
-    this.lastVignetteChunkChecked = -1;
-    this.lastVignetteIdxEmitted = -1;
     this.lastNotifiedTrafficBar = Math.floor(this.emitBarFloat) - 1;
 
     this.track.forkZoneStartZ = undefined;
@@ -545,19 +591,33 @@ export class HorizonAssembler {
   updateForkChoice(choice: 'left' | 'right', currentPosition: number, drawDistance: number): void {
     if (this.activeForkChoice === choice) return;
     this.activeForkChoice = choice;
+    this.rewindAndEmitNextStageHorizon(currentPosition, drawDistance);
+  }
+
+  private rewindAndEmitNextStageHorizon(currentPosition: number, drawDistance: number): void {
     if (!this.emittingNextStage || this.track.stageFinishWorldZ === undefined) return;
 
     const finishAbsSeg = Math.floor(this.track.stageFinishWorldZ / this.track.segmentLength);
     const camAbsSeg = Math.floor(currentPosition / this.track.segmentLength);
     if (finishAbsSeg <= camAbsSeg) return;
 
-    // Roll head back to finishAbsSeg and re-emit the far-horizon post-finish lookahead
+    // Roll head back to finishAbsSeg, clear stale pending vignettes, and re-emit lookahead
     const prevFinishSlot = this.track.segments[(finishAbsSeg - 1) & STREAMING_RING_MASK]!;
     this.prevCurve = prevFinishSlot.curve;
     this.prevWorldY = prevFinishSlot.p2.worldY;
     this.track.headAbsSeg = finishAbsSeg;
     this.nextStageEmitBarFloat = 0;
-    const chosenBp = choice === 'right' && this.track.nextBlueprint ? this.track.nextBlueprint : this.track.blueprint;
+    this.resetStageEmissionCursors();
+    for (let i = 0; i < MAX_PENDING_VIGNETTE_MEMBERS; i++) {
+      const pv = this.pendingVignettes[i]!;
+      if (pv.active && pv.targetAbsSeg >= finishAbsSeg) {
+        pv.active = false;
+      }
+    }
+    const chosenBp =
+      this.activeForkChoice === 'right' && this.track.nextBlueprint
+        ? this.track.nextBlueprint
+        : this.track.blueprint;
     resetPowerLineStreamState(
       this.nextPowerLineState,
       chosenBp.powerLineRuns,
@@ -651,6 +711,7 @@ export class HorizonAssembler {
     }
 
     if (this.track.headAbsSeg >= targetHead) {
+      this.updateProjectedStageLength(bp, segLen);
       return;
     }
 
@@ -715,7 +776,53 @@ export class HorizonAssembler {
       this.emitNextSegment(nominalStep * this.currentStretchRatio);
     }
 
+    this.updateProjectedStageLength(bp, segLen);
     this.finalizeCommittedPortals();
+  }
+
+  private resetStageEmissionCursors(): void {
+    this.lastEmittedTunnelLightSlot = -1;
+    this.lastEmittedChevronBeat = -1;
+    this.chevronSeqIndex = 0;
+    this.lastVignetteChunkChecked = -1;
+    this.lastVignetteIdxEmitted = -1;
+  }
+
+  private compactMaterializedAnchors(): void {
+    const anchors = this.track.materializedAnchors;
+    let writeIdx = 0;
+    for (let i = 0; i < this.track.materializedAnchorCount; i++) {
+      const src = anchors[i]!;
+      if (src.crossedState === 0) {
+        if (writeIdx !== i) {
+          const dst = anchors[writeIdx]!;
+          dst.kind = src.kind;
+          dst.barIndex = src.barIndex;
+          dst.absSeg = src.absSeg;
+          dst.worldZ = src.worldZ;
+          dst.rewardsSyncBonus = src.rewardsSyncBonus;
+          dst.crossedState = src.crossedState;
+        }
+        writeIdx++;
+      }
+    }
+    this.track.materializedAnchorCount = writeIdx;
+  }
+
+  private updateProjectedStageLength(bp: SongBlueprint, segLen: number): void {
+    if (this.emittingNextStage || this.track.forkZoneStartZ !== undefined) return;
+    const forkBars = Math.max(1, bp.totalBars - bp.forkStartBar);
+    const remainingBarsFromHead = Math.max(forkBars, bp.totalBars - this.emitBarFloat);
+    const speedRatioToRef = Math.max(
+      0.55,
+      Math.min(1.25, this.estSpeed / Math.max(1, bp.referenceSpeed)),
+    );
+    const projectedFinishZ =
+      this.track.headAbsSeg * segLen +
+      Math.round(remainingBarsFromHead * bp.nominalSegmentsPerBar * speedRatioToRef) * segLen;
+    if (projectedFinishZ > this.track.length) {
+      this.track.length = projectedFinishZ;
+    }
   }
 
   private getNextHorizonGoalBar(): number | null {
@@ -850,6 +957,9 @@ export class HorizonAssembler {
         nextBar >= activeBp.syncAnchors[this.nextAnchorCursor]!.barIndex
       ) {
         const bpAnchor = activeBp.syncAnchors[this.nextAnchorCursor]!;
+        if (this.track.materializedAnchorCount >= MAX_MATERIALIZED_ANCHORS) {
+          this.compactMaterializedAnchors();
+        }
         if (this.track.materializedAnchorCount < MAX_MATERIALIZED_ANCHORS) {
           const slotAnchor = this.track.materializedAnchors[this.track.materializedAnchorCount]!;
           slotAnchor.kind = bpAnchor.kind;
@@ -918,6 +1028,7 @@ export class HorizonAssembler {
         }
         this.emittingNextStage = true;
         this.nextStageEmitBarFloat = 0;
+        this.resetStageEmissionCursors();
         const nextBp =
           this.activeForkChoice === 'right' && this.track.nextBlueprint
             ? this.track.nextBlueprint

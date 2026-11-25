@@ -289,4 +289,110 @@ describe('HorizonAssembler & SongBlueprint — Tranche 2 (Hybrid D+A Ring Buffer
     expect(asm.track.segments[newIdx & STREAMING_RING_MASK]!.stripe).toBe(stripeBefore);
     expect(asm.track.segments[newIdx & STREAMING_RING_MASK]!.index).toBe(newIdx);
   });
+
+  it('resets tunnel light cursors across promoteNextStage, materializes early Stage 2 drop anchors, and passes phraseBars', () => {
+    const bp1 = compileSongBlueprint(createCantStopMockBeatMap(), { stageId: 'night' });
+    const pickupStage2Map: BeatMap & {
+      spectralSpans: { startBar: number; endBar: number; kind: 'lpf_muffled' }[];
+      phraseBars: number[];
+    } = {
+      ...DEFAULT_SYNTH_BEATMAP,
+      contentHash: 'sha256:stage2-early-drop-and-tunnel',
+      bpm: 120,
+      durationSec: 64 * 2,
+      barEnergy: Array.from({ length: 64 }, (_, b) => (b === 0 ? 0.2 : 0.8)),
+      barBrightness: Array.from({ length: 64 }, (_, b) => (b >= 8 && b < 14 ? 0.14 : 0.85)),
+      sections: [
+        { startBar: 0, bars: 1, role: 'intro' },
+        { startBar: 1, bars: 15, role: 'drop' },
+        { startBar: 16, bars: 44, role: 'groove' },
+        { startBar: 60, bars: 4, role: 'outro' },
+      ],
+      spectralSpans: [{ startBar: 8, endBar: 14, kind: 'lpf_muffled' }],
+      phraseBars: [16, 32, 48],
+    };
+    const bp2 = compileSongBlueprint(pickupStage2Map, { stageId: 'akiba_night' });
+
+    // compileSongBlueprint must forward phraseBars so steady groove tracks span multiple archetypes
+    expect(new Set(bp2.chunks.map((c) => c.archetype)).size).toBeGreaterThanOrEqual(2);
+
+    const asm = new HorizonAssembler(bp1, bp2);
+    // Advance Stage 1 past its tunnel [32..38] to the fork finish so lastEmittedTunnelLightSlot is high
+    const barDur1 = barDurationSec(bp1.beatMap);
+    let pos = 0;
+    let t = 0;
+    const dt = 1 / 60;
+    while (asm.track.stageFinishWorldZ === undefined || pos <= asm.track.stageFinishWorldZ) {
+      t += dt;
+      pos += bp1.referenceSpeed * dt;
+      asm.advance(pos, t / barDur1, bp1.referenceSpeed, 200, dt);
+    }
+
+    // Promote to Stage 2 with overshoot past finishZ
+    asm.promoteNextStage(bp2, null, pos, 200);
+    const earlyDropAnchor = Array.from(
+      { length: asm.track.materializedAnchorCount },
+      (_, i) => asm.track.materializedAnchors[i]!,
+    ).find((a) => a.barIndex === 1 && a.kind === 'drop');
+    expect(earlyDropAnchor).toBeDefined();
+
+    // Advance Stage 2 through its tunnel [8..14] and verify tunnel ceiling lights are emitted
+    const barDur2 = barDurationSec(bp2.beatMap);
+    let pos2 = Math.max(0, pos - (asm.track.stageFinishWorldZ ?? pos));
+    let t2 = 0;
+    let stage2TunnelLights = 0;
+    let checkedUpToSeg = asm.track.headAbsSeg;
+    for (let step = 0; step < Math.ceil((16 * barDur2) / dt); step++) {
+      t2 += dt;
+      pos2 += bp2.referenceSpeed * dt;
+      asm.advance(pos2, t2 / barDur2, bp2.referenceSpeed, 200, dt);
+      for (let s = checkedUpToSeg; s < asm.track.headAbsSeg; s++) {
+        const seg = asm.track.segments[s & STREAMING_RING_MASK]!;
+        if (seg.env === 'tunnel' && seg.tunnelLight) {
+          stage2TunnelLights++;
+        }
+      }
+      checkedUpToSeg = asm.track.headAbsSeg;
+    }
+    expect(stage2TunnelLights).toBeGreaterThan(0);
+  });
+
+  it('clears stale pendingVignettes on updateForkChoice() and rewinds lookahead on setNextBlueprint()', () => {
+    const bp1 = compileSongBlueprint(DEFAULT_SYNTH_BEATMAP, { stageId: 'night' });
+    const bp2 = compileSongBlueprint(BUNDLED_WANGAN_BEATMAP, { stageId: 'akiba_night' });
+    const bp3 = compileSongBlueprint(createCantStopMockBeatMap(), { stageId: 'og_future_funk' });
+    const asm = new HorizonAssembler(bp1, bp2);
+
+    // Advance into the fork lookahead so emittingNextStage === true
+    const barDur = barDurationSec(bp1.beatMap);
+    let pos = 0;
+    let t = 0;
+    const dt = 1 / 60;
+    while (asm.track.stageFinishWorldZ === undefined) {
+      t += dt;
+      pos += bp1.referenceSpeed * dt;
+      asm.advance(pos, t / barDur, bp1.referenceSpeed, 200, dt);
+    }
+    const finishZ = asm.track.stageFinishWorldZ!;
+    const finishAbsSeg = Math.floor(finishZ / bp1.segmentLength);
+    const preFinishPos = Math.max(0, finishZ - 4000);
+    asm.advance(preFinishPos, 63.5, bp1.referenceSpeed, 200, dt);
+
+    // Inject a stale pending vignette scheduled beyond finishAbsSeg
+    const pv = (asm as unknown as {
+      pendingVignettes: Array<{ active: boolean; targetAbsSeg: number }>;
+    }).pendingVignettes[0]!;
+    pv.active = true;
+    pv.targetAbsSeg = finishAbsSeg + 5;
+
+    // Switching fork choice must deactivate stale pendingVignettes >= finishAbsSeg
+    asm.updateForkChoice('left', preFinishPos, 200);
+    expect(pv.active).toBe(false);
+
+    // Switching back to right and updating nextBlueprint mid-lookahead must rewind and emit bp3
+    asm.updateForkChoice('right', preFinishPos, 200);
+    asm.setNextBlueprint(bp3, preFinishPos, 200);
+    expect(asm.track.nextBlueprint?.contentHash).toBe(bp3.contentHash);
+    expect(asm.track.headAbsSeg).toBeGreaterThan(finishAbsSeg);
+  });
 });

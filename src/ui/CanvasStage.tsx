@@ -78,6 +78,7 @@ export function CanvasStage({
     loop.start();
     return () => {
       loop.stop();
+      game.dispose();
       humanInput.dispose();
       inputRef.current = null;
       gameRef.current = null;
