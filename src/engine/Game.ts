@@ -1185,6 +1185,7 @@ export class Game {
         maxSpeed: prevBp.referenceSpeed,
         referenceSpeedRatio: 1,
       });
+      this.horizonAssembler.track.stageStartAbsSeg = curAbsSeg;
       this.traffic.resetForStreaming(this.horizonAssembler.track, this.activeRoadBeatMap.contentHash);
       this.horizonAssembler.resetAtBar(curBar, curAbsSeg, newBp, null, tuning.drawDistance, this.forkChoice);
       this.track.length = prevLength;

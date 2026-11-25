@@ -1413,6 +1413,12 @@ describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () =>
       const envs = new Set(bp ? bp.barEnv : game.track.segments.map((s) => s.env));
       expect(envs.has('viaduct')).toBe(true);
       expect(envs.has('bridge')).toBe(false);
+
+      // No kei truck may spawn on top of or immediately beside the player after a mid-run theme switch
+      const minSafeZ = targetPos + 90 * game.track.segmentLength;
+      for (const truck of game.traffic.trucks) {
+        expect(truck.z).toBeGreaterThanOrEqual(minSafeZ);
+      }
     } finally {
       tuning.maxSpeed = prevMaxSpeed;
     }

@@ -479,6 +479,10 @@ export class TrafficManager {
     const safeStartBars = Math.max(4, Math.min(6, Math.floor(blueprint.totalBars * 0.3)));
     if (barIndex < safeStartBars || barIndex >= blueprint.forkStartBar - 1) return;
 
+    // Never spawn a truck on top of or immediately beside the player during a mid-run resetAtBar prefill.
+    const MIN_SPAWN_AHEAD_SEGS = 90;
+    if (anchorAbsSeg < track.stageStartAbsSeg + MIN_SPAWN_AHEAD_SEGS) return;
+
     // Avoid portal boundaries (±1 bar around tunnel/bridge/viaduct transitions)
     const curEnv = blueprint.barEnv[barIndex] ?? 'standard';
     const prevEnv = blueprint.barEnv[Math.max(0, barIndex - 1)] ?? 'standard';
