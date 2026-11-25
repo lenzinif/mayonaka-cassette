@@ -1237,10 +1237,11 @@ export class FunkAudioEngine {
       } else if (
         driving.roadBeatsRemaining !== undefined &&
         driving.roadBeatsRemaining > 0.5 &&
-        audioBeatsRemaining < driving.roadBeatsRemaining
+        driving.roadBeatsRemaining - audioBeatsRemaining > 0.75
       ) {
-        // Stadio 1: rallenta dolcemente il nastro se la strada rimasta supera i beat audio rimasti
-        const ratio = audioBeatsRemaining / driving.roadBeatsRemaining;
+        // Stadio 1: rallenta dolcemente il nastro solo se il ritardo supera la deadband (0.75 beat)
+        // così micro-scarti di quantizzazione negli ultimi 1-2 secondi non causano falsi cali di pitch.
+        const ratio = audioBeatsRemaining / Math.max(0.1, driving.roadBeatsRemaining - 0.75);
         outroDragTargetRate = Math.max(
           tuning.outroTapeDragMinRate,
           Math.min(1.0, ratio),

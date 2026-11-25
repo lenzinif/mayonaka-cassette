@@ -14,7 +14,8 @@ import { tuning } from '@src/config/tuning';
 import type { Action, InputPressEvent, InputSource } from '@src/core/InputManager';
 import { TelemetryBridge } from '@src/core/TelemetryBridge';
 import { cameraDepthFromFov } from '@src/road/RoadProjection';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { getChosenForkCenter } from '@src/road/RoadSegment';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Game, type GameEvent, type TelemetrySnapshot } from './Game';
 
 class FakeInput implements InputSource {
@@ -792,6 +793,103 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     expect(transitions.length).toBe(1);
     // After 2.5+ seconds in Stage 2, palette crossfade finishes smoothly on Stage 2's target palette
     expect(gameAcc.renderPalette.skyTop).toBe(game.palette.skyTop);
+  });
+
+  it('does not trigger false Tape Drag or phantom fork reset when cruising an 80-bar track in 5th/6th gear', () => {
+    const prevTraffic = tuning.trafficDensity;
+    tuning.trafficDensity = 0;
+    try {
+      const input = new FakeInput();
+      input.setDown('accelerate', true);
+      const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+      const library = new TrackLibrary();
+      const bpm = 117;
+      const totalBars = 80;
+      const barDur = (60 / bpm) * 4;
+      const longMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:alarming-temps-80bar-test',
+        title: 'Alarming Temperatures Test',
+        bpm,
+        durationSec: totalBars * barDur,
+        barEnergy: Array.from({ length: totalBars }, (_, b) => (b < 8 ? 0.35 : b < 16 ? 0.6 : 0.85)),
+        barBrightness: new Array<number>(totalBars).fill(0.8),
+        sections: [
+          { startBar: 0, bars: 8, role: 'intro' as const },
+          { startBar: 8, bars: 8, role: 'build' as const },
+          { startBar: 16, bars: 56, role: 'drop' as const },
+          { startBar: 72, bars: 8, role: 'outro' as const },
+        ],
+      };
+      void library.updateBeatMap(library.activeItem.contentHash, longMap);
+      const audio = new FunkAudioEngine(longMap);
+      const game = new Game({ input, bridge, audio, library });
+      const asm = (game as unknown as { horizonAssembler: { resetAtBar: (...args: unknown[]) => void } }).horizonAssembler;
+      const resetSpy = vi.spyOn(asm, 'resetAtBar');
+
+      const dt = 1 / 60;
+      const maxSteps = Math.ceil((totalBars * barDur + 12) / dt);
+      let sawForkActive = false;
+      let forkResetAfterActivation = false;
+      let minLatePlaybackRate = 1.0;
+      let transitionedToStage2 = false;
+
+      for (let step = 0; step < maxSteps; step++) {
+        game.hasStartedDriving = true;
+        game.car.speed = tuning.maxSpeed * 0.96;
+        game.car.gearbox.gear = 6;
+        game.car.x = game.forkActive ? getChosenForkCenter(game.forkProgress, 'right') : 0;
+        game.car.prevX = game.car.x;
+        game.update(dt);
+
+        if (library.currentIndex === 0) {
+          if (game.forkActive) {
+            sawForkActive = true;
+          } else if (sawForkActive) {
+            forkResetAfterActivation = true;
+          }
+          if (game.roadBarIndex >= totalBars - 10 && game.forkProgress < 0.98) {
+            minLatePlaybackRate = Math.min(minLatePlaybackRate, audio.playbackRate);
+          }
+        } else if (library.currentIndex === 1) {
+          transitionedToStage2 = true;
+          break;
+        }
+      }
+
+      expect(sawForkActive).toBe(true);
+      expect(forkResetAfterActivation).toBe(false);
+      expect(minLatePlaybackRate).toBeGreaterThanOrEqual(0.99);
+      expect(transitionedToStage2).toBe(true);
+      expect(resetSpy).not.toHaveBeenCalled();
+      expect(audio.beatMap.contentHash).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
+    } finally {
+      tuning.trafficDensity = prevTraffic;
+    }
+  });
+
+  it('updates horizonAssembler.nextBlueprint when TrackLibrary playlist mutates after track load and unsubscribes on dispose()', () => {
+    const input = new FakeInput();
+    const library = new TrackLibrary();
+    library.removeTrack(2);
+    library.removeTrack(1);
+    const audio = new FunkAudioEngine(library.activeItem.beatMap);
+    const game = new Game({ input, audio, library });
+
+    expect((game.track as { nextBlueprint?: { contentHash: string } | null }).nextBlueprint).toBeNull();
+
+    library.restoreDefaultPlaylist();
+    expect(
+      (game.track as { nextBlueprint?: { contentHash: string } | null }).nextBlueprint?.contentHash,
+    ).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
+
+    game.dispose();
+    library.removeTrack(2);
+    library.removeTrack(1);
+    // Listener was unsubscribed on dispose(), so track.nextBlueprint is untouched
+    expect(
+      (game.track as { nextBlueprint?: { contentHash: string } | null }).nextBlueprint?.contentHash,
+    ).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
   });
 });
 

@@ -305,7 +305,7 @@ export function detectMuffledSpans(beatMap: BeatMap, totalBars: number): Muffled
       if (shiftedFromZero) {
         startBar = endBar >= 6 ? 2 : 1;
       }
-      const minSpanBars = shiftedFromZero ? 3 : 4;
+      const minSpanBars = shiftedFromZero || startBar <= 2 ? 3 : 4;
       for (const sec of beatMap.sections) {
         if (sec.role !== 'drop') continue;
         if (

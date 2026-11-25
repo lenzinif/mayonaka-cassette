@@ -73,7 +73,10 @@ export class StageForkController {
         return track.forkZoneStartZ;
       }
       const forkBars = Math.min(FORK_APPROACH_BARS, Math.floor(track.totalBars * 0.25));
-      return Math.max(0, track.length - forkBars * track.barLengthWorld);
+      return Math.max(
+        track.headAbsSeg * track.segmentLength,
+        track.length - forkBars * track.barLengthWorld,
+      );
     }
     if (!isSongTrack(track)) {
       return undefined;
