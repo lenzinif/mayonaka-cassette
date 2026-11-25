@@ -820,9 +820,10 @@ export class HorizonAssembler {
     const projectedFinishZ =
       this.track.headAbsSeg * segLen +
       Math.round(remainingBarsFromHead * bp.nominalSegmentsPerBar * speedRatioToRef) * segLen;
-    if (projectedFinishZ > this.track.length) {
-      this.track.length = projectedFinishZ;
-    }
+    const minSafeFinishZ =
+      this.track.headAbsSeg * segLen +
+      Math.round(forkBars * bp.nominalSegmentsPerBar) * segLen;
+    this.track.length = Math.max(minSafeFinishZ, projectedFinishZ);
   }
 
   private getNextHorizonGoalBar(): number | null {

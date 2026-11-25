@@ -343,9 +343,9 @@ export function DebugPanel({
     }
   }, [tab]);
 
-  // Keyboard shortcut: pressing '1', '2', '3' while debug panel is open switches theme
+  // Keyboard shortcut: pressing '1', '2', '3' while debug panel is open switches theme (only before driving starts)
   useEffect(() => {
-    if (!open || !onSelectPalette) return;
+    if (!open || !onSelectPalette || snap?.hasStartedDriving) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === '1') onSelectPalette(0);
@@ -354,7 +354,7 @@ export function DebugPanel({
     };
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [open, onSelectPalette]);
+  }, [open, onSelectPalette, snap?.hasStartedDriving]);
 
   if (!open) return null;
 
@@ -688,25 +688,31 @@ export function DebugPanel({
             <section className="space-y-2 p-3">
               <div className="flex items-center justify-between text-[10px] select-none">
                 <span className="font-bold tracking-[0.14em] text-[var(--ff-muted)] uppercase">
-                  PALETTE
+                  PALETTE {snap?.hasStartedDriving ? '(LOCKED MID-RACE)' : ''}
                 </span>
                 <span className="text-[9px] text-[var(--ff-muted)]">KEYS 1–3</span>
               </div>
               <div className="grid grid-cols-3 gap-1.5 select-none">
                 {FUTURE_FUNK_THEMES.map((theme) => {
                   const isActive = snap?.stagePaletteName === theme.name;
+                  const isLocked = Boolean(snap?.hasStartedDriving);
                   return (
                     <button
                       key={theme.name}
                       type="button"
+                      disabled={isLocked}
+                      title={isLocked ? 'Theme is locked once the race starts' : undefined}
                       onClick={(e) => {
+                        if (isLocked) return;
                         onSelectPalette?.(theme.index);
                         e.currentTarget.blur();
                       }}
-                      className={`flex cursor-pointer flex-col justify-between gap-1 rounded-[2px] border p-1.5 text-left transition ${
-                        isActive
-                          ? 'border-[var(--ff-cream)] bg-[var(--ff-panel-hi)]'
-                          : 'border-[var(--ff-border)] bg-[var(--ff-panel)]/50 hover:border-[var(--ff-muted)]'
+                      className={`flex flex-col justify-between gap-1 rounded-[2px] border p-1.5 text-left transition ${
+                        isLocked
+                          ? 'cursor-not-allowed opacity-50 border-[var(--ff-border)] bg-[var(--ff-panel)]/30'
+                          : isActive
+                            ? 'cursor-pointer border-[var(--ff-cream)] bg-[var(--ff-panel-hi)]'
+                            : 'cursor-pointer border-[var(--ff-border)] bg-[var(--ff-panel)]/50 hover:border-[var(--ff-muted)]'
                       }`}
                     >
                       <div className="flex w-full items-center justify-between gap-1">
