@@ -466,8 +466,8 @@ describe('BeatClock & FunkAudioEngine', () => {
 
     try {
       await engine.unlock();
-      // Tunnel send gain is the 4th gain node created during unlock() (master, dubSend, dubFeedback, tunnelSend)
-      const tunnelSendGain = createdGains[3]!;
+      // Tunnel send gain is the 5th gain node created during unlock() (master, dubSend, dubFeedback, dubWet, tunnelSend)
+      const tunnelSendGain = createdGains[4]!;
       expect(tunnelSendGain.gain.value).toBe(0);
 
       // Drive inside tunnel -> wet send rises
@@ -523,6 +523,258 @@ describe('BeatClock & FunkAudioEngine', () => {
       g.AudioContext = prevAudioCtx;
       engine.dispose();
       expect(engine.tunnelResonance).toBe(0);
+    }
+  });
+
+  it('starts gameplay audio reliably when transitioning directly from Cassette Deck preview to Drive', async () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+    const createdSources: Array<{ start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
+    const fakeParam = (initial = 1) => ({
+      value: initial,
+      setValueAtTime: vi.fn(),
+      linearRampToValueAtTime: vi.fn(),
+      exponentialRampToValueAtTime: vi.fn(),
+      cancelScheduledValues: vi.fn(),
+    });
+    const mockCtx = {
+      state: 'suspended' as AudioContextState,
+      currentTime: 0,
+      sampleRate: 44100,
+      destination: {},
+      createGain: vi.fn(() => ({ gain: fakeParam(1), connect: vi.fn(), disconnect: vi.fn() })),
+      createBiquadFilter: vi.fn(() => ({
+        type: 'lowpass',
+        frequency: fakeParam(16000),
+        Q: fakeParam(1.8),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      })),
+      createDelay: vi.fn(() => ({
+        delayTime: fakeParam(0.1),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      })),
+      createBuffer: vi.fn((_c: number, len: number, sr: number) => ({
+        numberOfChannels: 2,
+        length: len,
+        sampleRate: sr,
+        duration: len / sr,
+        getChannelData: () => new Float32Array(len),
+      })),
+      createBufferSource: vi.fn(() => {
+        const src = {
+          buffer: null,
+          loop: false,
+          loopStart: 0,
+          loopEnd: 0,
+          playbackRate: fakeParam(),
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+          start: vi.fn(),
+          stop: vi.fn(),
+          onended: null,
+        };
+        createdSources.push(src);
+        return src;
+      }),
+      // Simulate real Chromium async state transitions: state only flips after Promise ticks
+      suspend: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            setTimeout(() => {
+              mockCtx.state = 'suspended';
+              resolve();
+            }, 5);
+          }),
+      ),
+      resume: vi.fn(async () => {
+        mockCtx.state = 'running';
+      }),
+      close: vi.fn(async () => {
+        mockCtx.state = 'closed';
+      }),
+    };
+
+    const g = globalThis as unknown as { window?: unknown; AudioContext?: unknown };
+    const prevWindow = g.window;
+    const prevAudioCtx = g.AudioContext;
+    const AudioCtxCtor = vi.fn(function () {
+      return mockCtx;
+    });
+    g.window = { AudioContext: AudioCtxCtor };
+    g.AudioContext = AudioCtxCtor;
+
+    try {
+      // 1. Main menu paused -> open Cassette Deck -> preview starts
+      await engine.pause();
+      await engine.startPreview(0);
+      expect(mockCtx.state).toBe('running');
+      expect(createdSources.length).toBe(1);
+
+      // 2. Drive directly from Cassette Deck with suspendIfPaused=false
+      engine.stopPreview(false, false);
+      engine.restartFromBeginning();
+      await engine.resume();
+      await engine.unlock();
+      expect(mockCtx.suspend).not.toHaveBeenCalled();
+      expect(mockCtx.state).toBe('running');
+      expect(createdSources.length).toBe(2);
+      expect(createdSources[1]!.start).toHaveBeenCalledTimes(1);
+
+      // 3. Also guard against async suspend/resume race if stopPreview(true) is immediately followed by resume()
+      await engine.pause();
+      await engine.startPreview(0);
+      expect(mockCtx.state).toBe('running');
+      engine.stopPreview(true);
+      const resumePromise = engine.resume();
+      const unlockPromise = engine.unlock();
+      await Promise.all([resumePromise, unlockPromise]);
+      expect(mockCtx.state).toBe('running');
+      expect((engine as unknown as { isPlaying: boolean }).isPlaying).toBe(true);
+    } finally {
+      g.window = prevWindow;
+      g.AudioContext = prevAudioCtx;
+      engine.dispose();
+    }
+  });
+
+  it('cuts outgoing outro cleanly without looping or bleeding dub tail into next track', async () => {
+    const map1 = { ...DEFAULT_SYNTH_BEATMAP, bpm: 117, durationSec: 213, contentHash: 'track-alarming' };
+    const map2 = { ...DEFAULT_SYNTH_BEATMAP, bpm: 110.35, durationSec: 150, contentHash: 'track-cant-stop' };
+    const engine = new FunkAudioEngine(map1);
+
+    const createdGains: Array<{ gain: { value: number; linearRampToValueAtTime: ReturnType<typeof vi.fn>; setValueAtTime: ReturnType<typeof vi.fn>; cancelScheduledValues: ReturnType<typeof vi.fn> } }> = [];
+    const createdSources: Array<{
+      buffer: unknown;
+      loop: boolean;
+      playbackRate: { value: number };
+      start: ReturnType<typeof vi.fn>;
+      stop: ReturnType<typeof vi.fn>;
+      disconnect: ReturnType<typeof vi.fn>;
+    }> = [];
+    const fakeParam = (initial = 1) => ({
+      value: initial,
+      setValueAtTime: vi.fn(),
+      linearRampToValueAtTime: vi.fn(),
+      exponentialRampToValueAtTime: vi.fn(),
+      cancelScheduledValues: vi.fn(),
+    });
+    const mockCtx = {
+      state: 'running',
+      currentTime: 10,
+      destination: {},
+      createGain: vi.fn(() => {
+        const g = { gain: fakeParam(1), connect: vi.fn(), disconnect: vi.fn() };
+        createdGains.push(g);
+        return g;
+      }),
+      createBiquadFilter: vi.fn(() => ({
+        type: 'lowpass',
+        frequency: fakeParam(16000),
+        Q: fakeParam(1.8),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      })),
+      createDelay: vi.fn(() => ({
+        delayTime: fakeParam(0.1),
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+      })),
+      createBuffer: vi.fn((_c: number, len: number, sr: number) => ({
+        numberOfChannels: 2,
+        length: len,
+        sampleRate: sr,
+        duration: len / sr,
+        getChannelData: () => new Float32Array(len),
+      })),
+      createBufferSource: vi.fn(() => {
+        const src = {
+          buffer: null,
+          loop: false,
+          loopStart: 0,
+          loopEnd: 0,
+          playbackRate: fakeParam(1),
+          connect: vi.fn(),
+          disconnect: vi.fn(),
+          start: vi.fn(),
+          stop: vi.fn(),
+          onended: null,
+        };
+        createdSources.push(src);
+        return src;
+      }),
+      resume: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+    };
+
+    const g = globalThis as unknown as { window?: unknown; AudioContext?: unknown };
+    const prevWindow = g.window;
+    const prevAudioCtx = g.AudioContext;
+    const AudioCtxCtor = vi.fn(function () {
+      return mockCtx;
+    });
+    g.window = { AudioContext: AudioCtxCtor };
+    g.AudioContext = AudioCtxCtor;
+
+    try {
+      const buf1 = { duration: 213 } as AudioBuffer;
+      const buf2 = { duration: 150 } as AudioBuffer;
+      engine.loadTrack(map1, buf1);
+      await engine.unlock();
+
+      // createdGains: [master(0), dubSend(1), dubFeedback(2), dubWet(3), tunnelSend(4), src1Gain(5)]
+      const dubWetGain = createdGains[3]!;
+      expect(createdSources[0]!.loop).toBe(false);
+
+      // Drive into pre-outro dub window + simulate minor pitch dip before fork
+      (engine as unknown as { virtualTrackSec: number }).virtualTrackSec = 211;
+      engine.triggerPitchDip(0.1);
+      engine.update(1 / 60, {
+        speedRatio: 0.9,
+        isDrifting: false,
+        isOffRoad: false,
+        holdOutroLoop: true,
+      });
+      expect(dubWetGain.gain.value).toBe(1);
+
+      // Transition to Track 2
+      const fadeSec = engine.crossfadeToTrack(map2, buf2, 4);
+      expect(fadeSec).toBeLessThanOrEqual(0.25);
+
+      const outgoingSrc = createdSources[0]!;
+      const incomingSrc = createdSources[1]!;
+      const incomingGain = createdGains[createdGains.length - 1]!;
+
+      // Outgoing source MUST NOT loop back to 0:00 and MUST stop within <= 0.3s
+      expect(outgoingSrc.loop).toBe(false);
+      expect(outgoingSrc.stop).toHaveBeenCalledWith(mockCtx.currentTime + fadeSec + 0.03);
+
+      // Incoming source starts cleanly without looping and without inheriting Track 1's pitch dip
+      expect(incomingSrc.loop).toBe(false);
+      expect(engine.playbackRate).toBe(1.0);
+      expect(incomingSrc.playbackRate.value).toBe(1.0);
+      expect(incomingGain.gain.linearRampToValueAtTime).toHaveBeenCalledWith(
+        1.0,
+        mockCtx.currentTime + 0.04,
+      );
+
+      // Dub wet output is zeroed immediately on transition so zero stale echo leaks into Track 2
+      expect(dubWetGain.gain.value).toBe(0);
+
+      // Single-track user AudioBuffer wrap restarts cleanly when holdOutroLoop is false
+      (engine as unknown as { virtualTrackSec: number }).virtualTrackSec = 149.99;
+      mockCtx.currentTime = 11;
+      engine.update(0.05, {
+        speedRatio: 0.9,
+        isDrifting: false,
+        isOffRoad: false,
+        holdOutroLoop: false,
+      });
+      expect(createdSources.length).toBe(3);
+    } finally {
+      g.window = prevWindow;
+      g.AudioContext = prevAudioCtx;
+      engine.dispose();
     }
   });
 });

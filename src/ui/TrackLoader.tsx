@@ -78,6 +78,8 @@ export function TrackLoader({
   const [clickEnabled, setClickEnabled] = useState(() => audio?.isPreviewClickEnabled ?? false);
   const [helpOpen, setHelpOpen] = useState(false);
   const tapTimesRef = useRef<number[]>([]);
+  const openRef = useRef(open);
+  openRef.current = open;
   const headingId = useId();
 
   useEffect(() => {
@@ -210,7 +212,9 @@ export function TrackLoader({
       const imported = await library.importFiles(fileList, (p) => setProgress({ ...p }));
       if (imported[0]) {
         onSelectTrack(imported[0]);
-        void startPreviewFromStart();
+        if (openRef.current) {
+          void startPreviewFromStart();
+        }
       }
     } finally {
       window.setTimeout(() => setProgress(null), 900);

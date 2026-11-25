@@ -454,5 +454,31 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
         expect(() => drawProp(edgeMock.ctx, kind, 320, 240, 0.25, 1, 0)).not.toThrow();
       }
     });
+
+    it('transitions atmospheric prop colors smoothly through intermediate LUT shades without mutating globalAlpha', () => {
+      setPropAtmosphere('#0a102b', '#112233', '#224455');
+
+      // Foreground (fogFactor = 0): full palette colors
+      const nearMock = createMockCanvas();
+      drawProp(nearMock.ctx, 'billboard', 200, 240, 0.015, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0);
+      expect(nearMock.fills).toContain('#ff2a6d');
+      expect(nearMock.fills).not.toContain('#112233');
+      expect(nearMock.ctx.globalAlpha).toBe(1);
+
+      // Mid-distance (fogFactor = 0.45): intermediate blended hex colors (neither pure neon nor pure silhouette)
+      const midMock = createMockCanvas();
+      drawProp(midMock.ctx, 'billboard', 200, 240, 0.015, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.45);
+      expect(midMock.fills).not.toContain('#ff2a6d');
+      expect(midMock.fills).not.toContain('#112233');
+      expect(midMock.fills).not.toContain('#224455');
+      expect(midMock.ctx.globalAlpha).toBe(1);
+
+      // Far distance (fogFactor = 0.8): pure atmospheric silhouette
+      const farMock = createMockCanvas();
+      drawProp(farMock.ctx, 'billboard', 200, 240, 0.015, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(farMock.fills).toContain('#112233');
+      expect(farMock.fills).toContain('#224455');
+      expect(farMock.ctx.globalAlpha).toBe(1);
+    });
   });
 });

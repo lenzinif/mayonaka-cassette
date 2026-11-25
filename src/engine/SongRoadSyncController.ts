@@ -138,8 +138,8 @@ export class SongRoadSyncController {
             if (timeRemainingSec > 0.01) {
               const targetSpeed = distRemaining / timeRemainingSec;
               const ratio = targetSpeed / Math.max(1, worldBaseSpeed);
-              const minS = anchor.kind === 'fork' ? 0.91 : 0.84;
-              const maxS = anchor.kind === 'fork' ? 1.15 : 1.24;
+              const minS = anchor.kind === 'fork' ? 0.90 : 0.84;
+              const maxS = anchor.kind === 'fork' ? 1.28 : 1.24;
               targetScale = Math.max(minS, Math.min(maxS, ratio));
               foundKind = anchor.kind;
               foundBar = anchor.barIndex;

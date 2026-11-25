@@ -10,6 +10,7 @@ import {
   STREAMING_RING_MASK,
   STREAMING_RING_SIZE,
 } from './HorizonAssembler';
+import { getPropLateralHalfWidth, isOverheadProp } from './RoadSegment';
 import { compileSongBlueprint } from './SongBlueprint';
 
 function createCantStopMockBeatMap(): BeatMap & {
@@ -394,5 +395,85 @@ describe('HorizonAssembler & SongBlueprint — Tranche 2 (Hybrid D+A Ring Buffer
     asm.setNextBlueprint(bp3, preFinishPos, 200);
     expect(asm.track.nextBlueprint?.contentHash).toBe(bp3.contentHash);
     expect(asm.track.headAbsSeg).toBeGreaterThan(finishAbsSeg);
+  });
+
+  it('prevents same-side prop overlaps (pylons, curve chevrons/signs/lamps, and stacked billboards) across streamed segments', () => {
+    const bp = compileSongBlueprint(createCantStopMockBeatMap(), { stageId: 'night' });
+    const asm = new HorizonAssembler(bp);
+    const barDur = barDurationSec(bp.beatMap);
+
+    let pos = 0;
+    let t = 0;
+    const dt = 1 / 60;
+    let checkedSeg = 0;
+
+    while (t < 42) {
+      t += dt;
+      pos += bp.referenceSpeed * dt;
+      asm.advance(pos, t / barDur, bp.referenceSpeed, 200, dt);
+
+      const safeCheckHead = Math.max(checkedSeg, asm.track.headAbsSeg - 2);
+      for (let absSeg = checkedSeg; absSeg < safeCheckHead; absSeg++) {
+        const seg = asm.track.segments[absSeg & STREAMING_RING_MASK]!;
+        const spList = seg.sprites;
+
+        // Check intra-segment overlaps
+        for (let i = 0; i < spList.length; i++) {
+          const a = spList[i]!;
+          if (isOverheadProp(a.kind)) continue;
+          for (let j = i + 1; j < spList.length; j++) {
+            const b = spList[j]!;
+            if (isOverheadProp(b.kind) || a.offset * b.offset <= 0) continue;
+            const dOff = Math.abs(a.offset - b.offset);
+            if (a.kind === 'pylon' || b.kind === 'pylon') {
+              const other = a.kind === 'pylon' ? b : a;
+              const isBlocked =
+                other.kind === 'building' ||
+                other.kind === 'billboard' ||
+                other.kind === 'palm' ||
+                other.kind === 'street-tree' ||
+                other.kind === 'pine' ||
+                other.kind === 'tree';
+              expect(dOff).toBeGreaterThanOrEqual(isBlocked ? 1.85 : 1.05);
+            } else {
+              const minClear = (getPropLateralHalfWidth(a.kind) + getPropLateralHalfWidth(b.kind)) * 0.85;
+              expect(dOff).toBeGreaterThanOrEqual(minClear - 1e-6);
+            }
+          }
+        }
+
+        // Check ±1 segment neighbor conflicts (chevron vs ordinary sign, pylon vs building/trees)
+        if (absSeg > 0) {
+          const prevSeg = asm.track.segments[(absSeg - 1) & STREAMING_RING_MASK]!;
+          for (let i = 0; i < spList.length; i++) {
+            const a = spList[i]!;
+            for (let j = 0; j < prevSeg.sprites.length; j++) {
+              const b = prevSeg.sprites[j]!;
+              if (a.offset * b.offset <= 0) continue;
+              if (
+                (a.kind === 'chevron' && (b.kind === 'vms' || (b.kind === 'sign' && b.variant !== 2))) ||
+                (b.kind === 'chevron' && (a.kind === 'vms' || (a.kind === 'sign' && a.variant !== 2)))
+              ) {
+                throw new Error(`Ordinary sign/VMS overlapped chevron across adjacent seg ${absSeg}`);
+              }
+              if (a.kind === 'pylon' || b.kind === 'pylon') {
+                const other = a.kind === 'pylon' ? b : a;
+                if (
+                  other.kind === 'building' ||
+                  other.kind === 'billboard' ||
+                  other.kind === 'palm' ||
+                  other.kind === 'street-tree' ||
+                  other.kind === 'pine' ||
+                  other.kind === 'tree'
+                ) {
+                  expect(Math.abs(a.offset - b.offset)).toBeGreaterThanOrEqual(1.85);
+                }
+              }
+            }
+          }
+        }
+      }
+      checkedSeg = safeCheckHead;
+    }
   });
 });

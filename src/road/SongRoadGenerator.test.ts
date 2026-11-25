@@ -8,7 +8,7 @@ import { RUMBLE_LENGTH, SEGMENT_LENGTH } from '@src/config/constants';
 import { describe, expect, it } from 'vitest';
 import { detectMuffledSpans } from './EnvironmentArchetypes';
 import { defineChunk, getChunksForRole, ROAD_CHUNKS, type RoadChunk, validateRoadChunk } from './RoadChunks';
-import { isOverheadProp } from './RoadSegment';
+import { getPropLateralHalfWidth, isOverheadProp } from './RoadSegment';
 import { CURVE, HILL } from './TrackBuilder';
 import {
   barToWorldZ,
@@ -1340,6 +1340,63 @@ describe('SongRoadGenerator', () => {
         ],
       };
       expect(detectMuffledSpans(introMuffledMap, 16)).toEqual([{ startBar: 1, endBar: 4 }]);
+    });
+
+    it('de-conflicts same-side overlapping props (pylons, chevron/sign/lamp, billboards) across generated tracks', () => {
+      for (const map of [DEFAULT_SYNTH_BEATMAP, BUNDLED_WANGAN_BEATMAP, BUNDLED_COASTAL_BEATMAP]) {
+        const road = generateSongRoad(map, { stageId: 'night' });
+        for (let s = 0; s < road.segments.length; s++) {
+          const sprites = road.segments[s]!.sprites;
+          for (let i = 0; i < sprites.length; i++) {
+            const a = sprites[i]!;
+            if (isOverheadProp(a.kind)) continue;
+            for (let j = i + 1; j < sprites.length; j++) {
+              const b = sprites[j]!;
+              if (isOverheadProp(b.kind) || a.offset * b.offset <= 0) continue;
+              const dOff = Math.abs(a.offset - b.offset);
+              if (a.kind === 'pylon' || b.kind === 'pylon') {
+                const other = a.kind === 'pylon' ? b : a;
+                const isBlocked =
+                  other.kind === 'building' ||
+                  other.kind === 'billboard' ||
+                  other.kind === 'palm' ||
+                  other.kind === 'street-tree' ||
+                  other.kind === 'pine' ||
+                  other.kind === 'tree';
+                expect(dOff).toBeGreaterThanOrEqual(isBlocked ? 1.85 : 1.05);
+              } else {
+                const minClear =
+                  (getPropLateralHalfWidth(a.kind) + getPropLateralHalfWidth(b.kind)) * 0.85;
+                expect(dOff).toBeGreaterThanOrEqual(minClear - 1e-6);
+              }
+            }
+          }
+
+          if (s > 0) {
+            const prevSprites = road.segments[s - 1]!.sprites;
+            for (let i = 0; i < sprites.length; i++) {
+              const a = sprites[i]!;
+              for (let j = 0; j < prevSprites.length; j++) {
+                const b = prevSprites[j]!;
+                if (a.offset * b.offset <= 0) continue;
+                if (a.kind === 'pylon' || b.kind === 'pylon') {
+                  const other = a.kind === 'pylon' ? b : a;
+                  if (
+                    other.kind === 'building' ||
+                    other.kind === 'billboard' ||
+                    other.kind === 'palm' ||
+                    other.kind === 'street-tree' ||
+                    other.kind === 'pine' ||
+                    other.kind === 'tree'
+                  ) {
+                    expect(Math.abs(a.offset - b.offset)).toBeGreaterThanOrEqual(1.85);
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     });
   });
 });
