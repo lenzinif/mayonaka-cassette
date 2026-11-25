@@ -99,10 +99,10 @@ export class RoadRenderer {
   private readonly chainSlotMeta = new Int32Array(RoadRenderer.MAX_CHAIN_SLOTS * 5);
   /** 5 attachment points (x, y) per slot = 10 floats */
   private readonly chainSlotPoints = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 10);
+  /** Normalized screen-space direction (dx, dy) per attachment point (k = 0..4) per slot = 10 floats */
+  private readonly chainSlotPointVec = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 10);
   /** Screen position [screenX, screenY] per slot = 2 floats */
   private readonly chainSlotPos = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 2);
-  /** Delta vector from farther tower [dx, dy] per slot = 2 floats */
-  private readonly chainSlotVec = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 2);
   /** Scratch attachment points for current pylon = 10 floats */
   private readonly currentPylonPoints = new Float32Array(10);
 
@@ -126,15 +126,22 @@ export class RoadRenderer {
   private boreMinY = 0;
   private boreMaxY = 0;
 
-  // Pre-allocated 4-band depth fog palette (Phase 2, Zero GC)
-  private static readonly FOG_BAND_T = [0, 0.22, 0.48, 0.72] as const;
-  private readonly fogGrass0 = ['', '', '', ''];
-  private readonly fogGrass1 = ['', '', '', ''];
-  private readonly fogRoad0 = ['', '', '', ''];
-  private readonly fogRoad1 = ['', '', '', ''];
-  private readonly fogRumble0 = ['', '', '', ''];
-  private readonly fogRumble1 = ['', '', '', ''];
-  private readonly fogLane = ['', '', '', ''];
+  // Pre-allocated 16-band depth fog palette + 8-band dark tunnel fog palette (Zero GC)
+  private static readonly FOG_BANDS = 16;
+  private static readonly TUNNEL_FOG_BANDS = 8;
+  private static readonly TUNNEL_FOG_COLOR = '#0d0a1c';
+  private readonly fogGrass0 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogGrass1 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogRoad0 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogRoad1 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogRumble0 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogRumble1 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogLane = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly tunnelFogRoad0 = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
+  private readonly tunnelFogRoad1 = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
+  private readonly tunnelFogRumble0 = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
+  private readonly tunnelFogRumble1 = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
+  private readonly tunnelFogLane = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
   private cachedFogColor = '';
   private cachedFogGrass0 = '';
   private cachedFogGrass1 = '';
@@ -183,6 +190,7 @@ export class RoadRenderer {
     let samplePropsMs = 0;
     let sampleTrafficMs = 0;
     this.chainSlotMeta.fill(0);
+    this.chainSlotPointVec.fill(0);
     setPropTheme(palette.scenery);
 
     const { segments, segmentLength, length: trackLength } = track;
@@ -247,11 +255,12 @@ export class RoadRenderer {
       this.cachedPropSilhouette = lerpHexColor(palette.mountain, palette.fog, 0.45);
       this.cachedPropAccent = lerpHexColor(palette.mountainRim, palette.fog, 0.55);
 
-      for (let b = 0; b < 4; b++) {
+      for (let b = 0; b < RoadRenderer.FOG_BANDS; b++) {
+        const tRaw = b === 0 ? 0 : Math.pow(b / (RoadRenderer.FOG_BANDS - 1), 1.35) * 0.8;
         const tFog =
           b === 0 || fogStrength <= 0
             ? 0
-            : Math.max(0, Math.min(0.88, RoadRenderer.FOG_BAND_T[b]! * fogStrength * fogDensity));
+            : Math.max(0, Math.min(0.88, tRaw * fogStrength * fogDensity));
         this.fogGrass0[b] =
           tFog <= 0 ? palette.grass[0] : lerpHexColor(palette.grass[0], palette.fog, tFog);
         this.fogGrass1[b] =
@@ -267,10 +276,38 @@ export class RoadRenderer {
         this.fogLane[b] = tFog <= 0 ? palette.lane : lerpHexColor(palette.lane, palette.fog, tFog);
       }
 
-      const farRumbleMid = lerpHexColor(this.fogRumble0[3]!, this.fogRumble1[3]!, 0.5);
+      for (let b = 0; b < RoadRenderer.TUNNEL_FOG_BANDS; b++) {
+        const tTun =
+          b === 0 || fogStrength <= 0
+            ? 0
+            : Math.pow(b / (RoadRenderer.TUNNEL_FOG_BANDS - 1), 1.2) * 0.58 * fogStrength;
+        this.tunnelFogRoad0[b] =
+          tTun <= 0
+            ? palette.road[0]
+            : lerpHexColor(palette.road[0], RoadRenderer.TUNNEL_FOG_COLOR, tTun);
+        this.tunnelFogRoad1[b] =
+          tTun <= 0
+            ? palette.road[1]
+            : lerpHexColor(palette.road[1], RoadRenderer.TUNNEL_FOG_COLOR, tTun);
+        this.tunnelFogRumble0[b] =
+          tTun <= 0
+            ? palette.rumble[0]
+            : lerpHexColor(palette.rumble[0], RoadRenderer.TUNNEL_FOG_COLOR, tTun);
+        this.tunnelFogRumble1[b] =
+          tTun <= 0
+            ? palette.rumble[1]
+            : lerpHexColor(palette.rumble[1], RoadRenderer.TUNNEL_FOG_COLOR, tTun);
+        this.tunnelFogLane[b] =
+          tTun <= 0
+            ? palette.lane
+            : lerpHexColor(palette.lane, RoadRenderer.TUNNEL_FOG_COLOR, tTun);
+      }
+
+      const farIdx = RoadRenderer.FOG_BANDS - 1;
+      const farRumbleMid = lerpHexColor(this.fogRumble0[farIdx]!, this.fogRumble1[farIdx]!, 0.5);
       this.cachedHorizonCurbColor =
         fogStrength <= 0 ? farRumbleMid : lerpHexColor(farRumbleMid, palette.fog, 0.25);
-      this.cachedHorizonRoadColor = lerpHexColor(this.fogRoad0[3]!, this.fogRoad1[3]!, 0.5);
+      this.cachedHorizonRoadColor = lerpHexColor(this.fogRoad0[farIdx]!, this.fogRoad1[farIdx]!, 0.5);
     }
     setPropAtmosphere(palette.fog, this.cachedPropSilhouette, this.cachedPropAccent);
 
@@ -390,7 +427,10 @@ export class RoadRenderer {
       } else {
         ctx.fillStyle = waterColors[1];
       }
-      ctx.fillRect(0, horizonY, width, height - horizonY);
+      const waterTopStripH = Math.max(0, Math.min(height, Math.ceil(maxy) + 2) - horizonY);
+      if (waterTopStripH > 0) {
+        ctx.fillRect(0, horizonY, width, waterTopStripH);
+      }
     }
 
     // Zero-gap distant slice coalescing state (prevents sky slits on distant hills while keeping low draw counts)
@@ -450,7 +490,8 @@ export class RoadRenderer {
           const dy = p1.screenY - p2.screenY;
           shouldDeferSlice = !(dy >= 0.15 || p1.screenW >= 8 || seg.sprites.length > 0 || firstTruckIdx !== -1);
         } else if (
-          (seg.env ?? 'standard') === 'standard' &&
+          ((seg.env ?? 'standard') === 'standard' ||
+            ((seg.env === 'bridge' || seg.env === 'viaduct') && p1.screenW < 24)) &&
           n > 60 &&
           combinedDy < 0.75 &&
           seg.sprites.length === 0 &&
@@ -471,13 +512,13 @@ export class RoadRenderer {
           }
         } else if (
           isTunnelSeg &&
-          p1.screenW < 64 &&
+          p1.screenW < 28 &&
           roadVisible &&
           coalesceCount < 6 &&
           combinedDy < 1.8 &&
           !(seg.tunnelLight !== undefined ? seg.tunnelLight : seg.index % 16 === 0) &&
           !(
-            p1.screenW >= 28 &&
+            p1.screenW >= 14 &&
             (seg.index % 12 === 0 || (Math.abs(seg.curve) >= 2.2 && seg.index % 8 === 0))
           ) &&
           firstTruckIdx === -1 &&
@@ -515,15 +556,12 @@ export class RoadRenderer {
           this.stats.drawnSegments++;
           const nRatio = drawDistance > 0 ? n / drawDistance : 0;
           const fogBand =
-            legacy || fogStrength <= 0
+            legacy || fogStrength <= 0 || nRatio < 0.25
               ? 0
-              : nRatio < 0.25
-                ? 0
-                : nRatio < 0.5
-                  ? 1
-                  : nRatio < 0.75
-                    ? 2
-                    : 3;
+              : Math.min(
+                  RoadRenderer.FOG_BANDS - 1,
+                  1 + Math.floor(((nRatio - 0.25) / 0.75) * (RoadRenderer.FOG_BANDS - 1)),
+                );
           const tSeg0 = sampleSubsystems ? performance.now() : 0;
           const farP2 = coalesceCount > 0 && isTunnelSeg && coalesceFarSeg ? coalesceFarSeg.p2 : undefined;
           this.renderSegment(
@@ -627,21 +665,21 @@ export class RoadRenderer {
         const propPpu = scaledPpu * spriteScale;
         const propRefPpu = propPpu * (640 / Math.max(1, width));
 
-        // Phase 1: Per-category local distance & PPU fade-in (eliminates mid-distance pop-in)
+        // Phase 1: Per-category local distance & PPU fade-in (smoothstep horizon reveal)
         let propFogFactor = 0;
         let targetAlpha = propAlpha;
         if (!legacy) {
           const absOff = Math.abs(s.offset);
           let maxRatio = 1.0;
-          let fadeRatioSpan = 0.18;
+          let fadeRatioSpan = 0.24;
           let minRefPpu = 0.004;
-          let fadePpuSpan = 0.003;
+          let fadePpuSpan = 0.0055;
 
           if (absOff >= 6.0) {
             maxRatio = 0.5;
-            fadeRatioSpan = 0.12;
+            fadeRatioSpan = 0.2;
             minRefPpu = 0.0095;
-            fadePpuSpan = 0.004;
+            fadePpuSpan = 0.0065;
           } else if (
             resolvedKind === 'shrub' ||
             resolvedKind === 'bench' ||
@@ -651,14 +689,14 @@ export class RoadRenderer {
             resolvedKind === 'bus-stop'
           ) {
             maxRatio = 0.58;
-            fadeRatioSpan = 0.12;
+            fadeRatioSpan = 0.2;
             minRefPpu = 0.0095;
-            fadePpuSpan = 0.004;
+            fadePpuSpan = 0.0065;
           } else if (resolvedKind === 'building' && absOff >= 3.0 && absOff < 6.0) {
             maxRatio = 0.78;
-            fadeRatioSpan = 0.14;
+            fadeRatioSpan = 0.22;
             minRefPpu = 0.0055;
-            fadePpuSpan = 0.003;
+            fadePpuSpan = 0.0055;
           } else if (
             resolvedKind === 'sign' ||
             resolvedKind === 'lamp' ||
@@ -668,9 +706,9 @@ export class RoadRenderer {
             (absOff >= 3.0 && resolvedKind !== 'building' && resolvedKind !== 'pylon')
           ) {
             maxRatio = 0.68;
-            fadeRatioSpan = 0.12;
+            fadeRatioSpan = 0.2;
             minRefPpu = 0.0085;
-            fadePpuSpan = 0.0035;
+            fadePpuSpan = 0.006;
           }
 
           if (nRatio >= maxRatio || propRefPpu <= minRefPpu) {
@@ -679,11 +717,11 @@ export class RoadRenderer {
 
           const localDistAlpha =
             nRatio > maxRatio - fadeRatioSpan
-              ? clamp01((maxRatio - nRatio) / fadeRatioSpan)
+              ? smoothstep(clamp01((maxRatio - nRatio) / fadeRatioSpan))
               : 1;
           const localPpuAlpha =
             propRefPpu < minRefPpu + fadePpuSpan
-              ? clamp01((propRefPpu - minRefPpu) / fadePpuSpan)
+              ? smoothstep(clamp01((propRefPpu - minRefPpu) / fadePpuSpan))
               : 1;
           const effectiveAlpha = Math.min(propAlpha, localDistAlpha, localPpuAlpha);
           if (effectiveAlpha < 0.04) continue;
@@ -691,8 +729,8 @@ export class RoadRenderer {
           targetAlpha = effectiveAlpha >= 0.98 ? 1 : effectiveAlpha;
 
           const relDepth = clamp01(nRatio / Math.max(0.1, maxRatio));
-          if (relDepth > 0.35 && tuning.propAtmosphereFog > 0) {
-            propFogFactor = clamp01(((relDepth - 0.35) / 0.45) * tuning.propAtmosphereFog);
+          if (relDepth > 0.22 && tuning.propAtmosphereFog > 0) {
+            propFogFactor = clamp01(smoothstep((relDepth - 0.22) / 0.6) * tuning.propAtmosphereFog);
           }
         } else if (Math.abs(s.offset) >= 6.0 && propPpu < 0.0012) {
           continue;
@@ -722,6 +760,8 @@ export class RoadRenderer {
             propPpu,
             seg.index,
             isStreaming ? 0 : isNextSeg ? view.nextTrack!.segments.length : segments.length,
+            width,
+            height,
             legacy,
           );
         }
@@ -922,7 +962,7 @@ export class RoadRenderer {
     // Phase 3 Edge case (b): extrapolate wires for nearest visible tower behind camera
     const tWires0 = sampleSubsystems ? performance.now() : 0;
     if (!view.skipPylonWires && !view.skipProps && !isCameraInTunnel) {
-      this.extrapolateNearestPylonWires(ctx, width, height, legacy);
+      this.extrapolateNearestPylonWires(ctx, width, height, horizonY, legacy);
     }
     if (sampleSubsystems) {
       samplePropsMs += performance.now() - tWires0;
@@ -940,6 +980,8 @@ export class RoadRenderer {
     propPpu: number,
     segIndex: number,
     trackSegCount: number,
+    width: number,
+    height: number,
     legacy = false,
   ): void {
     const chainId = sprite.chainId!;
@@ -971,6 +1013,12 @@ export class RoadRenderer {
       const segDelta =
         trackSegCount > 0 ? Math.min(rawDelta, trackSegCount - rawDelta) : rawDelta;
 
+      const minClipX = -width * 1.0;
+      const maxClipX = width * 2.0;
+      const minClipY = -height * 2.5;
+      const maxClipY = height * 1.75;
+      const maxSag = height * 0.14;
+
       // Connect all consecutive towers belonging to the same corridor run
       if (isCrossing || segDelta <= 200) {
         if (legacy || propPpu >= 0.0055) {
@@ -981,18 +1029,22 @@ export class RoadRenderer {
           let drewAnyWire = false;
           if (legacy) {
             for (let k = 0; k < 5; k++) {
-              const xNear = this.currentPylonPoints[k * 2]!;
-              const yNear = this.currentPylonPoints[k * 2 + 1]!;
+              const xNearRaw = this.currentPylonPoints[k * 2]!;
+              const yNearRaw = this.currentPylonPoints[k * 2 + 1]!;
               const xFar = this.chainSlotPoints[pOffset + k * 2]!;
               const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
 
-              drewAnyWire = true;
-              const dx = xFar - xNear;
-              const dy = yFar - yNear;
-              const dist = Math.sqrt(dx * dx + dy * dy);
+              const dx = xNearRaw - xFar;
+              const dy = yNearRaw - yFar;
+              const tClip = computeNearClipT(xFar, yFar, dx, dy, minClipX, maxClipX, minClipY, maxClipY);
+              if (tClip <= 0) continue;
+              const xNear = xFar + dx * tClip;
+              const yNear = yFar + dy * tClip;
 
+              drewAnyWire = true;
+              const dist = Math.hypot(xNear - xFar, yNear - yFar);
               const sagRatio = isCrossing ? 0.05 : 0.09;
-              const sag = Math.max(1.5, dist * sagRatio);
+              const sag = Math.min(maxSag, Math.max(1.5, dist * sagRatio));
               const midX = (xNear + xFar) * 0.5;
               const midY = (yNear + yFar) * 0.5 + sag;
 
@@ -1009,16 +1061,21 @@ export class RoadRenderer {
             if (drewAnyWire && propPpu > 0.0035) {
               ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
               for (let k = 0; k < 5; k++) {
-                const xNear = this.currentPylonPoints[k * 2]!;
-                const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+                const xNearRaw = this.currentPylonPoints[k * 2]!;
+                const yNearRaw = this.currentPylonPoints[k * 2 + 1]! - 0.75;
                 const xFar = this.chainSlotPoints[pOffset + k * 2]!;
                 const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
 
-                const dx = xFar - xNear;
-                const dy = yFar - yNear;
-                const dist = Math.sqrt(dx * dx + dy * dy);
+                const dx = xNearRaw - xFar;
+                const dy = yNearRaw - yFar;
+                const tClip = computeNearClipT(xFar, yFar, dx, dy, minClipX, maxClipX, minClipY, maxClipY);
+                if (tClip <= 0) continue;
+                const xNear = xFar + dx * tClip;
+                const yNear = yFar + dy * tClip;
+
+                const dist = Math.hypot(xNear - xFar, yNear - yFar);
                 const sagRatio = isCrossing ? 0.05 : 0.09;
-                const sag = Math.max(1.5, dist * sagRatio);
+                const sag = Math.min(maxSag, Math.max(1.5, dist * sagRatio));
                 ctx.beginPath();
                 ctx.moveTo(xNear, yNear);
                 ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
@@ -1026,46 +1083,60 @@ export class RoadRenderer {
               }
             }
           } else {
-            // Batched catenary wire draw: 1 beginPath + 5 quadratic curves + 1 stroke
+            const pOffsetSpan = slot * 10;
+            // Batched catenary wire draw: 1 beginPath + 5 clipped quadratic curves + 1 stroke
             ctx.beginPath();
             for (let k = 0; k < 5; k++) {
-              const xNear = this.currentPylonPoints[k * 2]!;
-              const yNear = this.currentPylonPoints[k * 2 + 1]!;
-              const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-              const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+              const xNearRaw = this.currentPylonPoints[k * 2]!;
+              const yNearRaw = this.currentPylonPoints[k * 2 + 1]!;
+              const xFar = this.chainSlotPoints[pOffsetSpan + k * 2]!;
+              const yFar = this.chainSlotPoints[pOffsetSpan + k * 2 + 1]!;
 
-              const dx = xFar - xNear;
-              const dy = yFar - yNear;
-              const dist = Math.sqrt(dx * dx + dy * dy);
+              const dx = xNearRaw - xFar;
+              const dy = yNearRaw - yFar;
+              const tClip = computeNearClipT(xFar, yFar, dx, dy, minClipX, maxClipX, minClipY, maxClipY);
+              if (tClip <= 0) continue;
+              const xNear = xFar + dx * tClip;
+              const yNear = yFar + dy * tClip;
+
+              drewAnyWire = true;
+              const dist = Math.hypot(xNear - xFar, yNear - yFar);
               const sagRatio = isCrossing ? 0.05 : 0.09;
-              const sag = Math.max(1.5, dist * sagRatio);
+              const sag = Math.min(maxSag, Math.max(1.5, dist * sagRatio));
               const midX = (xNear + xFar) * 0.5;
               const midY = (yNear + yFar) * 0.5 + sag;
 
               ctx.moveTo(xNear, yNear);
               ctx.quadraticCurveTo(midX, midY, xFar, yFar);
             }
-            ctx.stroke();
-            this.stats.drawnPylonSpans++;
-
-            if (propPpu > 0.018) {
-              ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
-              ctx.beginPath();
-              for (let k = 0; k < 5; k++) {
-                const xNear = this.currentPylonPoints[k * 2]!;
-                const yNear = this.currentPylonPoints[k * 2 + 1]! - 0.75;
-                const xFar = this.chainSlotPoints[pOffset + k * 2]!;
-                const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]! - 0.75;
-
-                const dx = xFar - xNear;
-                const dy = yFar - yNear;
-                const dist = Math.sqrt(dx * dx + dy * dy);
-                const sagRatio = isCrossing ? 0.05 : 0.09;
-                const sag = Math.max(1.5, dist * sagRatio);
-                ctx.moveTo(xNear, yNear);
-                ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
-              }
+            if (drewAnyWire) {
               ctx.stroke();
+              this.stats.drawnPylonSpans++;
+
+              if (propPpu > 0.045) {
+                ctx.strokeStyle = 'rgba(128, 245, 236, 0.22)';
+                ctx.beginPath();
+                for (let k = 0; k < 5; k++) {
+                  const xNearRaw = this.currentPylonPoints[k * 2]!;
+                  const yNearRaw = this.currentPylonPoints[k * 2 + 1]! - 0.75;
+                  const xFar = this.chainSlotPoints[pOffsetSpan + k * 2]!;
+                  const yFar = this.chainSlotPoints[pOffsetSpan + k * 2 + 1]! - 0.75;
+
+                  const dx = xNearRaw - xFar;
+                  const dy = yNearRaw - yFar;
+                  const tClip = computeNearClipT(xFar, yFar, dx, dy, minClipX, maxClipX, minClipY, maxClipY);
+                  if (tClip <= 0) continue;
+                  const xNear = xFar + dx * tClip;
+                  const yNear = yFar + dy * tClip;
+
+                  const dist = Math.hypot(xNear - xFar, yNear - yFar);
+                  const sagRatio = isCrossing ? 0.05 : 0.09;
+                  const sag = Math.min(maxSag, Math.max(1.5, dist * sagRatio));
+                  ctx.moveTo(xNear, yNear);
+                  ctx.quadraticCurveTo((xNear + xFar) * 0.5, (yNear + yFar) * 0.5 + sag, xFar, yFar);
+                }
+                ctx.stroke();
+              }
             }
           }
         }
@@ -1079,16 +1150,22 @@ export class RoadRenderer {
         return;
       }
 
-      // Record perspective delta vector for edge-case extrapolation: (near - far)
-      const farSx = this.chainSlotPos[slot * 2]!;
-      const farSy = this.chainSlotPos[slot * 2 + 1]!;
-      this.chainSlotVec[slot * 2] = sx - farSx;
-      this.chainSlotVec[slot * 2 + 1] = sy - farSy;
-
-      // Update slot with current (nearer) tower points
+      // Record per-wire normalized screen direction (near - far) from attachment points, then update slot
       const pOffset = slot * 10;
-      for (let k = 0; k < 10; k++) {
-        this.chainSlotPoints[pOffset + k] = this.currentPylonPoints[k]!;
+      for (let k = 0; k < 5; k++) {
+        const xNear = this.currentPylonPoints[k * 2]!;
+        const yNear = this.currentPylonPoints[k * 2 + 1]!;
+        const xFar = this.chainSlotPoints[pOffset + k * 2]!;
+        const yFar = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+        const dx = xNear - xFar;
+        const dy = yNear - yFar;
+        const len = Math.hypot(dx, dy);
+        if (len > 0.5 && Number.isFinite(len)) {
+          this.chainSlotPointVec[pOffset + k * 2] = dx / len;
+          this.chainSlotPointVec[pOffset + k * 2 + 1] = dy / len;
+        }
+        this.chainSlotPoints[pOffset + k * 2] = xNear;
+        this.chainSlotPoints[pOffset + k * 2 + 1] = yNear;
       }
       this.chainSlotPos[slot * 2] = sx;
       this.chainSlotPos[slot * 2 + 1] = sy;
@@ -1108,10 +1185,9 @@ export class RoadRenderer {
       this.chainSlotMeta[targetSlot * 5 + 4] = 0;
       this.chainSlotPos[targetSlot * 2] = sx;
       this.chainSlotPos[targetSlot * 2 + 1] = sy;
-      this.chainSlotVec[targetSlot * 2] = 0;
-      this.chainSlotVec[targetSlot * 2 + 1] = 0;
       for (let k = 0; k < 10; k++) {
         this.chainSlotPoints[pOffset + k] = this.currentPylonPoints[k]!;
+        this.chainSlotPointVec[pOffset + k] = 0;
       }
     }
   }
@@ -1120,6 +1196,7 @@ export class RoadRenderer {
     ctx: CanvasRenderingContext2D,
     width: number,
     height: number,
+    horizonY: number,
     legacy = false,
   ): void {
     ctx.strokeStyle = '#2d1c4a';
@@ -1132,69 +1209,77 @@ export class RoadRenderer {
       if (variant === 1 || variant === 2) continue;
 
       const wiredCount = this.chainSlotMeta[s * 5 + 4]!;
-      const towerX = this.chainSlotPos[s * 2]!;
       const towerY = this.chainSlotPos[s * 2 + 1]!;
 
       // Do not shoot extrapolated wires from a lone distant tower peeking over the horizon
       if (wiredCount === 0 && towerY < height * 0.6) continue;
 
-      let vx = this.chainSlotVec[s * 2]!;
-      let vy = this.chainSlotVec[s * 2 + 1]!;
-
-      if (vx === 0 && vy === 0) {
-        // Only one tower of this chain was visible near the camera; extrapolate outward/downward
-        vx = towerX - width * 0.5;
-        vy = towerY - height * 0.35;
-      }
-
-      const vDist = Math.sqrt(vx * vx + vy * vy) || 1;
-      let dirX = vx / vDist;
-      let dirY = vy / vDist;
-
-      // Ensure downward/outward direction toward screen edge/bottom
-      if (dirY < 0.2) dirY = 0.2;
-      const norm = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
-      dirX /= norm;
-      dirY /= norm;
-
-      // Skip if the nearest tower is already off-screen pointing outward
-      if (
-        (towerX < -80 && dirX <= 0) ||
-        (towerX > width + 80 && dirX >= 0) ||
-        towerY > height + 80
-      ) {
-        continue;
-      }
-
-      // Compute exit length so extrapolated cables always extend beyond the viewport border
-      let tx = 1e6;
-      if (dirX > 0.001) tx = (width + 24 - towerX) / dirX;
-      else if (dirX < -0.001) tx = (-24 - towerX) / dirX;
-      const ty = dirY > 0.001 ? (height + 24 - towerY) / dirY : 1e6;
-      const extLen = Math.max(140, Math.min(width + height, Math.min(tx, ty) + 40));
-
       const pOffset = s * 10;
+      const vpX = width * 0.5;
+      const vpY = horizonY;
 
-      if (legacy) {
-        for (let k = 0; k < 5; k++) {
-          const xNear = this.chainSlotPoints[pOffset + k * 2]!;
-          const yNear = this.chainSlotPoints[pOffset + k * 2 + 1]!;
-          const exitX = xNear + dirX * extLen;
-          const exitY = yNear + dirY * extLen;
+      if (!legacy) {
+        ctx.beginPath();
+      }
+      let drewAny = false;
 
+      for (let k = 0; k < 5; k++) {
+        const xNear = this.chainSlotPoints[pOffset + k * 2]!;
+        const yNear = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+        if (!Number.isFinite(xNear) || !Number.isFinite(yNear)) continue;
+
+        let vx = wiredCount > 0 ? this.chainSlotPointVec[pOffset + k * 2]! : 0;
+        let vy = wiredCount > 0 ? this.chainSlotPointVec[pOffset + k * 2 + 1]! : 0;
+        if (vx === 0 && vy === 0) {
+          // Single near tower visible: follow true radial perspective outward from vanishing point
+          vx = xNear - vpX;
+          vy = yNear - vpY;
+        }
+        const vLen = Math.hypot(vx, vy) || 1;
+        const dirX = vx / vLen;
+        const dirY = vy / vLen;
+
+        // Skip wire if attachment point is already past the viewport border pointing outward
+        if (
+          (xNear < -40 && dirX <= 0) ||
+          (xNear > width + 40 && dirX >= 0) ||
+          (yNear < -40 && dirY <= 0) ||
+          (yNear > height + 40 && dirY >= 0)
+        ) {
+          continue;
+        }
+
+        // Compute exit distance against ALL 4 viewport margins (left, right, top, bottom)
+        const tx =
+          dirX > 0.001
+            ? (width + 24 - xNear) / dirX
+            : dirX < -0.001
+              ? (-24 - xNear) / dirX
+              : 1e6;
+        const ty =
+          dirY > 0.001
+            ? (height + 24 - yNear) / dirY
+            : dirY < -0.001
+              ? (-24 - yNear) / dirY
+              : 1e6;
+        const extLen = Math.max(80, Math.min(width + height, Math.min(tx, ty) + 24));
+        const exitX = xNear + dirX * extLen;
+        const exitY = yNear + dirY * extLen;
+        const sag = Math.min(height * 0.07, extLen * 0.035);
+
+        drewAny = true;
+        if (legacy) {
           ctx.beginPath();
           ctx.moveTo(xNear, yNear);
-          ctx.lineTo(exitX, exitY);
+          ctx.quadraticCurveTo((xNear + exitX) * 0.5, (yNear + exitY) * 0.5 + sag, exitX, exitY);
           ctx.stroke();
-        }
-      } else {
-        ctx.beginPath();
-        for (let k = 0; k < 5; k++) {
-          const xNear = this.chainSlotPoints[pOffset + k * 2]!;
-          const yNear = this.chainSlotPoints[pOffset + k * 2 + 1]!;
+        } else {
           ctx.moveTo(xNear, yNear);
-          ctx.lineTo(xNear + dirX * extLen, yNear + dirY * extLen);
+          ctx.quadraticCurveTo((xNear + exitX) * 0.5, (yNear + exitY) * 0.5 + sag, exitX, exitY);
         }
+      }
+
+      if (!legacy && drewAny) {
         ctx.stroke();
       }
     }
@@ -1264,6 +1349,15 @@ export class RoadRenderer {
     const isViaduct = seg.env === 'viaduct';
 
     if (isTunnel) {
+      const tunBand =
+        legacy || this.cachedFogStrength <= 0
+          ? 0
+          : Math.min(RoadRenderer.TUNNEL_FOG_BANDS - 1, fogBand >> 1);
+      const tunRoadColor =
+        stripe === 0 ? this.tunnelFogRoad0[tunBand]! : this.tunnelFogRoad1[tunBand]!;
+      const tunRumbleColor =
+        stripe === 0 ? this.tunnelFogRumble0[tunBand]! : this.tunnelFogRumble1[tunBand]!;
+      const tunLaneColor = this.tunnelFogLane[tunBand]!;
       this.renderTunnelSegment(
         ctx,
         width,
@@ -1271,9 +1365,9 @@ export class RoadRenderer {
         seg,
         palette,
         grassColor,
-        roadColor,
-        rumbleColor,
-        laneColor,
+        tunRoadColor,
+        tunRumbleColor,
+        tunLaneColor,
         x1,
         y1,
         w1,
@@ -1296,10 +1390,10 @@ export class RoadRenderer {
     // Bridge bay water surface vs viaduct/terrain ground fill.
     // Viaducts NEVER draw bay water; non-bridge terrain fills [y2, y1] for natural hill-crest occlusion.
     if (isBridge && isCameraOnBridge) {
-      if (stripe === 0 && y1 > horizonY) {
+      if (y1 > horizonY) {
         const waterColors = palette.water ?? palette.grass;
         const waterY2 = Math.max(horizonY, y2);
-        ctx.fillStyle = waterColors[0];
+        ctx.fillStyle = isCoalesced || stripe !== 0 ? waterColors[1] : waterColors[0];
         ctx.fillRect(0, waterY2, width, y1 - waterY2);
       }
     } else if (isBridge) {
@@ -1309,7 +1403,7 @@ export class RoadRenderer {
         ctx.fillRect(0, baseY2, width, y1 - baseY2);
       }
     } else {
-      ctx.fillStyle = isCoalesced ? this.fogGrass1[3]! : grassColor;
+      ctx.fillStyle = isCoalesced ? this.fogGrass1[RoadRenderer.FOG_BANDS - 1]! : grassColor;
       ctx.fillRect(0, y2, width, y1 - y2);
     }
 
@@ -1338,14 +1432,16 @@ export class RoadRenderer {
       return;
     }
 
+    // Horizontal frustum cull for curved road slices completely outside [0, width]
+    const minRoadX = Math.min(x1 - w1 - r1, x2 - w2 - r2);
+    const maxRoadX = Math.max(x1 + w1 + r1, x2 + w2 + r2);
+    if (maxRoadX < -2 || minRoadX > width + 2) return;
+
     const sliceH = y1 - y2;
     const rawDy = p1.screenY - p2.screenY;
-    const useFastSliceRect =
-      !isBridge &&
-      !isViaduct &&
-      (legacy
-        ? w1 < 20 && rawDy < 2.2
-        : isCoalesced || (rawDy <= 1.6 && Math.abs(w1 - w2) <= 4.5 && Math.abs(x1 - x2) <= 3.5));
+    const useFastSliceRect = legacy
+      ? !isBridge && !isViaduct && w1 < 20 && rawDy < 2.2
+      : isCoalesced || (rawDy <= 1.6 && Math.abs(w1 - w2) <= 4.5 && Math.abs(x1 - x2) <= 5.5);
     if (useFastSliceRect) {
       // Distant thin-slice fast path: separate non-overlapping curb & asphalt fillRects avoid both
       // path tessellation and sub-pixel rumble color bleed across the asphalt surface.
@@ -1822,6 +1918,21 @@ export class RoadRenderer {
     const parH1 = Math.max(2, Math.round(w1 * 0.16));
     const parH2 = Math.max(1, Math.round(w2 * 0.16));
 
+    // Distant/mid bridge parapet LOD: compact axis-aligned fillRects avoid quad path tessellation
+    if (w1 < 36) {
+      const mx = (x1 + x2) * 0.5;
+      const mw = (w1 + w2) * 0.5;
+      const mr = (r1 + r2) * 0.5;
+      const parW = Math.max(2, Math.round(mr * 0.65));
+      const topY = Math.round(y2 - parH2);
+      const botY = Math.round(y1);
+      const wallH = Math.max(2, botY - topY);
+      ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
+      ctx.fillRect(Math.round(mx - mw - mr), topY, parW, wallH);
+      ctx.fillRect(Math.round(mx + mw + mr - parW), topY, parW, wallH);
+      return;
+    }
+
     // Continuous steel bridge parapets (Left & Right batched in 1 path)
     ctx.fillStyle = stripe === 0 ? '#484160' : '#39334d';
     ctx.beginPath();
@@ -1837,8 +1948,8 @@ export class RoadRenderer {
     ctx.closePath();
     ctx.fill();
 
-    // Top chrome rails & catadioptres (LOD: closer segments w1 >= 28 using fast axis-aligned fillRects)
-    if (w1 >= 28 && stripe === 0) {
+    // Top chrome rails & catadioptres (LOD: closer segments w1 >= 38 using fast axis-aligned fillRects)
+    if (w1 >= 38 && stripe === 0) {
       const leftRailX = Math.round(x1 - w1 - r1);
       const rightRailX = Math.round(x1 + w1 + r1);
       const railY = Math.round(y1 - parH1);
@@ -1854,9 +1965,16 @@ export class RoadRenderer {
     }
 
     // Expansion Joint across the asphalt every 8 segments on stripe 0
-    if (stripe === 0 && seg.index % 8 === 0 && w1 >= 22) {
+    if (stripe === 0 && seg.index % 8 === 0 && w1 >= 34) {
       ctx.fillStyle = '#5c5478';
-      polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      const dy = y1 - y2;
+      if (dy <= 2.5 && Math.abs(x1 - x2) <= 3.5) {
+        const mx = (x1 + x2) * 0.5;
+        const mw = (w1 + w2) * 0.5;
+        ctx.fillRect(Math.round(mx - mw), y2, Math.max(1, Math.round(mw * 2)), Math.max(1, dy));
+      } else {
+        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      }
     }
   }
 
@@ -1877,6 +1995,21 @@ export class RoadRenderer {
     const parH1 = Math.max(2, Math.round(w1 * 0.22));
     const parH2 = Math.max(1, Math.round(w2 * 0.22));
 
+    // Distant/mid viaduct wall LOD: axis-aligned fillRects avoid quad tessellation
+    if (w1 < 36) {
+      const mx = (x1 + x2) * 0.5;
+      const mw = (w1 + w2) * 0.5;
+      const mr = (r1 + r2) * 0.5;
+      const wallW = Math.max(2, Math.round(mr * 0.75));
+      const topY = Math.round(y2 - parH2);
+      const botY = Math.round(y1);
+      const wallH = Math.max(2, botY - topY);
+      ctx.fillStyle = stripe === 0 ? '#2c2740' : '#211c32';
+      ctx.fillRect(Math.round(mx - mw - mr), topY, wallW, wallH);
+      ctx.fillRect(Math.round(mx + mw + mr - wallW), topY, wallW, wallH);
+      return;
+    }
+
     // Shuto C1 elevated expressway concrete sound-barrier walls (Left & Right batched in 1 path)
     ctx.fillStyle = stripe === 0 ? '#2c2740' : '#211c32';
     ctx.beginPath();
@@ -1893,7 +2026,7 @@ export class RoadRenderer {
     ctx.fill();
 
     // Neon accent guide rail & amber reflectors (closer segments)
-    if (w1 >= 24 && stripe === 0) {
+    if (w1 >= 38 && stripe === 0) {
       const leftWallX = Math.round(x1 - w1 - r1);
       const rightWallX = Math.round(x1 + w1 + r1);
       const railY = Math.round(y1 - parH1);
@@ -1910,9 +2043,16 @@ export class RoadRenderer {
     }
 
     // Concrete viaduct expansion joint every 8 segments
-    if (stripe === 0 && seg.index % 8 === 0 && w1 >= 22) {
+    if (stripe === 0 && seg.index % 8 === 0 && w1 >= 34) {
       ctx.fillStyle = '#474063';
-      polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      const dy = y1 - y2;
+      if (dy <= 2.5 && Math.abs(x1 - x2) <= 3.5) {
+        const mx = (x1 + x2) * 0.5;
+        const mw = (w1 + w2) * 0.5;
+        ctx.fillRect(Math.round(mx - mw), y2, Math.max(1, Math.round(mw * 2)), Math.max(1, dy));
+      } else {
+        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      }
     }
   }
 
@@ -2168,10 +2308,18 @@ export class RoadRenderer {
         if (occludeBot > this.boreMaxY) this.boreMaxY = occludeBot;
       }
     } else {
-      // Approaching from outside: ground terrain below horizon + gapless concrete exterior shell
+      // Approaching from outside: paint ground terrain strictly outside the tunnel shell so grass never bleeds inside the bore
       if (drawRoadFloor && wallBot1 > wallBot2) {
+        const terrainSpanH = wallBot1 - wallBot2;
+        const leftGrassW = Math.max(0, Math.min(width, Math.min(outerL1, outerL2) + 1));
+        const rightGrassX = Math.max(0, Math.min(width, Math.max(outerR1, outerR2) - 1));
         ctx.fillStyle = grassColor;
-        ctx.fillRect(0, wallBot2, width, wallBot1 - wallBot2);
+        if (leftGrassW > 0) {
+          ctx.fillRect(0, wallBot2, leftGrassW, terrainSpanH);
+        }
+        if (rightGrassX < width) {
+          ctx.fillRect(rightGrassX, wallBot2, width - rightGrassX, terrainSpanH);
+        }
       }
 
       ctx.fillStyle = stripe === 0 ? '#1b162e' : '#151126';
@@ -2203,10 +2351,11 @@ export class RoadRenderer {
       ctx.fill();
     }
 
-    // 2. Interior octagonal vaulted surfaces (LOD-tiered for 60 FPS)
+    // 2. Interior octagonal vaulted surfaces (full-height & full-depth LOD-tiered for 60 FPS)
     const isRibSeg = seg.index % 12 === 0;
-    if (w1 < 68) {
-      // Far LOD: 1 batched wall+haunch path + ceiling crown (slashes GPU path tessellations by ~75%)
+    const hasCeilingLight = seg.tunnelLight !== undefined ? seg.tunnelLight : seg.index % 16 === 0;
+    if (w1 < 18) {
+      // Far LOD: 1 batched wall+haunch path + ceiling crown (preserves distant silhouettes at low GPU cost)
       ctx.fillStyle = '#181429';
       ctx.beginPath();
       ctx.moveTo(wallL1, wallBot1);
@@ -2230,7 +2379,7 @@ export class RoadRenderer {
       ctx.fillStyle = '#0d0a1a';
       polygon(ctx, crownL1, ceilY1, crownR1, ceilY1, crownR2, ceilY2, crownL2, ceilY2);
     } else {
-      // Mid/Near LOD: subtle lower tiled dado + matte upper wall/haunch + recessed crown
+      // Mid/Near LOD (from w1 >= 18): lower tiled dado + paneled upper wall/haunch + ceiling crown
       ctx.fillStyle = isRibSeg ? '#1f1a33' : stripe === 0 ? '#231e38' : '#1e1a30';
       ctx.beginPath();
       ctx.moveTo(wallL1, wallBot1);
@@ -2247,7 +2396,13 @@ export class RoadRenderer {
       ctx.closePath();
       ctx.fill();
 
-      ctx.fillStyle = isRibSeg ? '#120e20' : stripe === 0 ? '#161226' : '#130f21';
+      ctx.fillStyle = isRibSeg
+        ? '#120e20'
+        : hasCeilingLight && w1 >= 26
+          ? '#241e3e'
+          : stripe === 0
+            ? '#1b1630'
+            : '#161226';
       ctx.beginPath();
       ctx.moveTo(wallL1, dadoY1);
       ctx.lineTo(wallL1, haunchY1);
@@ -2268,8 +2423,69 @@ export class RoadRenderer {
       ctx.fillStyle = isRibSeg ? '#090713' : stripe === 0 ? '#0c0918' : '#090714';
       polygon(ctx, crownL1, ceilY1, crownR1, ceilY1, crownR2, ceilY2, crownL2, ceilY2);
 
-      // Safety dado handrail & flush wall-mounted cat's-eye reflectors (clear of rumble curbs and crests)
-      if (stripe === 0 && (rawDadoY1 < wallBot1 || rawDadoY2 < wallBot2)) {
+      // Upper-half architectural details (haunch service conduit + mid-upper panel rib + ceiling runners)
+      if (w1 >= 22 && (rawHaunchY1 < wallBot1 || rawHaunchY2 < wallBot2)) {
+        const conduitH1 = Math.max(1, w1 * 0.022);
+        const conduitH2 = Math.max(1, w2 * 0.022);
+        const condTop1 = Math.min(wallBot1, haunchY1 - conduitH1 * 0.5);
+        const condBot1 = Math.min(wallBot1, haunchY1 + conduitH1 * 0.5);
+        const condTop2 = Math.min(wallBot2, haunchY2 - conduitH2 * 0.5);
+        const condBot2 = Math.min(wallBot2, haunchY2 + conduitH2 * 0.5);
+        ctx.fillStyle = stripe === 0 ? '#302850' : '#262040';
+        ctx.beginPath();
+        ctx.moveTo(wallL1, condBot1);
+        ctx.lineTo(wallL1, condTop1);
+        ctx.lineTo(wallL2, condTop2);
+        ctx.lineTo(wallL2, condBot2);
+        ctx.closePath();
+        ctx.moveTo(wallR1, condBot1);
+        ctx.lineTo(wallR1, condTop1);
+        ctx.lineTo(wallR2, condTop2);
+        ctx.lineTo(wallR2, condBot2);
+        ctx.closePath();
+        ctx.fill();
+
+        if (w1 >= 34 && stripe === 0) {
+          const midWallY1 = Math.min(wallBot1, (dadoY1 + haunchY1) * 0.5);
+          const midWallY2 = Math.min(wallBot2, (dadoY2 + haunchY2) * 0.5);
+          const jointH1 = Math.max(1, w1 * 0.016);
+          const jointH2 = Math.max(1, w2 * 0.016);
+          ctx.fillStyle = '#262042';
+          ctx.beginPath();
+          ctx.moveTo(wallL1, midWallY1 + jointH1 * 0.5);
+          ctx.lineTo(wallL1, midWallY1 - jointH1 * 0.5);
+          ctx.lineTo(wallL2, midWallY2 - jointH2 * 0.5);
+          ctx.lineTo(wallL2, midWallY2 + jointH2 * 0.5);
+          ctx.closePath();
+          ctx.moveTo(wallR1, midWallY1 + jointH1 * 0.5);
+          ctx.lineTo(wallR1, midWallY1 - jointH1 * 0.5);
+          ctx.lineTo(wallR2, midWallY2 - jointH2 * 0.5);
+          ctx.lineTo(wallR2, midWallY2 + jointH2 * 0.5);
+          ctx.closePath();
+          ctx.fill();
+
+          if (rawCeilY1 < wallBot1 && rawCeilY2 < wallBot2) {
+            const runW1 = w1 * 0.06;
+            const runW2 = w2 * 0.06;
+            ctx.fillStyle = '#1a152e';
+            ctx.beginPath();
+            ctx.moveTo(crownL1 + w1 * 0.14, ceilY1);
+            ctx.lineTo(crownL1 + w1 * 0.14 + runW1, ceilY1);
+            ctx.lineTo(crownL2 + w2 * 0.14 + runW2, ceilY2);
+            ctx.lineTo(crownL2 + w2 * 0.14, ceilY2);
+            ctx.closePath();
+            ctx.moveTo(crownR1 - w1 * 0.14 - runW1, ceilY1);
+            ctx.lineTo(crownR1 - w1 * 0.14, ceilY1);
+            ctx.lineTo(crownR2 - w2 * 0.14, ceilY2);
+            ctx.lineTo(crownR2 - w2 * 0.14 - runW2, ceilY2);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+      }
+
+      // Safety dado handrail & flush wall-mounted cat's-eye reflectors (extend cleanly to w1 >= 22)
+      if (w1 >= 22 && stripe === 0 && (rawDadoY1 < wallBot1 || rawDadoY2 < wallBot2)) {
         const railH1 = Math.max(1, w1 * 0.024);
         const railH2 = Math.max(1, w2 * 0.024);
         const railTop1 = rawDadoY1 < wallBot1 ? dadoY1 - railH1 : wallBot1;
@@ -2288,7 +2504,7 @@ export class RoadRenderer {
         ctx.closePath();
         ctx.fill();
 
-        const reflW = Math.max(2, Math.round(w1 * 0.032));
+        const reflW = Math.max(1, Math.round(w1 * 0.032));
         const reflH = Math.max(1, Math.round(w1 * 0.026));
         if (rawDadoY1 < wallBot1 && rawDadoY2 < wallBot2 && wallBot1 - dadoY1 >= reflH) {
           const reflY = Math.round((dadoY1 + wallBot1 + dadoY2 + wallBot2) * 0.25 - reflH * 0.5);
@@ -2304,7 +2520,7 @@ export class RoadRenderer {
     }
 
     // 3. Flush wall-mounted curve chevron panels on outer tunnel walls (zero freestanding poles)
-    if (Math.abs(seg.curve) >= 2.2 && seg.index % 8 === 0 && w1 >= 30) {
+    if (Math.abs(seg.curve) >= 2.2 && seg.index % 8 === 0 && w1 >= 18) {
       const isRightTurn = seg.curve > 0;
       const wNearX = isRightTurn ? wallL1 : wallR1;
       const wFarX = isRightTurn ? wallL2 : wallR2;
@@ -2353,9 +2569,9 @@ export class RoadRenderer {
       }
     }
 
-    // 4. Mitered 3D perspective concrete arch ribs (flush with chamfered bore, zero overlap on curbs)
-    if (isRibSeg && w1 >= 32) {
-      const rib = Math.max(2, w1 * 0.055);
+    // 4. Mitered 3D perspective concrete arch ribs (flush with chamfered bore, visible down to w1 >= 14)
+    if (isRibSeg && w1 >= 14) {
+      const rib = Math.max(1.5, w1 * 0.055);
       const inWallL1 = wallL1 + rib;
       const inWallR1 = wallR1 - rib;
       const inCeilY1 = Math.min(rawCeilY1 + rib * 0.85, wallBot1);
@@ -2381,14 +2597,15 @@ export class RoadRenderer {
       ctx.fill();
     }
 
-    // 5. Roadway surface & concrete shoulder gutter inside bore (floor-clipped cleanly at segClipY)
+    // 5. Roadway surface & full-bore dark concrete base inside tunnel (zero ground bleed at all distances)
     if (drawRoadFloor && roadY1 > y2) {
       const tunR1 = Math.min(roadR1, roadW1 * 0.21);
       const tunR2 = Math.min(r2, w2 * 0.21);
-      const sliceH = roadY1 - y2;
+      const floorBotY = Math.min(segClipY, roadY1 + 0.75);
+      const sliceH = floorBotY - y2;
       const rawDy = seg.p1.screenY - seg.p2.screenY;
       const useFastTunnelRoad =
-        roadW1 < 68 &&
+        roadW1 < 28 &&
         Math.abs(roadW1 - w2) <= 6.5 &&
         Math.abs(roadX1 - x2) <= 4.5 &&
         (isCoalesced || rawDy <= 2.4);
@@ -2397,19 +2614,25 @@ export class RoadRenderer {
         const mx = (roadX1 + x2) * 0.5;
         const mw = (roadW1 + w2) * 0.5;
         const mr = (tunR1 + tunR2) * 0.5;
+        const boreLeft = Math.round(Math.min(roadWallL1, wallL2));
+        const boreRight = Math.round(Math.max(roadWallR1, wallR2));
         const roadLeft = Math.round(mx - mw);
         const roadRight = Math.round(mx + mw);
         const roadSpan = Math.max(1, roadRight - roadLeft);
         const curbW = Math.max(1, Math.round(mr));
 
-        ctx.fillStyle = isCoalesced ? this.cachedHorizonCurbColor : rumbleColor;
+        // Full-bore concrete base seals any gap between curbs and tunnel walls
+        ctx.fillStyle = '#1b162e';
+        ctx.fillRect(boreLeft, y2, Math.max(1, boreRight - boreLeft), sliceH);
+
+        ctx.fillStyle = isCoalesced ? this.tunnelFogRumble0[RoadRenderer.TUNNEL_FOG_BANDS - 1]! : rumbleColor;
         ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
         ctx.fillRect(roadRight, y2, curbW, sliceH);
 
-        ctx.fillStyle = isCoalesced ? this.cachedHorizonRoadColor : roadColor;
+        ctx.fillStyle = isCoalesced ? this.tunnelFogRoad0[RoadRenderer.TUNNEL_FOG_BANDS - 1]! : roadColor;
         ctx.fillRect(roadLeft, y2, roadSpan, sliceH);
 
-        if (!isCoalesced && stripe === 0 && roadW1 >= 24) {
+        if (!isCoalesced && stripe === 0 && roadW1 >= 8) {
           ctx.fillStyle = laneColor;
           const lw = Math.max(1, mw / Math.max(32, 8 * LANES));
           const laneStep = roadSpan / LANES;
@@ -2420,53 +2643,34 @@ export class RoadRenderer {
           }
         }
       } else {
-        if (roadW1 >= 68) {
-          const gutterL1 = roadX1 - roadW1 - tunR1;
-          const gutterR1 = roadX1 + roadW1 + tunR1;
-          const gutterL2 = x2 - w2 - tunR2;
-          const gutterR2 = x2 + w2 + tunR2;
-          if (gutterL1 > roadWallL1 + 0.5 || roadWallR1 > gutterR1 + 0.5) {
-            ctx.fillStyle = '#1b162e';
-            ctx.beginPath();
-            ctx.moveTo(roadWallL1, roadY1);
-            ctx.lineTo(gutterL1, roadY1);
-            ctx.lineTo(gutterL2, y2);
-            ctx.lineTo(wallL2, y2);
-            ctx.closePath();
-            ctx.moveTo(gutterR1, roadY1);
-            ctx.lineTo(roadWallR1, roadY1);
-            ctx.lineTo(wallR2, y2);
-            ctx.lineTo(gutterR2, y2);
-            ctx.closePath();
-            ctx.fill();
-          }
-        }
+        // Always fill full-bore concrete base across [wallL, wallR] so outdoor ground/fog never leaks beside/under asphalt
+        ctx.fillStyle = '#1b162e';
+        polygon(ctx, roadWallL1, floorBotY, roadWallR1, floorBotY, wallR2, y2, wallL2, y2);
 
         ctx.fillStyle = rumbleColor;
-        drawRumblePair(ctx, roadX1, roadY1, x2, y2, roadW1, w2, tunR1, tunR2);
+        drawRumblePair(ctx, roadX1, floorBotY, x2, y2, roadW1, w2, tunR1, tunR2);
 
         ctx.fillStyle = roadColor;
         polygon(
           ctx,
           roadX1 - roadW1,
-          roadY1,
+          floorBotY,
           roadX1 + roadW1,
-          roadY1,
+          floorBotY,
           x2 + w2,
           y2,
           x2 - w2,
           y2,
         );
 
-        if (stripe === 0 && roadW1 >= 24) {
+        if (stripe === 0 && roadW1 >= 8) {
           ctx.fillStyle = laneColor;
-          drawLanes(ctx, roadX1, roadY1, x2, y2, roadW1, w2);
+          drawLanes(ctx, roadX1, floorBotY, x2, y2, roadW1, w2);
         }
       }
     }
 
     // 6. Perspective ceiling light fixtures along crown
-    const hasCeilingLight = seg.tunnelLight !== undefined ? seg.tunnelLight : seg.index % 16 === 0;
     if (hasCeilingLight && w1 >= 6 && (rawCeilY1 < wallBot1 || rawCeilY2 < wallBot2)) {
       const lightScale = 0.32 + beatPulse * 0.04;
       if (w1 < 18) {
@@ -2631,6 +2835,61 @@ export class RoadRenderer {
       ctx.fill();
     }
   }
+}
+
+function computeNearClipT(
+  xFar: number,
+  yFar: number,
+  dx: number,
+  dy: number,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+): number {
+  if (
+    !Number.isFinite(xFar) ||
+    !Number.isFinite(yFar) ||
+    !Number.isFinite(dx) ||
+    !Number.isFinite(dy)
+  ) {
+    return 0;
+  }
+  let t0 = 0;
+  let t1 = 1;
+  if (Math.abs(dx) < 1e-6) {
+    if (xFar < minX || xFar > maxX) return 0;
+  } else {
+    let r = (minX - xFar) / dx;
+    if (dx < 0) {
+      if (r < t1) t1 = r;
+    } else if (r > t0) {
+      t0 = r;
+    }
+    r = (maxX - xFar) / dx;
+    if (dx > 0) {
+      if (r < t1) t1 = r;
+    } else if (r > t0) {
+      t0 = r;
+    }
+  }
+  if (Math.abs(dy) < 1e-6) {
+    if (yFar < minY || yFar > maxY) return 0;
+  } else {
+    let r = (minY - yFar) / dy;
+    if (dy < 0) {
+      if (r < t1) t1 = r;
+    } else if (r > t0) {
+      t0 = r;
+    }
+    r = (maxY - yFar) / dy;
+    if (dy > 0) {
+      if (r < t1) t1 = r;
+    } else if (r > t0) {
+      t0 = r;
+    }
+  }
+  return t0 <= t1 ? t1 : 0;
 }
 
 function polygon(

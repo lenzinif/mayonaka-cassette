@@ -1,7 +1,6 @@
 import type { BeatJudgementTier } from '@src/audio/BeatClock';
 import {
   barToTime,
-  beatDurationSec,
   sectionAtBar,
   type BeatMap,
   type SectionRole,
@@ -60,7 +59,6 @@ import { compileSongBlueprint, type SongBlueprint } from '@src/road/SongBlueprin
 import {
   isSongTrack,
   restoreCanonicalTrack,
-  worldZToBeat,
   type SongTrack,
   type SyncAnchorKind,
 } from '@src/road/SongRoadGenerator';
@@ -1528,8 +1526,8 @@ export class Game {
     this.drivingAudioParams.offRoadDepth = this.car.offRoadDepth;
     this.drivingAudioParams.inTunnel = cameraSeg?.env === 'tunnel';
     // If multi-track playlist is active and the player is in the late approach to the stage fork
-    // but hasn't reached the finish line yet (docs/OUTRO_EXTENSION_PROPOSALS.md), instruct the
-    // audio engine to apply progressive Tape Drag and hold the Dub Tape Delay wash if the track concludes.
+    // but hasn't reached the finish line yet, instruct the audio engine to hold the Dub Tape
+    // Delay wash at native pitch/tempo if the track concludes before crossing the fork.
     // If the player is in early/mid stage (e.g. at the start of a lap or stopped),
     // the song wraps naturally to the intro rather than skipping to the outro.
     const forkApproachWindowBars = Math.max(
@@ -1543,31 +1541,6 @@ export class Game {
       this.position < this.track.length;
 
     this.drivingAudioParams.holdOutroLoop = holdOutro;
-    if (holdOutro && isStreamingTrack(this.track)) {
-      if (this.track.stageFinishWorldZ !== undefined) {
-        const distRemaining = Math.max(0, this.track.stageFinishWorldZ - this.position);
-        const effectiveCruiseSpeed = Math.max(
-          this.track.referenceSpeed * 0.5,
-          this.horizonAssembler?.estimatedSpeed ?? this.track.referenceSpeed,
-          mapCarSpeedToWorldBaseSpeed(this.car.speed),
-        );
-        // Account for SongRoadSyncController's fork anchor convergence speedup (up to 1.15x)
-        // so highway 5th/6th gear cruising absorbs minor speed dips silently via road sync
-        // and Stage 1 Tape Drag only engages on genuine stalls/braking in the final bars.
-        const recoverableSpeed = effectiveCruiseSpeed * 1.12;
-        const beatSec = beatDurationSec(this.activeRoadBeatMap);
-        const timeRemainingSec = distRemaining / recoverableSpeed;
-        this.drivingAudioParams.roadBeatsRemaining = Math.max(0, timeRemainingSec / beatSec);
-      } else {
-        this.drivingAudioParams.roadBeatsRemaining = undefined;
-      }
-    } else if (holdOutro && isSongTrack(this.track)) {
-      const totalRoadBeats = this.track.totalBars * 4;
-      const currentRoadBeat = worldZToBeat(this.track, this.position);
-      this.drivingAudioParams.roadBeatsRemaining = Math.max(0, totalRoadBeats - currentRoadBeat);
-    } else {
-      this.drivingAudioParams.roadBeatsRemaining = undefined;
-    }
 
     const prevRole = this.sectionRole;
     const prevBarEnergy = this.barEnergy;

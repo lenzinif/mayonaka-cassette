@@ -66,7 +66,10 @@ export function App() {
     const params = new URLSearchParams(window.location.search);
     return params.has('autostart');
   });
-  const [isInitialSelect, setIsInitialSelect] = useState(false);
+  const [isInitialSelect, setIsInitialSelect] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return !params.has('autostart') && (params.has('deck') || params.has('tracks'));
+  });
   const gameRef = useRef<Game | null>(null);
   const wasPausedBeforeModalRef = useRef(false);
   const wasModalOpenRef = useRef(false);
@@ -153,7 +156,7 @@ export function App() {
   }, [audio, gameStarted]);
 
   const handleStartDrive = useCallback(() => {
-    audio.stopPreview(false);
+    audio.stopPreview(false, false);
     setGameStarted(true);
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
@@ -178,7 +181,7 @@ export function App() {
   };
 
   const handleResumeFromTrackLoader = () => {
-    audio.stopPreview(gameStarted);
+    audio.stopPreview(gameStarted, !gameStarted);
     setIsInitialSelect(false);
     setTrackLoaderOpen(false);
     if (gameStarted) {
@@ -359,6 +362,7 @@ export function App() {
             if (params.has('nowires')) game.renderPylonWires = false;
             if (params.has('notraffic')) game.renderTraffic = false;
             if (params.has('nocar')) game.renderCar = false;
+            if (params.has('syncprobe')) game.syncGpuProbe = true;
             if (params.has('legacy')) game.legacyRaster = true;
             if (params.has('autopilot')) {
               const apVal = params.get('autopilot')?.trim().toLowerCase();
