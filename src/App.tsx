@@ -321,6 +321,8 @@ export function App() {
     }
   };
 
+  const gameplayInputEnabled = gameStarted && !trackLoaderOpen && !inspectorOpen;
+
   return (
     <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[var(--ff-ink)]">
       <div className="relative aspect-video max-h-full max-w-full w-full overflow-hidden">
@@ -329,6 +331,7 @@ export function App() {
           audio={audio}
           library={library}
           preloader={preloader}
+          inputEnabled={gameplayInputEnabled}
           onGameReady={(game) => {
             gameRef.current = game;
             const params = new URLSearchParams(window.location.search);
@@ -397,6 +400,7 @@ export function App() {
             if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {
               game.setPaused(true);
             }
+            game.setInputLocked(!gameplayInputEnabled);
           }}
         />
         <HUD

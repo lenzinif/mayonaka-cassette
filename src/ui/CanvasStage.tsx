@@ -14,6 +14,7 @@ export interface CanvasStageProps {
   audio: FunkAudioEngine;
   library: TrackLibrary;
   preloader?: AssetPreloader;
+  inputEnabled?: boolean;
   onGameReady?: (game: Game) => void;
 }
 
@@ -26,9 +27,14 @@ export function CanvasStage({
   audio,
   library,
   preloader,
+  inputEnabled = true,
   onGameReady,
 }: CanvasStageProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const inputRef = useRef<InputManager | null>(null);
+  const gameRef = useRef<Game | null>(null);
+  const inputEnabledRef = useRef(inputEnabled);
+  inputEnabledRef.current = inputEnabled;
   const onGameReadyRef = useRef(onGameReady);
   onGameReadyRef.current = onGameReady;
 
@@ -40,8 +46,12 @@ export function CanvasStage({
     ctx.imageSmoothingEnabled = false;
 
     const humanInput = new InputManager(window);
+    humanInput.setEnabled(inputEnabledRef.current);
     const autopilot = new AutopilotDriver({ fallbackInput: humanInput });
     const game = new Game({ input: autopilot, autopilot, bridge, audio, library, preloader });
+    game.setInputLocked(!inputEnabledRef.current);
+    inputRef.current = humanInput;
+    gameRef.current = game;
     onGameReadyRef.current?.(game);
 
     const loop = new GameLoop({
@@ -62,23 +72,23 @@ export function CanvasStage({
         loop.reset();
       }
     };
-    const handleCanvasClick = () => {
-      if (game.paused) {
-        game.setPaused(false);
-      }
-    };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    canvas.addEventListener('click', handleCanvasClick);
 
     loop.start();
     return () => {
       loop.stop();
       humanInput.dispose();
+      inputRef.current = null;
+      gameRef.current = null;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      canvas.removeEventListener('click', handleCanvasClick);
     };
   }, [bridge, audio, library, preloader]);
+
+  useEffect(() => {
+    inputRef.current?.setEnabled(inputEnabled);
+    gameRef.current?.setInputLocked(!inputEnabled);
+  }, [inputEnabled]);
 
   return (
     <canvas
