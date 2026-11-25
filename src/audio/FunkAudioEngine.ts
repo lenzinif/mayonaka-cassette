@@ -1237,6 +1237,7 @@ export class FunkAudioEngine {
       } else if (
         driving.roadBeatsRemaining !== undefined &&
         driving.roadBeatsRemaining > 0.5 &&
+        audioBeatsRemaining <= 16 &&
         driving.roadBeatsRemaining - audioBeatsRemaining > 0.75
       ) {
         // Stadio 1: rallenta dolcemente il nastro solo se il ritardo supera la deadband (0.75 beat)

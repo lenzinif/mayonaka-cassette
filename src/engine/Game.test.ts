@@ -868,6 +868,89 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     }
   });
 
+  it('prevents false Tape Drag on a 104-bar 117 BPM track after mid-song Overdrive drops to 5th gear', () => {
+    const prevTraffic = tuning.trafficDensity;
+    tuning.trafficDensity = 0;
+    try {
+      const input = new FakeInput();
+      input.setDown('accelerate', true);
+      const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+      const library = new TrackLibrary();
+      const bpm = 117;
+      const totalBars = 104;
+      const barDur = (60 / bpm) * 4;
+      const longMap = {
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: 'sha256:alarming-temps-104bar-variable-speed',
+        title: 'Alarming Temperatures 104-Bar Test',
+        bpm,
+        durationSec: totalBars * barDur,
+        barEnergy: Array.from({ length: totalBars }, (_, b) => (b < 8 ? 0.35 : b < 16 ? 0.6 : 0.85)),
+        barBrightness: new Array<number>(totalBars).fill(0.8),
+        sections: [
+          { startBar: 0, bars: 8, role: 'intro' as const },
+          { startBar: 8, bars: 8, role: 'build' as const },
+          { startBar: 16, bars: 80, role: 'drop' as const },
+          { startBar: 96, bars: 8, role: 'outro' as const },
+        ],
+      };
+      void library.updateBeatMap(library.activeItem.contentHash, longMap);
+      const audio = new FunkAudioEngine(longMap);
+      const game = new Game({ input, bridge, audio, library });
+      const asm = (game as unknown as { horizonAssembler: { resetAtBar: (...args: unknown[]) => void } }).horizonAssembler;
+      const resetSpy = vi.spyOn(asm, 'resetAtBar');
+
+      const dt = 1 / 60;
+      const maxSteps = Math.ceil((totalBars * barDur + 16) / dt);
+      let sawForkActive = false;
+      let forkResetAfterActivation = false;
+      let minLatePlaybackRate = 1.0;
+      let transitionedToStage2 = false;
+
+      for (let step = 0; step < maxSteps; step++) {
+        game.hasStartedDriving = true;
+        // Mid-song 6th-gear Overdrive peak (bars 20..55), then 5th gear + curve/hill dips (bars 56..104)
+        const bar = game.roadBarIndex;
+        if (bar >= 20 && bar <= 55) {
+          game.car.speed = tuning.maxSpeed * 1.04;
+          game.car.gearbox.gear = 6;
+        } else if (bar >= 56 && bar <= 90) {
+          game.car.speed = tuning.maxSpeed * 0.91;
+          game.car.gearbox.gear = 5;
+        } else {
+          game.car.speed = tuning.maxSpeed * (bar % 4 === 0 ? 0.86 : 0.91);
+          game.car.gearbox.gear = 5;
+        }
+        game.car.x = game.forkActive ? getChosenForkCenter(game.forkProgress, 'right') : 0;
+        game.car.prevX = game.car.x;
+        game.update(dt);
+
+        if (library.currentIndex === 0) {
+          if (game.forkActive) {
+            sawForkActive = true;
+          } else if (sawForkActive) {
+            forkResetAfterActivation = true;
+          }
+          if (game.roadBarIndex >= totalBars - 12 && game.forkProgress < 0.98) {
+            minLatePlaybackRate = Math.min(minLatePlaybackRate, audio.playbackRate);
+          }
+        } else if (library.currentIndex === 1) {
+          transitionedToStage2 = true;
+          break;
+        }
+      }
+
+      expect(sawForkActive).toBe(true);
+      expect(forkResetAfterActivation).toBe(false);
+      expect(minLatePlaybackRate).toBeGreaterThanOrEqual(0.99);
+      expect(transitionedToStage2).toBe(true);
+      expect(resetSpy).not.toHaveBeenCalled();
+      expect(audio.beatMap.contentHash).toBe(BUNDLED_WANGAN_BEATMAP.contentHash);
+    } finally {
+      tuning.trafficDensity = prevTraffic;
+    }
+  });
+
   it('updates horizonAssembler.nextBlueprint when TrackLibrary playlist mutates after track load and unsubscribes on dispose()', () => {
     const input = new FakeInput();
     const library = new TrackLibrary();
@@ -1493,7 +1576,6 @@ describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () =>
       const game = new Game({ input: new FakeInput(), audio: new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP) });
       const initialLength = game.track.length;
       const targetPos = initialLength * 0.45;
-      game.hasStartedDriving = true;
       game.position = targetPos;
       (game as unknown as { prevPosition: number }).prevPosition = targetPos;
 
