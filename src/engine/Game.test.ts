@@ -219,11 +219,11 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     expect(library.currentIndex).toBe(0);
   });
 
-  it('holds Dub Tape Delay wash and applies Tape Drag without rewinding 8 bars (docs/OUTRO_EXTENSION_PROPOSALS.md)', () => {
+  it('holds Dub Tape Delay wash at native playbackRate without rewinding 8 bars', () => {
     const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
     const dur = DEFAULT_SYNTH_BEATMAP.durationSec;
 
-    // Stage 1: Tape Drag when roadBeatsRemaining > audioBeatsRemaining
+    // Late outro approach: song maintains native 1.0x pitch and tempo (zero Tape Drag slowdown)
     (engine as unknown as { virtualTrackSec: number }).virtualTrackSec = dur - 4; // ~8 beats remaining
     for (let i = 0; i < 30; i++) {
       engine.update(1 / 60, {
@@ -231,12 +231,9 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
         isDrifting: false,
         isOffRoad: false,
         holdOutroLoop: true,
-        roadBeatsRemaining: 16, // player needs 16 beats to reach fork
       });
     }
-    // Playback rate dips smoothly towards outroTapeDragMinRate (0.85)
-    expect(engine.playbackRate).toBeLessThan(0.98);
-    expect(engine.playbackRate).toBeGreaterThanOrEqual(0.85);
+    expect(engine.playbackRate).toBe(1.0);
 
     // Stage 2: Advance virtualTrackSec past durationSec while holdOutroLoop is true
     const clockState = engine.update(dur + 1, {
@@ -247,6 +244,7 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     });
 
     expect(engine.isOutroLooping).toBe(true);
+    expect(engine.playbackRate).toBe(1.0);
     // ZERO REWIND: virtualTrackSec does NOT jump backward by 8 bars!
     expect((engine as unknown as { virtualTrackSec: number }).virtualTrackSec).toBeGreaterThanOrEqual(dur);
     // Clock continues sampling valid, monotonic beat values

@@ -277,16 +277,21 @@ export function DebugPanel({
   const [values, setValues] = useState<Tuning>(() => ({ ...tuning }));
   const [copied, setCopied] = useState(false);
   const [copiedPerf, setCopiedPerf] = useState(false);
+  const [seekBarInput, setSeekBarInput] = useState('');
   const [reportJson, setReportJson] = useState('');
-  const [isolation, setIsolation] = useState<IsolationToggles>({
-    renderBg: true,
-    renderRoad: true,
-    renderProps: true,
-    renderPylonWires: true,
-    renderTraffic: true,
-    renderCar: true,
-    syncGpuProbe: false,
-    legacyRaster: false,
+  const [isolation, setIsolation] = useState<IsolationToggles>(() => {
+    const syncParam =
+      typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('syncprobe');
+    return {
+      renderBg: true,
+      renderRoad: true,
+      renderProps: true,
+      renderPylonWires: true,
+      renderTraffic: true,
+      renderCar: true,
+      syncGpuProbe: syncParam,
+      legacyRaster: false,
+    };
   });
 
   const tuningTabId = useId();
@@ -309,6 +314,19 @@ export function DebugPanel({
 
   useEffect(() => {
     if (!open || tab !== 'profiler') return;
+    const diagGame = window.__MAYONAKA_DIAG__?.game;
+    if (diagGame) {
+      setIsolation({
+        renderBg: diagGame.renderBg,
+        renderRoad: diagGame.renderRoad,
+        renderProps: diagGame.renderProps,
+        renderPylonWires: diagGame.renderPylonWires,
+        renderTraffic: diagGame.renderTraffic,
+        renderCar: diagGame.renderCar,
+        syncGpuProbe: diagGame.syncGpuProbe,
+        legacyRaster: diagGame.legacyRaster,
+      });
+    }
     refreshReportJson();
   }, [open, tab, refreshReportJson]);
 
@@ -403,6 +421,9 @@ export function DebugPanel({
   const handleCopyPerfReport = async () => {
     const fullReport = window.__MAYONAKA_DIAG__?.getFullReport();
     if (!fullReport && !snap) return;
+    if (fullReport) {
+      setReportJson(JSON.stringify(fullReport));
+    }
     const report = fullReport ?? {
       timestamp: new Date().toISOString(),
       fps: snap!.fps,
@@ -912,6 +933,37 @@ export function DebugPanel({
                   </button>
                 ))}
               </div>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const parsed = parseInt(seekBarInput.trim(), 10);
+                  if (!Number.isNaN(parsed) && parsed >= 0) {
+                    window.__MAYONAKA_DIAG__?.seekToBar(parsed);
+                    window.__MAYONAKA_DIAG__?.resetBenchmark();
+                    refreshReportJson();
+                  }
+                }}
+                className="flex items-center gap-1 text-[9px]"
+              >
+                <input
+                  data-testid="seek-bar-input"
+                  type="number"
+                  min={0}
+                  max={255}
+                  placeholder="BAR #"
+                  value={seekBarInput}
+                  onChange={(e) => setSeekBarInput(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  className="w-full rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-2 py-1 text-[9.5px] font-bold text-[var(--ff-cream)] outline-none focus:border-[var(--ff-mint)]"
+                />
+                <button
+                  data-testid="seek-bar-go"
+                  type="submit"
+                  className="shrink-0 cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel)] px-2.5 py-1 font-bold text-[var(--ff-mint)] uppercase transition hover:border-[var(--ff-mint)]"
+                >
+                  GO
+                </button>
+              </form>
               <div className="grid grid-cols-4 gap-1 text-[9px] select-none">
                 {(
                   [

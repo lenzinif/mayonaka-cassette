@@ -55,7 +55,6 @@ export const DEFAULT_TUNING = {
   audioOffRoadPitchDip: 0.025,
   audioFilterOffRoadFloorHz: 2200,
   bpmPulseStrength: 1.0,
-  outroTapeDragMinRate: 0.85,
   outroDubDelayFeedback: 0.82,
   outroDubFilterHz: 900,
 
@@ -526,16 +525,6 @@ export const TUNING_CONTROLS: readonly TuningControl[] = [
     min: 0,
     max: 2,
     step: 0.05,
-  },
-  {
-    group: 'Audio',
-    key: 'outroTapeDragMinRate',
-    label: 'Outro tape drag min',
-    hint: 'Rallentamento minimo del nastro (playbackRate) quando indugi prima del bivio',
-    unit: '×',
-    min: 0.7,
-    max: 1.0,
-    step: 0.01,
   },
   {
     group: 'Audio',

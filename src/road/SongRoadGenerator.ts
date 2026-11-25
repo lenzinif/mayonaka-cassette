@@ -32,6 +32,7 @@ import {
   createPoint,
   isOverheadProp,
   PROP_BAND_RANGES,
+  resolveSegmentPropOverlaps,
   sortSegmentSprites,
   type RoadSegment,
   type RoadSprite,
@@ -719,6 +720,9 @@ export function generateSongRoad(beatMap: BeatMap, options: SongRoadOptions = {}
     totalBars,
     sceneryRng,
   );
+
+  // Resolve intra-segment and adjacent-segment prop overlaps (pylons, chevrons, signs, buildings, trees)
+  resolveTrackPropOverlaps(segments);
 
   // Clear any freestanding props inside tunnels and keep tunnel portal thresholds uncluttered
   clearTunnelAndPortalProps(segments);
@@ -1567,7 +1571,11 @@ function emitPropRules(
     const scaleJitter = rule.scaleJitter ?? defaultScaleJitter;
 
     let altToggle = 0;
-    for (let beat = 0; beat < totalBeats; beat += stepBeats) {
+    const startBeat =
+      (rule.kind === 'sign' || rule.kind === 'vms') && stepBeats >= 2
+        ? Math.max(1, Math.floor(stepBeats * 0.5))
+        : 0;
+    for (let beat = startBeat; beat < totalBeats; beat += stepBeats) {
       const beatJitter =
         !isRhythmic && rule.jitter?.beats ? rng.range(-rule.jitter.beats, rule.jitter.beats) : 0;
       const anchorBeat = Math.max(0, Math.min(totalBeats - 0.001, beat + beatJitter));
@@ -1699,7 +1707,15 @@ function tryPlaceWarningSign(
     const scanB = Math.min(segments.length - 1, s + minClearSegs);
     for (let k = scanA; k <= scanB; k++) {
       const checkSeg = segments[k];
-      if (checkSeg?.sprites.some((sp) => sp.kind === 'sign' || sp.kind === 'chevron')) {
+      if (!checkSeg) continue;
+      if (
+        checkSeg.sprites.some(
+          (sp) =>
+            sp.kind === 'sign' ||
+            sp.kind === 'chevron' ||
+            (Math.abs(k - s) <= 1 && sp.kind === 'lamp' && sp.offset * offset > 0),
+        )
+      ) {
         hasNearby = true;
         break;
       }
@@ -1708,6 +1724,60 @@ function tryPlaceWarningSign(
 
     seg.sprites.push({ kind: 'sign', offset, variant: 2 });
     return;
+  }
+}
+
+/**
+ * Resolves prop overlaps across the full track (`pylon` clearance ±3 segs, chevron/sign clearing,
+ * and same-side prop spacing).
+ */
+function resolveTrackPropOverlaps(segments: RoadSegment[]): void {
+  const n = segments.length;
+  // Pass 1: Clear/nudge Band B/C/D structures & trees within ±3 segments of any pylon
+  for (let i = 0; i < n; i++) {
+    const sprites = segments[i]!.sprites;
+    for (let p = 0; p < sprites.length; p++) {
+      const sp = sprites[p]!;
+      if (sp.kind !== 'pylon') continue;
+      const pylonOff = sp.offset;
+      const lo = Math.max(0, i - 3);
+      const hi = Math.min(n - 1, i + 3);
+      for (let s = lo; s <= hi; s++) {
+        const target = segments[s]!.sprites;
+        let w = 0;
+        for (let k = 0; k < target.length; k++) {
+          const other = target[k]!;
+          if (other.kind === 'pylon') {
+            target[w++] = other;
+            continue;
+          }
+          const isBlocked =
+            other.kind === 'building' ||
+            other.kind === 'billboard' ||
+            other.kind === 'palm' ||
+            other.kind === 'street-tree' ||
+            other.kind === 'pine' ||
+            other.kind === 'tree';
+          if (isBlocked && other.offset * pylonOff > 0 && Math.abs(other.offset - pylonOff) < 1.9) {
+            const pushedAbs = Math.abs(pylonOff) + 2.35;
+            if (pushedAbs <= 13.8 && (other.kind === 'building' || Math.abs(other.offset) >= 3.5)) {
+              other.offset = (other.offset < 0 ? -1 : 1) * pushedAbs;
+              target[w++] = other;
+            }
+            continue;
+          }
+          target[w++] = other;
+        }
+        target.length = w;
+      }
+    }
+  }
+
+  // Pass 2: Intra-segment and ±2 neighbor prop overlap resolution
+  for (let i = 0; i < n; i++) {
+    const prev1 = i >= 1 ? segments[i - 1]!.sprites : undefined;
+    const prev2 = i >= 2 ? segments[i - 2]!.sprites : undefined;
+    resolveSegmentPropOverlaps(segments[i]!.sprites, prev1, prev2);
   }
 }
 
@@ -1824,6 +1894,22 @@ function populateChunkChevrons(
       if (!seg.sprites.some((sp) => sp.kind === 'chevron')) {
         const variant = dir + 2 * seqIndex;
         seg.sprites.push({ kind: 'chevron', offset: outsideOffset, variant });
+        // Remove ordinary signs/VMS within ±2 segments on the chevron side
+        const cLo = Math.max(0, sIdx - 2);
+        const cHi = Math.min(segments.length - 1, sIdx + 2);
+        for (let k = cLo; k <= cHi; k++) {
+          const nbSprites = segments[k]!.sprites;
+          let w = 0;
+          for (let spIdx = 0; spIdx < nbSprites.length; spIdx++) {
+            const sp = nbSprites[spIdx]!;
+            const isOrdinarySign = sp.kind === 'sign' && sp.variant !== 2;
+            if (sp.offset * outsideOffset > 0 && (isOrdinarySign || sp.kind === 'vms')) {
+              continue;
+            }
+            nbSprites[w++] = sp;
+          }
+          nbSprites.length = w;
+        }
         seqIndex++;
       }
     }

@@ -411,9 +411,6 @@ export class Background {
   private cachedCoronaCtx: CanvasRenderingContext2D | null = null;
   private cachedCoronaSunBottom = '';
   private cachedCoronaRim = '';
-  private cachedCoronaSunX = -1;
-  private cachedCoronaSunY = -1;
-  private cachedCoronaSunR = -1;
   private cachedCoronaGrad: CanvasGradient | null = null;
 
   private cachedLightningCtx: CanvasRenderingContext2D | null = null;
@@ -907,34 +904,40 @@ export class Background {
       ctx.translate(0, sunPitch);
     }
 
-    // Atmospheric Lunar Corona / Halo for Mayonaka Bay (cached to avoid per-frame gradient allocation)
+    // Atmospheric Lunar Corona / Halo for Mayonaka Bay (cached at origin to avoid gradient churn on curve/pulse)
     if (isMayonakaBay && typeof ctx.createRadialGradient === 'function') {
-      const haloR = sunR * 1.85;
+      const baseR = 50;
+      const baseHaloR = baseR * 1.85;
       if (
         this.cachedCoronaCtx !== ctx ||
         this.cachedCoronaSunBottom !== palette.sunBottom ||
         this.cachedCoronaRim !== palette.mountainRim ||
-        Math.abs(this.cachedCoronaSunX - sunX) > 3.5 ||
-        Math.abs(this.cachedCoronaSunY - baseSunY) > 3.5 ||
-        Math.abs(this.cachedCoronaSunR - sunR) > 3.5 ||
         !this.cachedCoronaGrad
       ) {
-        const glowGrad = ctx.createRadialGradient(sunX, baseSunY, sunR * 0.5, sunX, baseSunY, haloR);
+        const glowGrad = ctx.createRadialGradient(0, 0, baseR * 0.5, 0, 0, baseHaloR);
         glowGrad.addColorStop(0, hexToRgba(palette.sunBottom, 0.28));
         glowGrad.addColorStop(0.5, hexToRgba(palette.mountainRim, 0.10));
         glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         this.cachedCoronaCtx = ctx;
         this.cachedCoronaSunBottom = palette.sunBottom;
         this.cachedCoronaRim = palette.mountainRim;
-        this.cachedCoronaSunX = sunX;
-        this.cachedCoronaSunY = baseSunY;
-        this.cachedCoronaSunR = sunR;
         this.cachedCoronaGrad = glowGrad;
       }
-      ctx.fillStyle = this.cachedCoronaGrad;
-      ctx.beginPath();
-      ctx.arc(sunX, sunY, haloR, 0, Math.PI * 2);
-      ctx.fill();
+      if (typeof ctx.translate === 'function' && typeof ctx.scale === 'function') {
+        const scale = sunR / baseR;
+        ctx.save();
+        ctx.translate(sunX, sunY);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = this.cachedCoronaGrad;
+        ctx.fillRect(-baseHaloR, -baseHaloR, baseHaloR * 2, baseHaloR * 2);
+        ctx.restore();
+      } else {
+        const haloR = sunR * 1.85;
+        ctx.fillStyle = this.cachedCoronaGrad;
+        ctx.beginPath();
+        ctx.arc(sunX, sunY, haloR, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     if (

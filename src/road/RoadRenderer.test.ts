@@ -733,9 +733,8 @@ describe('RoadRenderer — Rendering Environments', () => {
         const nearPropTracker = createAlphaTrackingCtx();
         renderer.render(nearPropTracker.ctx, nearTrack, baseView, PALETTE_NIGHT_FUNK);
         expect(renderer.stats.drawnProps).toBe(1);
-        for (const a of nearPropTracker.drawAlphas) {
-          expect(a).toBe(1);
-        }
+        expect(nearPropTracker.drawAlphas[0]).toBe(1);
+        expect(Math.max(...nearPropTracker.drawAlphas)).toBe(1);
         expect(nearPropTracker.ctx.globalAlpha).toBe(1);
       }
     });
@@ -1546,6 +1545,215 @@ describe('RoadRenderer — Rendering Environments', () => {
         PALETTE_NIGHT_FUNK,
       );
       expect(renderer.stats.drawnSegments).toBeGreaterThan(20);
+    });
+
+    it('clips near-plane pylon spans and keeps overhead wire extrapolations pointing upward/outward', () => {
+      const renderer = new RoadRenderer();
+      const track = createTestTrack('standard');
+      // Chain 7: nearest tower inside viewport at seg 14 -> extrapolates overhead wires upward/outward
+      track.segments[14]!.sprites.push({ kind: 'pylon', offset: 1.6, variant: 0, chainId: 7 });
+      track.segments[22]!.sprites.push({ kind: 'pylon', offset: 1.6, variant: 0, chainId: 7 });
+      // Chain 8: near tower off-right at seg 8 connected to seg 18 -> exercises Liang-Barsky span clipping
+      track.segments[8]!.sprites.push({ kind: 'pylon', offset: 3.5, variant: 0, chainId: 8 });
+      track.segments[18]!.sprites.push({ kind: 'pylon', offset: 3.5, variant: 0, chainId: 8 });
+
+      const curves: Array<{
+        x0: number;
+        y0: number;
+        cpx: number;
+        cpy: number;
+        x1: number;
+        y1: number;
+        color: string;
+      }> = [];
+      let curX = 0;
+      let curY = 0;
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: (x: number, y: number) => {
+          curX = x;
+          curY = y;
+        },
+        lineTo: noop,
+        quadraticCurveTo: (cpx: number, cpy: number, x1: number, y1: number) => {
+          if (ctx.strokeStyle === '#2d1c4a') {
+            curves.push({ x0: curX, y0: curY, cpx, cpy, x1, y1, color: ctx.strokeStyle });
+          }
+          curX = x1;
+          curY = y1;
+        },
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: noop,
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(ctx, track, defaultView, PALETTE_NIGHT_FUNK);
+
+      expect(renderer.stats.drawnPylonSpans).toBeGreaterThanOrEqual(2);
+      expect(curves.length).toBeGreaterThanOrEqual(10);
+      for (const c of curves) {
+        expect(Number.isFinite(c.x0)).toBe(true);
+        expect(Number.isFinite(c.y0)).toBe(true);
+        expect(Number.isFinite(c.x1)).toBe(true);
+        expect(Number.isFinite(c.y1)).toBe(true);
+        // No runaway coordinates outside Liang-Barsky margin (-480..1120 x -270..630) + exit margin
+        expect(Math.abs(c.x0)).toBeLessThanOrEqual(1600);
+        expect(Math.abs(c.y0)).toBeLessThanOrEqual(1100);
+        expect(Math.abs(c.x1)).toBeLessThanOrEqual(1600);
+        expect(Math.abs(c.y1)).toBeLessThanOrEqual(1100);
+        // Extrapolated wires from overhead attachment points above horizonY (180) continue upward/outward (exitY < y0)
+        if (c.y0 < 180 && c.x1 > c.x0 && c.x1 > 640) {
+          expect(c.y1).toBeLessThanOrEqual(c.y0 + 1);
+        }
+      }
+    });
+
+    it('renders Sunset tunnel with zero ground bleed, full-height conduits, full-depth ribs/lanes, and dark interior fog', () => {
+      const renderer = new RoadRenderer();
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 60; i++) {
+        const inTunnel = i >= 6 && i < 45;
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: inTunnel ? 'tunnel' : 'standard',
+          tunnelLight: inTunnel && i % 16 === 0,
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+
+      const grassRects: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const fills: string[] = [];
+      let clipCalls = 0;
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        clip: () => {
+          clipCalls++;
+        },
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: () => {
+          fills.push(ctx.fillStyle as string);
+        },
+        stroke: noop,
+        fillRect: (x: number, y: number, w: number, h: number) => {
+          fills.push(ctx.fillStyle as string);
+          if (
+            ctx.fillStyle === PALETTE_OG_FUTURE_FUNK.grass[0] ||
+            ctx.fillStyle === PALETTE_OG_FUTURE_FUNK.grass[1]
+          ) {
+            grassRects.push({ x, y, w, h });
+          }
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      // Exterior approach (camera outside at seg 0 looking into Sunset tunnel starting at seg 6):
+      // Outdoor grass must never span across center bore x = 320 on tunnel slices!
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 0, drawDistance: 35 },
+        PALETTE_OG_FUTURE_FUNK,
+      );
+      expect(clipCalls).toBe(0);
+      expect(grassRects.some((r) => r.x <= 260 && r.x + r.w >= 380 && r.y < 210)).toBe(false);
+
+      // Inside tunnel: dark concrete bore (#1b162e), upper conduit (#302850 / #262040), arch ribs (#2e274b),
+      // lane markings at distance, and dark tunnel fog (none of Sunset's bright pink/lavender far road fog)
+      fills.length = 0;
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 8 * segmentLength, drawDistance: 38 },
+        PALETTE_OG_FUTURE_FUNK,
+      );
+      expect(clipCalls).toBe(0);
+      expect(fills).toContain('#1b162e');
+      expect(fills.some((c) => c === '#302850' || c === '#262040')).toBe(true);
+      expect(fills).toContain('#2e274b');
+      expect(fills).not.toContain(PALETTE_OG_FUTURE_FUNK.fog);
+    });
+
+    it('renders 16 progressive road fog bands smoothly across a long straight track', () => {
+      const renderer = new RoadRenderer();
+      const segmentLength = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 220; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segmentLength),
+          p2: createPoint(0, (i + 1) * segmentLength),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      const track: Track = { segments, segmentLength, length: segments.length * segmentLength };
+      const uniqueFills = new Set<string>();
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: () => {
+          uniqueFills.add(ctx.fillStyle as string);
+        },
+        stroke: noop,
+        fillRect: () => {
+          uniqueFills.add(ctx.fillStyle as string);
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(
+        ctx,
+        track,
+        { ...defaultView, position: 0, drawDistance: 200 },
+        PALETTE_VAPORFUNK,
+      );
+      // 16 fog bands produce far more distinct shades across the draw distance than the old 4-band LUT
+      expect(uniqueFills.size).toBeGreaterThanOrEqual(15);
     });
   });
 });

@@ -83,6 +83,275 @@ export function isOverheadProp(kind: PropKind): boolean {
   return kind === 'gantry' || kind === 'overpass' || kind === 'suspension-tower';
 }
 
+const PROP_LATERAL_HALF_WIDTH: Readonly<Record<PropKind, number>> = {
+  lamp: 0.24,
+  chevron: 0.34,
+  sign: 0.42,
+  jihanki: 0.34,
+  phonebooth: 0.34,
+  bench: 0.34,
+  toro: 0.34,
+  shrub: 0.38,
+  palm: 0.55,
+  'street-tree': 0.55,
+  pine: 0.55,
+  tree: 0.55,
+  billboard: 0.68,
+  kiosk: 0.65,
+  'bus-stop': 0.65,
+  torii: 0.65,
+  vms: 0.72,
+  canopy: 0.95,
+  building: 1.05,
+  pylon: 1.15,
+  gantry: 0,
+  overpass: 0,
+  'suspension-tower': 0,
+};
+
+const PROP_OVERLAP_PRIORITY: Readonly<Record<PropKind, number>> = {
+  gantry: 100,
+  overpass: 100,
+  'suspension-tower': 100,
+  pylon: 95,
+  chevron: 85,
+  kiosk: 70,
+  'bus-stop': 70,
+  canopy: 70,
+  torii: 70,
+  toro: 70,
+  jihanki: 70,
+  phonebooth: 70,
+  bench: 70,
+  vms: 65,
+  lamp: 60,
+  sign: 55,
+  billboard: 75,
+  building: 40,
+  palm: 30,
+  'street-tree': 30,
+  pine: 30,
+  tree: 30,
+  shrub: 20,
+};
+
+/** Returns conservative lateral half-width in road half-widths for prop de-confliction. */
+export function getPropLateralHalfWidth(kind: PropKind): number {
+  return PROP_LATERAL_HALF_WIDTH[kind] ?? 0.5;
+}
+
+/** Returns overlap priority (higher wins). Curve warning diamonds (`sign` variant 2) outrank lamps/ordinary signs. */
+export function getPropOverlapPriority(kind: PropKind, variant = 0): number {
+  if (kind === 'sign' && variant === 2) return 80;
+  return PROP_OVERLAP_PRIORITY[kind] ?? 30;
+}
+
+function isPylonBlockedKind(kind: PropKind): boolean {
+  return (
+    kind === 'building' ||
+    kind === 'billboard' ||
+    kind === 'palm' ||
+    kind === 'street-tree' ||
+    kind === 'pine' ||
+    kind === 'tree'
+  );
+}
+
+function isSameSideOverlap(a: RoadSprite, b: RoadSprite): boolean {
+  if (isOverheadProp(a.kind) || isOverheadProp(b.kind)) return false;
+  if (a.offset * b.offset <= 0) return false;
+  const dist = Math.abs(a.offset - b.offset);
+  if (a.kind === 'pylon' || b.kind === 'pylon') {
+    const other = a.kind === 'pylon' ? b : a;
+    return isPylonBlockedKind(other.kind) ? dist < 1.9 : dist < 1.1;
+  }
+  const minClear = (getPropLateralHalfWidth(a.kind) + getPropLateralHalfWidth(b.kind)) * 0.85;
+  return dist < minClear;
+}
+
+function maxNudgeAbsOffset(kind: PropKind, absOff: number): number {
+  if (kind === 'building' || absOff >= 3.5) return 13.8;
+  if (kind === 'palm' || kind === 'street-tree' || kind === 'pine' || kind === 'tree') return 7.5;
+  if (kind === 'shrub') return 3.7;
+  return absOff; // Shoulder/Band A fixtures & billboards do not nudge sideways into other bands
+}
+
+function hasOverlapAgainstList(
+  candidate: RoadSprite,
+  list: readonly RoadSprite[] | undefined,
+  skipIdx = -1,
+): boolean {
+  if (!list) return false;
+  for (let i = 0; i < list.length; i++) {
+    if (i === skipIdx) continue;
+    const other = list[i]!;
+    if (isSameSideOverlap(candidate, other)) return true;
+  }
+  return false;
+}
+
+function removeSpriteAt(sprites: RoadSprite[], idx: number): void {
+  const last = sprites.length - 1;
+  for (let k = idx; k < last; k++) {
+    sprites[k] = sprites[k + 1]!;
+  }
+  sprites.length = last;
+}
+
+/**
+ * Zero-GC in-place prop overlap resolver for `sprites`, optionally checking up to two
+ * adjacent segments (`neighborA`, `neighborB`). Preserves `pylon`, overhead portals,
+ * `chevron`, and warning diamonds while nudging or compacting out overlapping lower-priority props.
+ */
+export function resolveSegmentPropOverlaps(
+  sprites: RoadSprite[],
+  neighborA?: readonly RoadSprite[],
+  neighborB?: readonly RoadSprite[],
+): void {
+  if (sprites.length === 0) return;
+
+  // 1. Suppress ordinary signs/VMS on any side that has a curve chevron in this or adjacent segments
+  let chevronSides = 0; // bit 0 = left (< 0), bit 1 = right (> 0)
+  for (let i = 0; i < sprites.length; i++) {
+    const sp = sprites[i]!;
+    if (sp.kind === 'chevron') {
+      chevronSides |= sp.offset < 0 ? 1 : 2;
+    }
+  }
+  if (neighborA) {
+    for (let i = 0; i < neighborA.length; i++) {
+      const sp = neighborA[i]!;
+      if (sp.kind === 'chevron') chevronSides |= sp.offset < 0 ? 1 : 2;
+    }
+  }
+  if (neighborB) {
+    for (let i = 0; i < neighborB.length; i++) {
+      const sp = neighborB[i]!;
+      if (sp.kind === 'chevron') chevronSides |= sp.offset < 0 ? 1 : 2;
+    }
+  }
+
+  if (chevronSides !== 0) {
+    let w = 0;
+    for (let i = 0; i < sprites.length; i++) {
+      const sp = sprites[i]!;
+      const sideBit = sp.offset < 0 ? 1 : 2;
+      const isOrdinarySign = sp.kind === 'sign' && sp.variant !== 2;
+      if ((chevronSides & sideBit) !== 0 && (isOrdinarySign || sp.kind === 'vms')) {
+        continue;
+      }
+      sprites[w++] = sp;
+    }
+    sprites.length = w;
+  }
+
+  // 2. Resolve intra-segment & immediate-neighbor overlaps in-place
+  for (let i = 0; i < sprites.length; i++) {
+    const cur = sprites[i]!;
+    if (isOverheadProp(cur.kind)) continue;
+
+    // Check against read-only neighbors first
+    let removed = false;
+    for (let pass = 0; pass < 2 && !removed; pass++) {
+      const nb = pass === 0 ? neighborA : neighborB;
+      if (!nb) continue;
+      for (let j = 0; j < nb.length; j++) {
+        const other = nb[j]!;
+        if (!isSameSideOverlap(cur, other)) continue;
+        const pCur = getPropOverlapPriority(cur.kind, cur.variant);
+        const pOther = getPropOverlapPriority(other.kind, other.variant);
+        if (pCur <= pOther && cur.kind !== 'pylon') {
+          const absCur = Math.abs(cur.offset);
+          const maxAbs = maxNudgeAbsOffset(cur.kind, absCur);
+          const clear =
+            other.kind === 'pylon'
+              ? 1.95
+              : (getPropLateralHalfWidth(cur.kind) + getPropLateralHalfWidth(other.kind)) * 0.9;
+          const nudgedAbs = Math.abs(other.offset) + clear + 0.15;
+          if (nudgedAbs <= maxAbs) {
+            const origOffset = cur.offset;
+            cur.offset = (cur.offset < 0 ? -1 : 1) * nudgedAbs;
+            if (
+              hasOverlapAgainstList(cur, sprites, i) ||
+              hasOverlapAgainstList(cur, neighborA) ||
+              hasOverlapAgainstList(cur, neighborB)
+            ) {
+              cur.offset = origOffset;
+              removeSpriteAt(sprites, i);
+              i--;
+              removed = true;
+              break;
+            }
+          } else {
+            removeSpriteAt(sprites, i);
+            i--;
+            removed = true;
+            break;
+          }
+        }
+      }
+    }
+    if (removed) continue;
+
+    // Check against earlier kept props on the same segment
+    for (let j = 0; j < i; j++) {
+      const prev = sprites[j]!;
+      if (!isSameSideOverlap(cur, prev)) continue;
+      const pCur = getPropOverlapPriority(cur.kind, cur.variant);
+      const pPrev = getPropOverlapPriority(prev.kind, prev.variant);
+
+      // Winner is higher priority (on tie, earlier/inner sprite wins)
+      if (pCur > pPrev && prev.kind !== 'pylon') {
+        const absPrev = Math.abs(prev.offset);
+        const maxAbs = maxNudgeAbsOffset(prev.kind, absPrev);
+        const clear =
+          cur.kind === 'pylon'
+            ? 1.95
+            : (getPropLateralHalfWidth(cur.kind) + getPropLateralHalfWidth(prev.kind)) * 0.9;
+        const nudgedAbs = Math.abs(cur.offset) + clear + 0.15;
+        if (nudgedAbs <= maxAbs) {
+          const origOffset = prev.offset;
+          prev.offset = (prev.offset < 0 ? -1 : 1) * nudgedAbs;
+          if (
+            !hasOverlapAgainstList(prev, sprites, j) &&
+            !hasOverlapAgainstList(prev, neighborA) &&
+            !hasOverlapAgainstList(prev, neighborB)
+          ) {
+            continue;
+          }
+          prev.offset = origOffset;
+        }
+        removeSpriteAt(sprites, j);
+        i--;
+        j--;
+      } else if (cur.kind !== 'pylon') {
+        const absCur = Math.abs(cur.offset);
+        const maxAbs = maxNudgeAbsOffset(cur.kind, absCur);
+        const clear =
+          prev.kind === 'pylon'
+            ? 1.95
+            : (getPropLateralHalfWidth(cur.kind) + getPropLateralHalfWidth(prev.kind)) * 0.9;
+        const nudgedAbs = Math.abs(prev.offset) + clear + 0.15;
+        if (nudgedAbs <= maxAbs) {
+          const origOffset = cur.offset;
+          cur.offset = (cur.offset < 0 ? -1 : 1) * nudgedAbs;
+          if (
+            !hasOverlapAgainstList(cur, sprites, i) &&
+            !hasOverlapAgainstList(cur, neighborA) &&
+            !hasOverlapAgainstList(cur, neighborB)
+          ) {
+            continue;
+          }
+          cur.offset = origOffset;
+        }
+        removeSpriteAt(sprites, i);
+        i--;
+        break;
+      }
+    }
+  }
+}
+
 /**
  * Zero-GC in-place insertion sort for a single segment's sprite list (Band D -> C -> B -> A,
  * overhead portals last). Ideal for small lists (0..10 sprites) inside the horizon assembler.

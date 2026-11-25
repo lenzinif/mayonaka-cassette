@@ -9,6 +9,7 @@ import {
   createPoint,
   isOverheadProp,
   PROP_BAND_RANGES,
+  resolveSegmentPropOverlaps,
   sortSingleSegmentSprites,
   type PropKind,
   type RoadSegment,
@@ -555,6 +556,15 @@ export class HorizonAssembler {
             this.allocSprite('billboard', -1.65, 0, 1),
             this.allocSprite('billboard', 1.65, 1, 1),
           );
+          const prev1 =
+            matchedSeg - 1 >= this.track.tailAbsSeg
+              ? this.track.segments[(matchedSeg - 1) & STREAMING_RING_MASK]!.sprites
+              : undefined;
+          const prev2 =
+            matchedSeg - 2 >= this.track.tailAbsSeg
+              ? this.track.segments[(matchedSeg - 2) & STREAMING_RING_MASK]!.sprites
+              : undefined;
+          resolveSegmentPropOverlaps(matchedSegment.sprites, prev1, prev2);
           sortSingleSegmentSprites(matchedSegment.sprites);
         }
       }
@@ -942,7 +952,7 @@ export class HorizonAssembler {
         const barDur = barDurationSec(activeBp.beatMap);
         const speedRatioToRef = Math.max(
           0.55,
-          Math.min(1.2, this.estSpeed / Math.max(1, activeBp.referenceSpeed)),
+          Math.min(1.0, this.estSpeed / Math.max(1, activeBp.referenceSpeed)),
         );
         const forkSegs = Math.max(
           24,
@@ -951,6 +961,22 @@ export class HorizonAssembler {
         this.track.forkZoneStartZ = absSeg * segLen;
         this.track.stageFinishWorldZ = (absSeg + forkSegs) * segLen;
         this.track.length = this.track.stageFinishWorldZ;
+
+        // Guarantee a materialized 'fork' SyncAnchor at stageFinishWorldZ so SongRoadSyncController
+        // can converge road pace smoothly onto the finish line right as the music ends.
+        if (this.track.materializedAnchorCount >= MAX_MATERIALIZED_ANCHORS) {
+          this.compactMaterializedAnchors();
+        }
+        if (this.track.materializedAnchorCount < MAX_MATERIALIZED_ANCHORS) {
+          const forkAnchor = this.track.materializedAnchors[this.track.materializedAnchorCount]!;
+          forkAnchor.kind = 'fork';
+          forkAnchor.barIndex = activeBp.totalBars;
+          forkAnchor.absSeg = absSeg + forkSegs;
+          forkAnchor.worldZ = this.track.stageFinishWorldZ;
+          forkAnchor.rewardsSyncBonus = false;
+          forkAnchor.crossedState = 0;
+          this.track.materializedAnchorCount++;
+        }
       }
 
       while (
@@ -958,6 +984,10 @@ export class HorizonAssembler {
         nextBar >= activeBp.syncAnchors[this.nextAnchorCursor]!.barIndex
       ) {
         const bpAnchor = activeBp.syncAnchors[this.nextAnchorCursor]!;
+        if (bpAnchor.kind === 'fork' && this.track.stageFinishWorldZ !== undefined) {
+          this.nextAnchorCursor++;
+          continue;
+        }
         if (this.track.materializedAnchorCount >= MAX_MATERIALIZED_ANCHORS) {
           this.compactMaterializedAnchors();
         }
@@ -1095,20 +1125,20 @@ export class HorizonAssembler {
         nextBeat,
         activeSeedHash,
       );
-      this.emitStreamedCurveChevron(seg, prevBeat, nextBeat, 1.24);
+      this.emitStreamedCurveChevron(seg, absSeg, prevBeat, nextBeat, 1.24);
       sortSingleSegmentSprites(seg.sprites);
       return;
     }
 
     // Standard open road: archetype Band A, B, C, D rules
     const arch = ENVIRONMENT_ARCHETYPES[archetypeId];
-    this.emitStreamedRules(seg, arch.bandARules, chunk, prevBeat, nextBeat, activeSeedHash);
-    this.emitStreamedRules(seg, arch.bandBRules, chunk, prevBeat, nextBeat, activeSeedHash);
-    this.emitStreamedRules(seg, arch.bandCRules, chunk, prevBeat, nextBeat, activeSeedHash);
-    this.emitStreamedRules(seg, arch.bandDRules, chunk, prevBeat, nextBeat, activeSeedHash);
+    this.emitStreamedRules(seg, arch.bandARules, chunk, prevBeat, nextBeat, activeSeedHash, undefined, bp, prevBar);
+    this.emitStreamedRules(seg, arch.bandBRules, chunk, prevBeat, nextBeat, activeSeedHash, undefined, bp, prevBar);
+    this.emitStreamedRules(seg, arch.bandCRules, chunk, prevBeat, nextBeat, activeSeedHash, undefined, bp, prevBar);
+    this.emitStreamedRules(seg, arch.bandDRules, chunk, prevBeat, nextBeat, activeSeedHash, undefined, bp, prevBar);
 
     // Directional curve chevrons on tight curves
-    this.emitStreamedCurveChevron(seg, prevBeat, nextBeat, 1.3);
+    this.emitStreamedCurveChevron(seg, absSeg, prevBeat, nextBeat, 1.3);
 
     // Zone transition threshold landmark (gantry/overpass)
     if (!this.emittingNextStage) {
@@ -1144,6 +1174,28 @@ export class HorizonAssembler {
       env,
       (kind, offset, variant, scale, chainId) => {
         seg.sprites.push(this.allocSprite(kind, offset, variant, scale, chainId));
+        // Clear colliding buildings/trees/billboards on the preceding 3 segments
+        for (let back = 1; back <= 3; back++) {
+          const prevAbs = absSeg - back;
+          if (prevAbs < this.track.tailAbsSeg) break;
+          const prevSprites = this.track.segments[prevAbs & STREAMING_RING_MASK]!.sprites;
+          let w = 0;
+          for (let i = 0; i < prevSprites.length; i++) {
+            const sp = prevSprites[i]!;
+            const isBlocked =
+              sp.kind === 'building' ||
+              sp.kind === 'billboard' ||
+              sp.kind === 'palm' ||
+              sp.kind === 'street-tree' ||
+              sp.kind === 'pine' ||
+              sp.kind === 'tree';
+            if (isBlocked && sp.offset * offset > 0 && Math.abs(sp.offset - offset) < 1.9) {
+              continue;
+            }
+            prevSprites[w++] = sp;
+          }
+          prevSprites.length = w;
+        }
       },
     );
 
@@ -1197,6 +1249,15 @@ export class HorizonAssembler {
       }
     }
 
+    const prev1Sprites =
+      absSeg - 1 >= this.track.tailAbsSeg
+        ? this.track.segments[(absSeg - 1) & STREAMING_RING_MASK]!.sprites
+        : undefined;
+    const prev2Sprites =
+      absSeg - 2 >= this.track.tailAbsSeg
+        ? this.track.segments[(absSeg - 2) & STREAMING_RING_MASK]!.sprites
+        : undefined;
+    resolveSegmentPropOverlaps(seg.sprites, prev1Sprites, prev2Sprites);
     sortSingleSegmentSprites(seg.sprites);
   }
 
@@ -1234,6 +1295,8 @@ export class HorizonAssembler {
     nextBeat: number,
     seedHash: number,
     maxLateralClamp?: number,
+    bp?: SongBlueprint,
+    barFloat?: number,
   ): void {
     for (let rIdx = 0; rIdx < rules.length; rIdx++) {
       const rule = rules[rIdx]!;
@@ -1245,14 +1308,28 @@ export class HorizonAssembler {
         1,
         Math.round(rule.everyBeats === 'cadence' ? chunk.fixtureCadenceBeats : rule.everyBeats),
       );
-      const prevSlot = Math.floor(prevBeat / stepBeats);
-      const nextSlot = Math.floor(nextBeat / stepBeats);
-      if (nextSlot <= prevSlot && prevBeat > 0) continue;
-      if (prevBeat === 0 && nextSlot < 0) continue;
-
-      const beatSlot = nextSlot;
       const band = rule.band;
       const isRhythmic = rule.rhythmic ?? band === 'A';
+
+      // Phase-stagger signs/VMS between lamps, and apply deterministic beat jitter for non-rhythmic props
+      let phaseShiftBeats = 0;
+      if ((rule.kind === 'sign' || rule.kind === 'vms') && stepBeats >= 2) {
+        phaseShiftBeats = Math.max(1, Math.floor(stepBeats * 0.5));
+      } else if (!isRhythmic && rule.jitter?.beats) {
+        const approxSlot = Math.floor(nextBeat / stepBeats);
+        const jFrac = hashUnit(seedHash, chunk.chunkIndex, approxSlot, rIdx * 11 + 3) * 2 - 1;
+        phaseShiftBeats = Math.max(-0.45 * stepBeats, Math.min(0.45 * stepBeats, jFrac * rule.jitter.beats));
+      }
+
+      const adjPrevBeat = prevBeat - phaseShiftBeats;
+      const adjNextBeat = nextBeat - phaseShiftBeats;
+      const prevSlot = Math.floor(adjPrevBeat / stepBeats);
+      const nextSlot = Math.floor(adjNextBeat / stepBeats);
+      if (nextSlot < 0) continue;
+      if (nextSlot <= prevSlot && adjPrevBeat > 0) continue;
+      if (adjPrevBeat <= 0 && prevSlot >= 0 && nextSlot <= prevSlot) continue;
+
+      const beatSlot = nextSlot;
       const scaleJitter = rule.scaleJitter ?? (isRhythmic ? 0 : 0.2);
 
       let baseOffset: number;
@@ -1291,10 +1368,64 @@ export class HorizonAssembler {
         Math.abs(seg.curve) > 0.2 ? (seg.curve > 0 ? 1 : -1) : chunk.mirrorSign;
       const altSide: -1 | 1 = beatSlot % 2 === 0 ? -1 : 1;
 
+      const pushChecked = (signedOffset: number, pVariant: number, pScale: number): void => {
+        if (signedOffset === 0) {
+          seg.sprites.push(this.allocSprite(rule.kind, 0, pVariant, pScale));
+          return;
+        }
+        // Keep ordinary signs clear of tight curve outsides where chevrons belong
+        if (rule.kind === 'sign' && Math.abs(seg.curve) >= 2.2 && seg.curve * signedOffset < 0) {
+          return;
+        }
+        let finalOffset = signedOffset;
+        const isPylonSensitive =
+          rule.kind === 'building' ||
+          rule.kind === 'billboard' ||
+          rule.kind === 'palm' ||
+          rule.kind === 'street-tree' ||
+          rule.kind === 'pine' ||
+          rule.kind === 'tree';
+        if (isPylonSensitive && bp && barFloat !== undefined) {
+          for (let r = 0; r < bp.powerLineRuns.length; r++) {
+            const run = bp.powerLineRuns[r]!;
+            if (
+              barFloat >= run.startBar - 0.5 &&
+              barFloat <= run.endBar + 0.5 &&
+              run.side * finalOffset > 0
+            ) {
+              const runSpan = Math.max(1, run.endBar - run.startBar);
+              const tRun = Math.max(0, Math.min(1, (barFloat - run.startBar) / runSpan));
+              const runOff = run.baseOffset + run.driftTotal * tRun;
+              if (Math.abs(finalOffset - runOff) < 1.9) {
+                const pushedAbs = Math.abs(runOff) + 2.35;
+                if (pushedAbs <= 13.8 && (rule.kind === 'building' || Math.abs(finalOffset) >= 3.5)) {
+                  finalOffset = run.side * pushedAbs;
+                } else {
+                  return;
+                }
+              }
+            }
+          }
+          if (
+            bp.powerLineCrossing &&
+            Math.abs(barFloat - bp.powerLineCrossing.bar) <= 0.5 &&
+            Math.abs(Math.abs(finalOffset) - bp.powerLineCrossing.offsetMag) < 1.9
+          ) {
+            const pushedAbs = bp.powerLineCrossing.offsetMag + 2.35;
+            if (pushedAbs <= 13.8 && (rule.kind === 'building' || Math.abs(finalOffset) >= 3.5)) {
+              finalOffset = (finalOffset < 0 ? -1 : 1) * pushedAbs;
+            } else {
+              return;
+            }
+          }
+        }
+        seg.sprites.push(this.allocSprite(rule.kind, finalOffset, pVariant, pScale));
+      };
+
       switch (rule.placement) {
         case 'both':
           if (baseOffset === 0) {
-            seg.sprites.push(this.allocSprite(rule.kind, 0, variant, scale));
+            pushChecked(0, variant, scale);
           } else {
             const rightScale =
               scaleJitter > 0
@@ -1305,26 +1436,24 @@ export class HorizonAssembler {
                         scaleJitter,
                   )
                 : scale;
-            seg.sprites.push(
-              this.allocSprite(rule.kind, -mOffset, variant, scale),
-              this.allocSprite(rule.kind, mOffset, (variant + 1) % 3, rightScale),
-            );
+            pushChecked(-mOffset, variant, scale);
+            pushChecked(mOffset, (variant + 1) % 3, rightScale);
           }
           break;
         case 'left':
-          seg.sprites.push(this.allocSprite(rule.kind, -mOffset * chunk.mirrorSign, variant, scale));
+          pushChecked(-mOffset * chunk.mirrorSign, variant, scale);
           break;
         case 'right':
-          seg.sprites.push(this.allocSprite(rule.kind, mOffset * chunk.mirrorSign, variant, scale));
+          pushChecked(mOffset * chunk.mirrorSign, variant, scale);
           break;
         case 'alternating':
-          seg.sprites.push(this.allocSprite(rule.kind, altSide * mOffset, variant, scale));
+          pushChecked(altSide * mOffset, variant, scale);
           break;
         case 'outside-curve':
-          seg.sprites.push(this.allocSprite(rule.kind, -curveSign * mOffset, variant, scale));
+          pushChecked(-curveSign * mOffset, variant, scale);
           break;
         case 'inside-curve':
-          seg.sprites.push(this.allocSprite(rule.kind, curveSign * mOffset, variant, scale));
+          pushChecked(curveSign * mOffset, variant, scale);
           break;
       }
     }
@@ -1332,6 +1461,7 @@ export class HorizonAssembler {
 
   private emitStreamedCurveChevron(
     seg: RoadSegment,
+    absSeg: number,
     prevBeat: number,
     nextBeat: number,
     baseOffset: number,
@@ -1350,6 +1480,24 @@ export class HorizonAssembler {
     const isRight = seg.curve > 0;
     const outsideOffset = isRight ? -baseOffset : baseOffset;
     const dir = isRight ? 0 : 1;
+
+    // Clear ordinary signs/VMS on the same side across the preceding 2 segments so chevrons never sit behind a sign
+    for (let back = 1; back <= 2; back++) {
+      const prevAbs = absSeg - back;
+      if (prevAbs < this.track.tailAbsSeg) break;
+      const prevSprites = this.track.segments[prevAbs & STREAMING_RING_MASK]!.sprites;
+      let w = 0;
+      for (let i = 0; i < prevSprites.length; i++) {
+        const sp = prevSprites[i]!;
+        const isOrdinarySign = sp.kind === 'sign' && sp.variant !== 2;
+        if (sp.offset * outsideOffset > 0 && (isOrdinarySign || sp.kind === 'vms')) {
+          continue;
+        }
+        prevSprites[w++] = sp;
+      }
+      prevSprites.length = w;
+    }
+
     seg.sprites.push(this.allocSprite('chevron', outsideOffset, dir + 2 * this.chevronSeqIndex, 1));
     this.chevronSeqIndex++;
   }
