@@ -77,30 +77,30 @@ export const SunVisorPhoto = memo(function SunVisorPhoto({
   };
 
   return (
-    <div className="group pointer-events-none relative flex origin-top scale-80 flex-col items-center sm:scale-100 [contain:layout_style_paint] [transform:translateZ(0)]">
+    <div className="group pointer-events-none relative flex origin-top scale-90 flex-col items-center sm:scale-100 [contain:layout_style_paint] [transform:translateZ(0)]">
       {/* Dual roof visor hinge brackets */}
-      <div className="flex w-36 justify-between px-4">
-        <span className="h-1.5 w-3.5 rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.4)] bg-[#231d29]" />
-        <span className="h-1.5 w-3.5 rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.4)] bg-[#231d29]" />
+      <div className="flex w-64 justify-between px-6">
+        <span className="h-2 w-5 rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.45)] bg-[#231d29]" />
+        <span className="h-2 w-5 rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.45)] bg-[#231d29]" />
       </div>
 
       {/* Folded dark-leather visor flap */}
-      <div className="ck-visor-shell relative flex items-center gap-2.5 rounded-b-[6px] px-3 pt-1.5 pb-2">
+      <div className="ck-visor-shell relative flex items-center gap-3.5 rounded-b-[8px] px-4 pt-2.5 pb-3">
         {/* Decorative warm saddle stitch */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-2.5 bottom-1 h-0 border-b border-dashed border-[rgba(214,174,114,0.26)]"
+          className="pointer-events-none absolute inset-x-3 bottom-1.5 h-0 border-b border-dashed border-[rgba(214,174,114,0.28)]"
         />
 
         {/* Pinned photo tucked under elastic strap */}
-        <div className="relative -rotate-2 rounded-[2px] border border-[#efe7d6]/85 bg-[#efe7d6] p-[2px] shadow-[0_3px_8px_rgba(0,0,0,0.65)]">
+        <div className="relative -rotate-1 rounded-[3px] border-2 border-[#efe7d6]/90 bg-[#efe7d6] p-[4px] shadow-[0_4px_12px_rgba(0,0,0,0.7)]">
           {/* Elastic visor strap & brass clip */}
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -top-1 left-1/2 h-2 w-6 -translate-x-1/2 rounded-[1px] border border-[rgba(217,167,92,0.75)] bg-[#2b221e]"
+            className="pointer-events-none absolute -top-1.5 left-1/2 h-3 w-10 -translate-x-1/2 rounded-[1px] border border-[rgba(217,167,92,0.8)] bg-[#2b221e]"
           />
 
-          <div className="h-[42px] w-[68px] overflow-hidden bg-[#110c19]">
+          <div className="h-[104px] w-[168px] overflow-hidden bg-[#110c19] xl:h-[120px] xl:w-[194px]">
             {photoUrl ? (
               <img
                 src={photoUrl}
@@ -114,16 +114,16 @@ export const SunVisorPhoto = memo(function SunVisorPhoto({
         </div>
 
         {/* Visor nameplate & subtle hover/focus upload controls */}
-        <div className="flex flex-col items-start gap-1 pr-0.5">
-          <span className="ff-mono text-[8px] font-bold tracking-[0.18em] text-[var(--ck-brass)] uppercase">
+        <div className="flex flex-col items-start gap-1.5 pr-1">
+          <span className="ff-mono text-[9px] font-bold tracking-[0.18em] text-[var(--ck-brass)] uppercase">
             SUN VISOR
           </span>
-          <span className="ff-mono text-[7px] tracking-wider text-[#b6a997] uppercase">
+          <span className="ff-mono text-[8px] tracking-wider text-[#b6a997] uppercase">
             {photoUrl ? 'CUSTOM CLIP' : 'TOKYO 86'}
           </span>
 
           {(onUploadPhoto || onClearPhoto) && (
-            <div className="pointer-events-auto flex items-center gap-1 opacity-75 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+            <div className="pointer-events-auto flex items-center gap-1 opacity-80 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
               {onUploadPhoto && (
                 <button
                   type="button"
@@ -131,7 +131,7 @@ export const SunVisorPhoto = memo(function SunVisorPhoto({
                     inputRef.current?.click();
                     e.currentTarget.blur();
                   }}
-                  className="ck-din-btn ff-mono cursor-pointer px-1.5 py-[1px] text-[8px] font-bold tracking-wider uppercase"
+                  className="ck-din-btn ff-mono cursor-pointer px-2 py-0.5 text-[9px] font-bold tracking-wider uppercase"
                   title="Pin local manga/anime image onto sun visor"
                 >
                   PIN PHOTO
@@ -145,7 +145,7 @@ export const SunVisorPhoto = memo(function SunVisorPhoto({
                     onClearPhoto();
                     e.currentTarget.blur();
                   }}
-                  className="ck-din-btn ff-mono cursor-pointer px-1 py-[1px] text-[8px] font-bold text-[#ff8aa9] uppercase"
+                  className="ck-din-btn ff-mono cursor-pointer px-1.5 py-0.5 text-[9px] font-bold text-[#ff8aa9] uppercase"
                   title="Reset to default postcard"
                 >
                   ✕
