@@ -76,6 +76,7 @@ export interface StagePalette {
   skyMid: string;
   skyHorizon: string;
   horizonGlow?: string;
+  horizonMist?: string;
   fog: string;
   fogDensity?: number;
   starColors?: readonly [string, string];
@@ -104,6 +105,7 @@ export const PALETTE_NIGHT_FUNK: StagePalette = {
   skyMid: '#120e2e',
   skyHorizon: '#00e5be',
   horizonGlow: '#00f0b5',
+  horizonMist: '#0d263d',
   fog: '#0a102b',
   fogDensity: 1.0,
   starColors: ['#80f6ff', '#e0fbfc'],
@@ -132,6 +134,7 @@ export const PALETTE_OG_FUTURE_FUNK: StagePalette = {
   skyMid: '#d82b7d',
   skyHorizon: '#ff7b25',
   horizonGlow: '#ffd447',
+  horizonMist: '#c84562',
   fog: '#b02868',
   fogDensity: 1.0,
   starColors: ['#ffd447', '#fff2c2'],
@@ -160,6 +163,7 @@ export const PALETTE_VAPORFUNK: StagePalette = {
   skyMid: '#5e548e',
   skyHorizon: '#e0b1cb',
   horizonGlow: '#e0b1cb',
+  horizonMist: '#9b83b0',
   fog: '#7b6b9e',
   fogDensity: 1.35,
   starColors: ['#e0b1cb', '#f8f9fa'],
@@ -188,6 +192,7 @@ export const PALETTE_AKIBA_NOON: StagePalette = {
   skyMid: '#b0d8ea',
   skyHorizon: '#fff4dd',
   horizonGlow: '#ffeec2',
+  horizonMist: '#ede4d0',
   fog: '#e4dac5',
   fogDensity: 1.05,
   starColors: ['#ffffff', '#fff4dd'],
@@ -216,6 +221,7 @@ export const PALETTE_AKIBA_NIGHT: StagePalette = {
   skyMid: '#490b4d',
   skyHorizon: '#00f5d4',
   horizonGlow: '#00f5d4',
+  horizonMist: '#0a3656',
   fog: '#0c1033',
   fogDensity: 0.85,
   starColors: ['#00f5d4', '#ffd6f6'],
@@ -250,6 +256,7 @@ interface MutableStagePalette {
   skyMid: string;
   skyHorizon: string;
   horizonGlow?: string;
+  horizonMist?: string;
   fog: string;
   fogDensity?: number;
   starColors?: [string, string];
@@ -308,6 +315,7 @@ export function createMutablePaletteClone(base: StagePalette): StagePalette {
     skyMid: base.skyMid,
     skyHorizon: base.skyHorizon,
     horizonGlow: base.horizonGlow ?? base.skyHorizon,
+    horizonMist: base.horizonMist ?? base.fog,
     fog: base.fog,
     fogDensity: base.fogDensity ?? 1.0,
     starColors: [
@@ -355,6 +363,11 @@ export function blendStagePalette(
   m.horizonGlow = lerpHexColor(
     from.horizonGlow ?? from.skyHorizon,
     to.horizonGlow ?? to.skyHorizon,
+    clampedT,
+  );
+  m.horizonMist = lerpHexColor(
+    from.horizonMist ?? from.fog,
+    to.horizonMist ?? to.fog,
     clampedT,
   );
   m.fog = lerpHexColor(from.fog, to.fog, clampedT);
