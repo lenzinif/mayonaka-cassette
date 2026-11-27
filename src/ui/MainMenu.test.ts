@@ -32,7 +32,7 @@ describe('MainMenu (UI Layer)', () => {
 
     expect(text).toContain('真夜中');
     expect(text).toContain('CASSETTE');
-    expect(text).toContain('MAYONAKA CASSETTE');
+    expect(text).not.toContain('MAYONAKA CASSETTE');
     expect(text).toContain('88.4 FM');
     expect(text).toContain('TOKYO BAY');
     expect(text).toContain('SOUND');

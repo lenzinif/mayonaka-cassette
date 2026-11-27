@@ -1,6 +1,7 @@
 import type { SectionRole } from '@src/audio/BeatMap';
 import type { GrooveTier } from '@src/entities/PlayerCar';
 import { memo } from 'react';
+import { CassetteReel, WalkmanLed, WalkmanScrew } from '../walkman/WalkmanChrome';
 
 export interface CassetteTapeWidgetProps {
   trackArtist: string;
@@ -10,13 +11,10 @@ export interface CassetteTapeWidgetProps {
   beatInBar: number;
   sectionRole: SectionRole;
   barEnergy: number;
-  filterCutoffHz: number;
-  groove: number;
   grooveTier: GrooveTier;
   tofuMode: boolean;
   roadBarIndex: number;
   totalBars: number;
-  speedRatio: number;
   playlistIndex?: number;
   playlistLength?: number;
   isSlack?: boolean;
@@ -32,46 +30,51 @@ const TIER_CASSETTE_CONFIG: Readonly<
       typeLabel: string;
       gradeColor: string;
       tapeColor: string;
+      reelAccent: string;
     }
   >
 > = {
   LOW: {
-    shellBorder: 'border-[rgba(255,245,228,0.26)]',
+    shellBorder: 'border-[rgba(244,239,230,0.2)]',
     typeLabel: 'NORMAL · TYPE I',
-    gradeColor: 'text-[var(--ff-muted)]',
-    tapeColor: '#252C4D',
+    gradeColor: 'text-[var(--wm-silk-dim)]',
+    tapeColor: '#252c4d',
+    reelAccent: '#8a93ad',
   },
   MEDIUM: {
-    shellBorder: 'border-[rgba(46,232,196,0.55)]',
+    shellBorder: 'border-[rgba(46,226,190,0.52)]',
     typeLabel: 'CHROME · CrO₂',
-    gradeColor: 'text-[var(--ff-mint)]',
-    tapeColor: '#1C3645',
+    gradeColor: 'text-[var(--wm-mint)]',
+    tapeColor: '#1c3645',
+    reelAccent: '#2ee2be',
   },
   HIGH: {
-    shellBorder: 'border-[rgba(255,59,127,0.6)]',
+    shellBorder: 'border-[rgba(255,59,107,0.6)]',
     typeLabel: 'METAL · TYPE IV',
-    gradeColor: 'text-[var(--ff-pink)]',
-    tapeColor: '#3B1E3C',
+    gradeColor: 'text-[var(--wm-play)]',
+    tapeColor: '#3b1e3c',
+    reelAccent: '#ff3b6b',
   },
   OVERDRIVE: {
-    shellBorder: 'border-[var(--ff-gold)]',
+    shellBorder: 'border-[var(--wm-amber)]',
     typeLabel: 'GOLD · OVERDRIVE',
-    gradeColor: 'text-[var(--ff-gold)]',
-    tapeColor: '#4A3615',
+    gradeColor: 'text-[var(--wm-amber)]',
+    tapeColor: '#4a3615',
+    reelAccent: '#f5b94c',
   },
 };
 
 const SECTION_BADGE_STYLES: Readonly<Record<SectionRole, string>> = {
-  intro: 'bg-[#0B0E1E] text-[#FFF5E4]',
-  build: 'bg-[#FFD166] text-[#0B0E1E]',
-  groove: 'bg-[#05D9E8] text-[#0B0E1E]',
-  drop: 'bg-[#FF3B7F] text-[#FFF5E4]',
-  breakdown: 'bg-[#2EE8C4] text-[#0B0E1E]',
-  outro: 'bg-[#1A2140] text-[#FFF5E4]',
+  intro: 'bg-[#131622] text-[#f4efe6]',
+  build: 'bg-[#f5b94c] text-[#131622]',
+  groove: 'bg-[#05d9e8] text-[#090b12]',
+  drop: 'bg-[#ff3b6b] text-[#f4efe6]',
+  breakdown: 'bg-[#2ee2be] text-[#090b12]',
+  outro: 'bg-[#1f2436] text-[#f4efe6]',
 };
 
 /**
- * Compact Japanese Compact Cassette Widget (Mayonaka Hi-Fi Palette).
+ * Compact Flat Matte Walkman Cassette Door Widget.
  * Togglable via hotkey [C] or button click for an unobstructed road view.
  */
 export const CassetteTapeWidget = memo(function CassetteTapeWidget({
@@ -95,16 +98,13 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
   const config = TIER_CASSETTE_CONFIG[grooveTier] ?? TIER_CASSETTE_CONFIG.LOW;
   const sectionBadgeStyle = SECTION_BADGE_STYLES[sectionRole] ?? SECTION_BADGE_STYLES.intro;
 
-  // Song tape progress: ratio [0..1]
   const songProgress = Math.max(0, Math.min(1, (roadBarIndex + 1) / Math.max(1, totalBars)));
 
-  // Left spool tape pack decreases from 24px down to 8px; Right spool increases from 8px to 24px
   const minPackRadius = 8;
   const maxPackRadius = 24;
   const leftPackRadius = maxPackRadius - (maxPackRadius - minPackRadius) * songProgress;
   const rightPackRadius = minPackRadius + (maxPackRadius - minPackRadius) * songProgress;
 
-  // Rotation angles for spools: derived from bar & beat
   const baseRotation = (barIndex * 4 + beatInBar) * 90;
 
   if (!visible) {
@@ -112,11 +112,15 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
       <div className="pointer-events-auto flex items-center gap-1.5 [contain:layout_style_paint]">
         <button
           type="button"
-          onClick={onToggleVisible}
-          className="ff-shadow-ink ff-mono cursor-pointer rounded-[2px] border border-[rgba(255,245,228,0.26)] bg-[#12172E]/92 px-2.5 py-1 text-[10px] font-bold tracking-wider text-[var(--ff-cream)] uppercase transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]"
+          onClick={(e) => {
+            onToggleVisible();
+            e.currentTarget.blur();
+          }}
+          className="wm-btn ff-mono flex cursor-pointer items-center gap-2 px-2.5 py-1 text-[10px] font-bold tracking-wider text-[var(--wm-silk)] uppercase hover:text-[var(--wm-mint)]"
           title="Show cassette [C]"
         >
-          ⏏ {trackTitle.slice(0, 18)} [C]
+          <WalkmanLed lit color="mint" />
+          <span>⏏ {trackTitle.slice(0, 18)} [C]</span>
         </button>
       </div>
     );
@@ -124,10 +128,19 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
 
   return (
     <div
-      className={`ff-shadow-ink pointer-events-auto relative flex w-72 origin-top-left scale-85 flex-col overflow-hidden rounded-[2px] border-2 bg-[#12172E]/94 text-[var(--ff-cream)] select-none sm:w-80 sm:scale-100 [contain:layout_style_paint] ${config.shellBorder}`}
+      className={`wm-shell wm-faceplate pointer-events-none relative flex w-72 origin-top-left scale-85 flex-col overflow-hidden text-[var(--wm-silk)] select-none sm:w-80 sm:scale-100 [contain:layout_style_paint] ${config.shellBorder}`}
     >
-      {/* Cream J-Card Adhesive Top Label */}
-      <div className="flex items-center justify-between gap-2 bg-[var(--ff-cream)] px-2.5 py-1 text-[10px] font-black text-[var(--ff-ink)]">
+      {/* Micro Anodized Bezel Strip */}
+      <div className="flex items-center justify-between bg-[#171b2a] px-2 py-0.5">
+        <WalkmanScrew />
+        <span className="ff-mono text-[7px] font-bold tracking-[0.26em] text-[var(--wm-silk-dim)] uppercase">
+          WM-86 · STEREO CASSETTE
+        </span>
+        <WalkmanScrew />
+      </div>
+
+      {/* Ruled Paper Cassette Label */}
+      <div className="wm-paper-label flex items-center justify-between gap-2 px-2.5 py-1 text-[10px] font-black text-[#131622]">
         <div className="min-w-0 truncate">
           <span>
             A ▷ {trackArtist} — {trackTitle}
@@ -141,19 +154,23 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
 
         <div className="flex shrink-0 items-center gap-1">
           {tofuMode && (
-            <span className="rounded-[2px] bg-[#0B0E1E] px-1.5 py-[1px] text-[8px] font-black text-[var(--ff-mint)] uppercase">
+            <span className="rounded-[1px] bg-[#131622] px-1.5 py-[1px] text-[8px] font-black text-[var(--wm-mint)] uppercase">
               TOFU ×2
             </span>
           )}
           <span
-            className={`ff-mono rounded-[2px] px-1.5 py-[1px] text-[8px] font-black uppercase ${sectionBadgeStyle}`}
+            className={`ff-mono rounded-[1px] px-1.5 py-[1px] text-[8px] font-black uppercase ${sectionBadgeStyle}`}
           >
             {sectionRole}
           </span>
           <button
             type="button"
-            onClick={onToggleVisible}
-            className="cursor-pointer rounded-[2px] border border-[#0B0E1E]/30 px-1 py-[1px] text-[9px] font-black text-[var(--ff-ink)] transition hover:bg-[var(--ff-pink)] hover:text-[var(--ff-cream)]"
+            onClick={(e) => {
+              onToggleVisible();
+              e.currentTarget.blur();
+            }}
+            aria-label="Hide cassette"
+            className="pointer-events-auto cursor-pointer rounded-[1px] border border-[#131622]/35 px-1 py-[1px] text-[9px] font-black text-[#131622] transition hover:bg-[var(--wm-play)] hover:text-[var(--wm-silk)]"
             title="Hide cassette [C]"
           >
             ⏏
@@ -161,118 +178,100 @@ export const CassetteTapeWidget = memo(function CassetteTapeWidget({
         </div>
       </div>
 
-      {/* 3-Stripe Obi Divider */}
-      <div className="ff-obi-h h-[3px] w-full" />
+      <div className="wm-accent-strip" />
 
-      {/* Acrylic Tape Window */}
-      <div className="flex items-center justify-between gap-2.5 bg-[#0B0E1E]/90 px-3 py-2">
-        {/* Left Spool: Supply Reel */}
-        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center">
-          <div
-            className="absolute inset-0 rounded-full border border-[rgba(255,245,228,0.2)] will-change-transform"
-            style={{
-              backgroundColor: config.tapeColor,
-              transform: `scale(${(leftPackRadius * 2) / 48})`,
-            }}
+      {/* Smoked-Acrylic Cassette Window */}
+      <div className="p-1.5">
+        <div className="wm-window flex items-center justify-between gap-2 rounded-[2px] px-2.5 py-2">
+          <CassetteReel
+            size={38}
+            angleDeg={baseRotation}
+            packScale={(leftPackRadius * 2) / 48}
+            tapeColor={config.tapeColor}
+            accentColor={config.reelAccent}
           />
-          <div
-            className="relative z-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-[var(--ff-cream)] bg-[var(--ff-cream)] will-change-transform"
-            style={{ transform: `rotate(${baseRotation}deg)` }}
-          >
-            <div className="h-2 w-2 rounded-full bg-[var(--ff-ink)]" />
-          </div>
-        </div>
 
-        {/* Center Tape Progress & Beat Sequencer */}
-        <div className="min-w-0 flex-1 space-y-1.5">
-          <div className="ff-mono flex items-center justify-between text-[9px] font-bold">
-            <span className={`truncate ${config.gradeColor}`}>{config.typeLabel}</span>
-            <span className="shrink-0 text-[var(--ff-muted)]">{bpm.toFixed(1)} BPM</span>
-          </div>
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="ff-mono flex items-center justify-between text-[9px] font-bold">
+              <span className={`truncate ${config.gradeColor}`}>{config.typeLabel}</span>
+              <span className="shrink-0 text-[var(--wm-silk-dim)]">{bpm.toFixed(1)} BPM</span>
+            </div>
 
-          {isSlack ? (
-            <div className="flex items-center gap-1.5">
-              <svg
-                className="h-2.5 flex-1 text-[var(--ff-pink)]"
-                viewBox="0 0 100 12"
-                fill="none"
-                preserveAspectRatio="none"
-              >
-                <path
-                  d="M 0,6 Q 25,12 50,2 Q 75,12 100,6"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
+            {isSlack ? (
+              <div className="flex items-center gap-1.5">
+                <svg
+                  className="h-2.5 flex-1 text-[var(--wm-play)]"
+                  viewBox="0 0 100 12"
+                  fill="none"
+                  preserveAspectRatio="none"
+                >
+                  <path
+                    d="M 0,6 Q 25,12 50,2 Q 75,12 100,6"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span className="ff-mono shrink-0 text-[8px] font-black text-[var(--wm-play)] uppercase">
+                  TAPE SLACK
+                </span>
+              </div>
+            ) : (
+              <div className="wm-lcd relative h-2 w-full overflow-hidden rounded-[1px] p-[1px]">
+                <div
+                  className="wm-accent-strip h-full w-full origin-left will-change-transform"
+                  style={{ transform: `scaleX(${songProgress})` }}
                 />
-              </svg>
-              <span className="ff-mono shrink-0 text-[8px] font-black text-[var(--ff-pink)] uppercase">
-                TAPE SLACK
-              </span>
-            </div>
-          ) : (
-            <div className="relative h-2 w-full overflow-hidden rounded-[2px] bg-[var(--ff-panel-hi)]">
-              <div
-                className="ff-obi-h h-full w-full origin-left will-change-transform"
-                style={{ transform: `scaleX(${songProgress})` }}
-              />
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* 4-Beat Pips, Bar Counter, Mini VU */}
-          <div className="ff-mono flex items-center justify-between gap-2 text-[9px]">
-            <div className="flex items-center gap-1">
-              {[0, 1, 2, 3].map((b) => (
-                <span
-                  key={b}
-                  className={`inline-block h-2 w-3 rounded-[2px] ${
-                    beatInBar === b
-                      ? b === 0
-                        ? 'bg-[var(--ff-pink)]'
-                        : 'bg-[var(--ff-mint)]'
-                      : 'bg-[#1E2749]'
-                  }`}
-                />
-              ))}
-            </div>
+            {/* 4-Beat Pips, Bar Counter, Mini VU */}
+            <div className="wm-lcd ff-mono flex items-center justify-between gap-2 rounded-[1px] px-1.5 py-0.5 text-[9px]">
+              <div className="flex items-center gap-1">
+                {[0, 1, 2, 3].map((b) => (
+                  <span
+                    key={b}
+                    className={`inline-block h-1.5 w-2.5 rounded-[1px] ${
+                      beatInBar === b
+                        ? b === 0
+                          ? 'bg-[var(--wm-play)]'
+                          : 'bg-[var(--wm-mint)]'
+                        : 'bg-[#1e253d]'
+                    }`}
+                  />
+                ))}
+              </div>
 
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-[var(--ff-cream)]">
-                BAR {String(barIndex + 1).padStart(3, '0')}.{beatInBar + 1}
-              </span>
-              <div className="flex h-2.5 items-end gap-0.5" title="Tape level">
-                {[0.3, 0.55, 0.8, 1.0].map((factor, idx) => {
-                  const ratio = Math.max(0.2, Math.min(1, barEnergy * factor));
-                  const isPeak = idx === 3 && ratio > 0.75;
-                  return (
-                    <span
-                      key={idx}
-                      className={`h-full w-1 origin-bottom rounded-t-[1px] will-change-transform ${
-                        isPeak ? 'bg-[var(--ff-pink)]' : 'bg-[var(--ff-mint)]'
-                      }`}
-                      style={{ transform: `scaleY(${ratio})` }}
-                    />
-                  );
-                })}
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-[var(--wm-silk)]">
+                  BAR {String(barIndex + 1).padStart(3, '0')}.{beatInBar + 1}
+                </span>
+                <div className="flex h-2.5 items-end gap-0.5" title="Tape level">
+                  {[0.3, 0.55, 0.8, 1.0].map((factor, idx) => {
+                    const ratio = Math.max(0.2, Math.min(1, barEnergy * factor));
+                    const isPeak = idx === 3 && ratio > 0.75;
+                    return (
+                      <span
+                        key={idx}
+                        className={`h-full w-1 origin-bottom rounded-t-[1px] will-change-transform ${
+                          isPeak ? 'bg-[var(--wm-play)]' : 'bg-[var(--wm-mint)]'
+                        }`}
+                        style={{ transform: `scaleY(${ratio})` }}
+                      />
+                    );
+                  })}
+                </div>
               </div>
             </div>
           </div>
-        </div>
 
-        {/* Right Spool: Take-up Reel */}
-        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center">
-          <div
-            className="absolute inset-0 rounded-full border border-[rgba(255,245,228,0.2)] will-change-transform"
-            style={{
-              backgroundColor: config.tapeColor,
-              transform: `scale(${(rightPackRadius * 2) / 48})`,
-            }}
+          <CassetteReel
+            size={38}
+            angleDeg={baseRotation}
+            packScale={(rightPackRadius * 2) / 48}
+            tapeColor={config.tapeColor}
+            accentColor={config.reelAccent}
           />
-          <div
-            className="relative z-1 flex h-5 w-5 items-center justify-center rounded-full border-2 border-[var(--ff-cream)] bg-[var(--ff-cream)] will-change-transform"
-            style={{ transform: `rotate(${baseRotation}deg)` }}
-          >
-            <div className="h-2 w-2 rounded-full bg-[var(--ff-ink)]" />
-          </div>
         </div>
       </div>
     </div>

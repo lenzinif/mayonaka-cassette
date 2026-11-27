@@ -1,0 +1,111 @@
+:root {
+  --ck-leather: #141118;
+  --ck-leather-hi: #211c27;
+  --ck-stitch: rgba(214, 174, 114, 0.28);
+  --ck-wood: #3a1f16;
+  --ck-wood-hi: #59301f;
+  --ck-wood-grain: rgba(16, 7, 4, 0.36);
+  --ck-brass: #d9a75c;
+  --ck-brass-dim: rgba(217, 167, 92, 0.35);
+  --ck-vfd-glass: #070b10;
+  --ck-vfd-mint: #38f2c8;
+  --ck-vfd-amber: #ffbd4a;
+  --ck-vfd-coral: #ff4778;
+}
+
+@layer components {
+  .ck-dash-pad {
+    background-color: var(--ck-leather);
+    background-image: linear-gradient(
+      180deg,
+      var(--ck-leather-hi) 0%,
+      var(--ck-leather) 24%,
+      #0e0c12 100%
+    );
+    border: 1px solid var(--ck-brass-dim);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 232, 195, 0.1),
+      0 10px 26px rgba(4, 3, 8, 0.72);
+  }
+
+  .ck-stitch-top {
+    border-top: 1px dashed var(--ck-stitch);
+  }
+
+  .ck-wood-trim {
+    background-color: var(--ck-wood);
+    background-image: repeating-linear-gradient(
+      90deg,
+      var(--ck-wood) 0px,
+      var(--ck-wood-hi) 6px,
+      var(--ck-wood-grain) 7px,
+      var(--ck-wood) 14px
+    );
+    border-top: 1px solid rgba(255, 224, 178, 0.2);
+    border-bottom: 1px solid rgba(217, 167, 92, 0.32);
+  }
+
+  .ck-vfd-well {
+    background-color: var(--ck-vfd-glass);
+    border: 1px solid rgba(217, 167, 92, 0.26);
+    box-shadow:
+      inset 0 2px 8px rgba(0, 0, 0, 0.9),
+      inset 0 0 0 1px rgba(56, 242, 200, 0.08);
+  }
+
+  .ck-visor-shell {
+    background-color: var(--ck-leather);
+    background-image: linear-gradient(
+      180deg,
+      #221d28 0%,
+      #16121b 65%,
+      #0f0c14 100%
+    );
+    border: 1px solid var(--ck-brass-dim);
+    border-top: 0;
+    box-shadow:
+      inset 0 -1px 0 rgba(255, 232, 195, 0.08),
+      0 8px 20px rgba(4, 3, 8, 0.65);
+  }
+
+  .ck-din-shell {
+    background-color: #110e15;
+    border: 1px solid var(--ck-brass-dim);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 232, 195, 0.09),
+      0 10px 24px rgba(4, 3, 8, 0.74);
+  }
+
+  .ck-din-btn {
+    background-color: #1c1723;
+    border: 1px solid rgba(217, 167, 92, 0.25);
+    border-radius: 2px;
+    color: #f4ead8;
+    transition:
+      background-color 90ms ease,
+      border-color 90ms ease,
+      color 90ms ease,
+      transform 60ms ease;
+  }
+
+  .ck-din-btn:hover:not(:disabled) {
+    background-color: #292132;
+    border-color: var(--ck-brass);
+    color: var(--ck-vfd-amber);
+  }
+
+  .ck-din-btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  .ck-din-btn:focus-visible {
+    outline: 1px solid var(--ck-vfd-mint);
+    outline-offset: -1px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ck-din-btn {
+    transition: none;
+  }
+}

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  blendStagePalette,
+  createMutablePaletteClone,
   getStagePalette,
   PALETTE_AKIBA_NIGHT,
   PALETTE_AKIBA_NOON,
@@ -45,6 +47,9 @@ function validatePalette(palette: StagePalette): void {
 
   if (palette.horizonGlow !== undefined) {
     expect(palette.horizonGlow).toMatch(HEX_COLOR_REGEX);
+  }
+  if (palette.horizonMist !== undefined) {
+    expect(palette.horizonMist).toMatch(HEX_COLOR_REGEX);
   }
   if (palette.fogDensity !== undefined) {
     expect(palette.fogDensity).toBeGreaterThan(0);
@@ -177,6 +182,26 @@ describe('StagePalettes (Future Funk Presets)', () => {
       expect(getStagePalette(0.8)).toBe(PALETTE_NIGHT_FUNK);
       expect(getStagePalette(1.2)).toBe(PALETTE_OG_FUTURE_FUNK);
       expect(getStagePalette(2.99)).toBe(PALETTE_AKIBA_NIGHT);
+    });
+  });
+
+  describe('horizonMist palette blending', () => {
+    it('defines horizonMist on all stage palettes and blends it in-place', () => {
+      for (const p of [
+        PALETTE_NIGHT_FUNK,
+        PALETTE_OG_FUTURE_FUNK,
+        PALETTE_AKIBA_NOON,
+        PALETTE_AKIBA_NIGHT,
+        PALETTE_VAPORFUNK,
+      ]) {
+        expect(p.horizonMist).toMatch(HEX_COLOR_REGEX);
+      }
+
+      const out = createMutablePaletteClone(PALETTE_NIGHT_FUNK);
+      blendStagePalette(PALETTE_NIGHT_FUNK, PALETTE_OG_FUTURE_FUNK, 0.5, out);
+      expect(out.horizonMist).toMatch(HEX_COLOR_REGEX);
+      expect(out.horizonMist).not.toBe(PALETTE_NIGHT_FUNK.horizonMist);
+      expect(out.horizonMist).not.toBe(PALETTE_OG_FUTURE_FUNK.horizonMist);
     });
   });
 });
