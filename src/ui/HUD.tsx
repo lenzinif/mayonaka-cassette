@@ -4,6 +4,7 @@ import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
 import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
 import type { GrooveTier } from '@src/entities/PlayerCar';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { WalkmanLed } from './walkman/WalkmanChrome';
 import { CassetteTapeWidget } from './hud/CassetteTapeWidget';
 import { RhythmBezel } from './hud/RhythmBezel';
 import { VfdDigidash } from './hud/VfdDigidash';
@@ -86,7 +87,7 @@ export function HUD({
 
   // Keyboard shortcut listeners
   useEffect(() => {
-    if (!gameStarted) return;
+    if (!gameStarted || trackLoaderOpen || inspectorOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
@@ -104,7 +105,7 @@ export function HUD({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [gameStarted, handleToggleCleanHud]);
+  }, [gameStarted, trackLoaderOpen, inspectorOpen, handleToggleCleanHud]);
 
   // Telemetry event listeners & tape slack triggers
   useEffect(() => {
@@ -144,7 +145,6 @@ export function HUD({
   const beatPulse = snap?.beatPulse ?? 0;
   const sectionRole: SectionRole = snap?.sectionRole ?? 'intro';
   const barEnergy = Math.round((snap?.barEnergy ?? 0.5) * 50) / 50;
-  const filterCutoffHz = Math.round((snap?.filterCutoffHz ?? 2400) / 20) * 20;
   const trackTitle = snap?.trackTitle ?? 'Neon Horizon';
   const trackArtist = snap?.trackArtist ?? 'Mayonaka FM';
   const roadBarIndex = snap?.roadBarIndex ?? 0;
@@ -211,13 +211,10 @@ export function HUD({
               beatInBar={beatInBar}
               sectionRole={sectionRole}
               barEnergy={barEnergy}
-              filterCutoffHz={filterCutoffHz}
-              groove={groove}
               grooveTier={grooveTier}
               tofuMode={tofuMode}
               roadBarIndex={roadBarIndex}
               totalBars={totalBars}
-              speedRatio={speedRatio}
               playlistIndex={playlistIndex}
               playlistLength={playlistLength}
               isSlack={isTapeSlack}
@@ -227,61 +224,65 @@ export function HUD({
           )}
         </div>
 
-        {/* Right: Minimalist Status & Action Controls */}
+        {/* Right: Walkman Tactile Status & Transport Controls */}
         <div className="pointer-events-auto flex items-center gap-1.5 [contain:layout_style_paint] [transform:translateZ(0)]">
           {snap?.autopilotActive && (
             <span
-              className="ff-mono rounded-[2px] border border-[var(--ff-mint)] bg-[#12172E]/90 px-2 py-1 text-[10px] font-bold tracking-wider text-[var(--ff-mint)] uppercase"
+              className="wm-lcd ff-mono inline-flex h-7 items-center gap-1.5 rounded-[2px] px-2 text-[10px] font-bold tracking-wider text-[var(--wm-mint)] uppercase"
               title={`Autopilot: ${snap.autopilotMode?.toUpperCase() ?? 'ON'}`}
             >
+              <WalkmanLed lit color="mint" />
               AUTO
             </span>
           )}
 
           {gamepadConnected && (
             <span
-              className="ff-mono rounded-[2px] border border-[rgba(46,232,196,0.5)] bg-[#12172E]/90 px-2 py-1 text-[10px] font-black text-[var(--ff-mint)]"
+              className="wm-lcd ff-mono inline-flex h-7 items-center gap-1 rounded-[2px] px-2 text-[10px] font-black text-[var(--wm-mint)]"
               title="Gamepad connected"
             >
               GP
             </span>
           )}
 
-          <button
-            type="button"
-            onClick={(e) => {
-              handleToggleCleanHud();
-              e.currentTarget.blur();
-            }}
-            className={`flex h-7 cursor-pointer items-center justify-center rounded-[2px] border px-2.5 text-[10px] font-bold tracking-[0.14em] uppercase transition ${
-              effectiveCleanHud
-                ? 'border-[var(--ff-pink)] bg-[var(--ff-panel)] text-[var(--ff-pink)]'
-                : 'border-[rgba(255,245,228,0.22)] bg-[#12172E]/88 text-[var(--ff-cream)] hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]'
-            }`}
-            title="Toggle minimal HUD [H]"
-          >
-            {effectiveCleanHud ? 'FULL H' : 'HUD H'}
-          </button>
+          <div className="wm-key-bank flex items-center">
+            <button
+              type="button"
+              aria-pressed={effectiveCleanHud}
+              onClick={(e) => {
+                handleToggleCleanHud();
+                e.currentTarget.blur();
+              }}
+              className={`wm-btn-well ff-mono flex h-[26px] cursor-pointer items-center justify-center gap-1.5 px-2.5 text-[10px] font-bold tracking-[0.14em] uppercase ${
+                effectiveCleanHud
+                  ? 'text-[var(--wm-play)]'
+                  : 'text-[var(--wm-silk)] hover:text-[var(--wm-mint)]'
+              }`}
+              title="Toggle minimal HUD [H]"
+            >
+              <WalkmanLed lit={effectiveCleanHud} color="play" />
+              {effectiveCleanHud ? 'FULL H' : 'HUD H'}
+            </button>
 
-          <button
-            type="button"
-            onClick={(e) => {
-              onTogglePause?.();
-              e.currentTarget.blur();
-            }}
-            className="flex h-7 cursor-pointer items-center justify-center rounded-[2px] border border-[var(--ff-pink)] bg-[var(--ff-pink)] px-2.5 text-[10px] font-black tracking-[0.14em] text-[var(--ff-cream)] uppercase transition hover:brightness-110"
-            style={{ boxShadow: '2px 2px 0 #0B0E1E' }}
-            title="Pause [ESC] or [P]"
-          >
-            {isPaused ? 'RESUME' : 'PAUSE'}
-          </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                onTogglePause?.();
+                e.currentTarget.blur();
+              }}
+              className="wm-btn-well wm-btn-play ff-mono flex h-[26px] cursor-pointer items-center justify-center gap-1.5 px-2.5 text-[10px] font-black tracking-[0.14em] uppercase"
+              title="Pause [ESC] or [P]"
+            >
+              {isPaused ? '▶ RESUME' : '⏸ PAUSE'}
+            </button>
+          </div>
         </div>
       </div>
 
       {/* On-Demand Performance Profiler Ribbon (F3) */}
       {showPerfHud && (
         <div
-          className={`ff-mono pointer-events-auto absolute top-11 z-2 flex flex-wrap items-center justify-end gap-2.5 rounded-[2px] border border-[rgba(255,245,228,0.25)] bg-[#0B0E1E]/95 px-3 py-1 text-[10px] text-[var(--ff-cream)] sm:top-13 [contain:layout_style_paint] [transform:translateZ(0)] ${
+          className={`wm-lcd ff-mono pointer-events-none absolute top-11 z-2 flex flex-wrap items-center justify-end gap-2.5 rounded-[2px] px-3 py-1 text-[10px] text-[var(--wm-silk)] sm:top-13 [contain:layout_style_paint] [transform:translateZ(0)] ${
             debugOpen
               ? cassetteVisible
                 ? 'right-[calc(376px+1.25rem)] max-w-[calc(100%-376px-2.5rem)] sm:right-[calc(376px+1.75rem)] lg:max-w-[min(46rem,calc(100%-760px))]'
@@ -289,44 +290,44 @@ export function HUD({
               : 'right-3 max-w-[min(46rem,calc(100%-1.5rem))] sm:right-5'
           }`}
         >
-          <span className="font-bold tracking-widest text-[var(--ff-pink)] uppercase">PERF MON</span>
-          <span className="font-bold text-[var(--ff-mint)]">
+          <span className="font-bold tracking-widest text-[var(--wm-play)] uppercase">PERF MON</span>
+          <span className="font-bold text-[var(--wm-mint)]">
             {fps} FPS (MIN {snap?.minFps ?? fps})
           </span>
-          <span className="text-[var(--ff-muted)]">
-            FRAME: <strong className="text-[var(--ff-cream)]">{snap?.frameTimeMs ?? 16.7}ms</strong> (P95{' '}
+          <span className="text-[var(--wm-silk-dim)]">
+            FRAME: <strong className="text-[var(--wm-silk)]">{snap?.frameTimeMs ?? 16.7}ms</strong> (P95{' '}
             {snap?.p95FrameMs ?? 16.7})
           </span>
-          <span className="text-[var(--ff-pink)]">
-            JS: <strong className="text-[var(--ff-cream)]">{snap?.renderTimeMs ?? 1.2}ms</strong>{' '}
+          <span className="text-[var(--wm-play)]">
+            JS: <strong className="text-[var(--wm-silk)]">{snap?.renderTimeMs ?? 1.2}ms</strong>{' '}
             [BG {snap?.bgRenderMs ?? 0} / SL {snap?.roadSlicesMs ?? 0} / PR {snap?.roadPropsMs ?? 0} / CAR{' '}
             {snap?.carOverlayMs ?? 0}]
           </span>
-          <span className="text-[var(--ff-gold)]">
-            GAP: <strong className="text-[var(--ff-cream)]">{snap?.compositorGapMs ?? 0}ms</strong>
+          <span className="text-[var(--wm-amber)]">
+            GAP: <strong className="text-[var(--wm-silk)]">{snap?.compositorGapMs ?? 0}ms</strong>
           </span>
-          <span className="text-[var(--ff-pink)]">
-            DROPS: <strong className="text-[var(--ff-cream)]">{snap?.droppedFrames ?? 0}</strong>
+          <span className="text-[var(--wm-play)]">
+            DROPS: <strong className="text-[var(--wm-silk)]">{snap?.droppedFrames ?? 0}</strong>
           </span>
-          <span className="text-[var(--ff-mint)]">
-            PHYS: <strong className="text-[var(--ff-cream)]">{snap?.simTimeMs ?? 0.3}ms</strong> (x
+          <span className="text-[var(--wm-mint)]">
+            PHYS: <strong className="text-[var(--wm-silk)]">{snap?.simTimeMs ?? 0.3}ms</strong> (x
             {snap?.fixedStepsLastFrame ?? 1})
           </span>
-          <span className="text-[var(--ff-muted)]">
-            SEGS: <strong className="text-[var(--ff-cream)]">{snap?.drawnSegments ?? 0}</strong>
+          <span className="text-[var(--wm-silk-dim)]">
+            SEGS: <strong className="text-[var(--wm-silk)]">{snap?.drawnSegments ?? 0}</strong>
           </span>
-          <span className="text-[var(--ff-gold)]">
-            PROPS: <strong className="text-[var(--ff-cream)]">{snap?.drawnProps ?? 0}</strong>
+          <span className="text-[var(--wm-amber)]">
+            PROPS: <strong className="text-[var(--wm-silk)]">{snap?.drawnProps ?? 0}</strong>
           </span>
-          <span className="text-[var(--ff-muted)]">
-            TRUCKS: <strong className="text-[var(--ff-cream)]">{snap?.drawnTrucks ?? 0}</strong>
+          <span className="text-[var(--wm-silk-dim)]">
+            TRUCKS: <strong className="text-[var(--wm-silk)]">{snap?.drawnTrucks ?? 0}</strong>
           </span>
-          <span className="text-[var(--ff-pink)]">
-            PARTS: <strong className="text-[var(--ff-cream)]">{snap?.activeParticles ?? 0}</strong>
+          <span className="text-[var(--wm-play)]">
+            PARTS: <strong className="text-[var(--wm-silk)]">{snap?.activeParticles ?? 0}</strong>
           </span>
           {snap?.memoryMb !== null && snap?.memoryMb !== undefined && (
-            <span className="text-[var(--ff-mint)]">
-              HEAP: <strong className="text-[var(--ff-cream)]">{snap.memoryMb}MB</strong>
+            <span className="text-[var(--wm-mint)]">
+              HEAP: <strong className="text-[var(--wm-silk)]">{snap.memoryMb}MB</strong>
             </span>
           )}
         </div>
