@@ -269,11 +269,24 @@ export function synthesizeFutureFunkLoopPcm(
   return { left, right };
 }
 
-/** In-memory cache of synthesized raw PCM channels keyed by `${sampleRate}:${bpm}:${bars}`. */
+/** Maximum number of synthesized fallback PCM / AudioBuffer variants retained via LRU. */
+export const MAX_SYNTH_CACHE_ENTRIES = 6;
+
+/** In-memory LRU cache of synthesized raw PCM channels keyed by `${sampleRate}:${bpm}:${bars}`. */
 const synthPcmCache = new Map<string, { left: Float32Array; right: Float32Array }>();
 
-/** In-memory cache of AudioBuffer instances keyed by `${sampleRate}:${bpm}:${bars}`. */
+/** In-memory LRU cache of AudioBuffer instances keyed by `${sampleRate}:${bpm}:${bars}`. */
 const synthAudioBufferCache = new Map<string, AudioBuffer>();
+
+function setBoundedLruEntry<K, V>(cache: Map<K, V>, key: K, value: V, maxEntries: number): void {
+  cache.delete(key);
+  cache.set(key, value);
+  while (cache.size > maxEntries) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey === undefined) break;
+    cache.delete(oldestKey);
+  }
+}
 
 /**
  * Retrieves a cached synthesized stereo loop or calculates it once deterministically.
@@ -285,10 +298,13 @@ export function getOrSynthesizeFutureFunkLoopPcm(
 ): { left: Float32Array; right: Float32Array } {
   const key = `${sampleRate}:${bpm}:${bars}`;
   let cached = synthPcmCache.get(key);
-  if (!cached) {
-    cached = synthesizeFutureFunkLoopPcm(bpm, sampleRate, bars);
+  if (cached) {
+    synthPcmCache.delete(key);
     synthPcmCache.set(key, cached);
+    return cached;
   }
+  cached = synthesizeFutureFunkLoopPcm(bpm, sampleRate, bars);
+  setBoundedLruEntry(synthPcmCache, key, cached, MAX_SYNTH_CACHE_ENTRIES);
   return cached;
 }
 
@@ -298,6 +314,16 @@ export function getOrSynthesizeFutureFunkLoopPcm(
 export function clearSynthLoopCache(): void {
   synthPcmCache.clear();
   synthAudioBufferCache.clear();
+}
+
+/**
+ * Diagnostic helper returning the current number of cached synth fallback entries.
+ */
+export function getSynthLoopCacheStats(): { pcmEntries: number; audioBufferEntries: number } {
+  return {
+    pcmEntries: synthPcmCache.size,
+    audioBufferEntries: synthAudioBufferCache.size,
+  };
 }
 
 /**
@@ -311,15 +337,20 @@ export function getOrBuildSynthFallbackBuffer(
   const sr = ctx.sampleRate;
   const key = `${sr}:${bpm}:${bars}`;
   let buf = synthAudioBufferCache.get(key);
-  if (!buf) {
-    const pcm = getOrSynthesizeFutureFunkLoopPcm(bpm, sr, bars);
-    buf = ctx.createBuffer(2, pcm.left.length, sr);
-    buf.getChannelData(0).set(pcm.left);
-    buf.getChannelData(1).set(pcm.right);
+  if (buf) {
+    synthAudioBufferCache.delete(key);
     synthAudioBufferCache.set(key, buf);
+    return buf;
   }
+  const pcm = getOrSynthesizeFutureFunkLoopPcm(bpm, sr, bars);
+  buf = ctx.createBuffer(2, pcm.left.length, sr);
+  buf.getChannelData(0).set(pcm.left);
+  buf.getChannelData(1).set(pcm.right);
+  setBoundedLruEntry(synthAudioBufferCache, key, buf, MAX_SYNTH_CACHE_ENTRIES);
   return buf;
 }
+
+export type ForkTransitionAudioStyle = 'none' | 'scratch' | 'rewind';
 
 export interface DrivingAudioParams {
   /** Current car speed ratio in [0, 1]. */
@@ -366,14 +397,17 @@ export class FunkAudioEngine {
 
   private ctx: AudioContext | null = null;
   private filterNode: BiquadFilterNode | null = null;
+  private tapeDropoutGain: GainNode | null = null;
   private masterGain: GainNode | null = null;
 
   private sourceNode: AudioBufferSourceNode | null = null;
   private sourceGainNode: GainNode | null = null;
   private outgoingSourceNode: AudioBufferSourceNode | null = null;
   private outgoingGainNode: GainNode | null = null;
+  private outgoingSpinDownActive = false;
 
   private currentBuffer: AudioBuffer | null = null;
+  private noiseBuffer: AudioBuffer | null = null;
   private isSynthLoopBuffer = true;
 
   private isPlaying = false;
@@ -384,10 +418,12 @@ export class FunkAudioEngine {
   private justResumed = false;
   private currentCutoffHz = 2400;
   private currentQ = 1.6;
+  private currentBasePlaybackRate = 1.0;
   private currentPlaybackRate = 1.0;
   private lastAppliedCutoffHz = -1;
   private lastAppliedQ = -1;
   private lastAppliedPlaybackRate = -1;
+  private lastAppliedDropoutGain = 1.0;
   private cachedLatencySec = 0;
   private lastLatencyCheckSec = -10;
 
@@ -430,6 +466,11 @@ export class FunkAudioEngine {
   /** Progressive attack/release envelope for off-road immersion [0, 1]. */
   private offRoadEnvelope = 0;
 
+  /** Cassette wear oscillators & shock intensity for zero-lag Wow & Flutter. */
+  private wowPhase = 0;
+  private flutterPhase = 0;
+  private tapeShockEnvelope = 0;
+
   /** Progressive attack/release envelope for filter muffle on collisions/spills. */
   private filterMuffleTarget = 0;
   private filterMuffleEnvelope = 0;
@@ -465,6 +506,10 @@ export class FunkAudioEngine {
 
   get beatMap(): BeatMap {
     return this.beatClock.map;
+  }
+
+  get isUsingSynthFallback(): boolean {
+    return this.isSynthLoopBuffer;
   }
 
   get cutoffHz(): number {
@@ -633,6 +678,7 @@ export class FunkAudioEngine {
       this.ctx = ctx;
       this.filterNode = filter;
       this.masterGain = gain;
+      this.noiseBuffer = this.buildCassetteNoiseBuffer(ctx);
       this.lastAudioTimeSec = ctx.currentTime;
 
       if (typeof ctx.createDelay === 'function') {
@@ -691,6 +737,18 @@ export class FunkAudioEngine {
         this.tunnelFilterNode = tunnelFilter;
         this.tunnelFeedbackGain = tunnelFeedback;
       }
+
+      // Insert tapeDropoutGain after dub/tunnel sends so GainNode creation order stays deterministic
+      const dropoutGain = ctx.createGain();
+      dropoutGain.gain.value = 1.0;
+      try {
+        filter.disconnect(gain);
+      } catch {
+        // Ignore disconnect errors in minimal mocks
+      }
+      filter.connect(dropoutGain);
+      dropoutGain.connect(gain);
+      this.tapeDropoutGain = dropoutGain;
     }
 
     if (!this.isPaused || this.previewMode) {
@@ -890,7 +948,7 @@ export class FunkAudioEngine {
   private applyPreviewFilterAndRate(): void {
     this.currentCutoffHz = tuning.audioFilterMaxHz;
     this.currentQ = 1.6;
-    this.currentPlaybackRate = 1.0;
+    this.resetTapeWearState();
     this.lastAppliedCutoffHz = -1;
     this.lastAppliedQ = -1;
     this.lastAppliedPlaybackRate = -1;
@@ -944,8 +1002,7 @@ export class FunkAudioEngine {
     this.crossfadeTotalSec = 0;
     this.resetDubState();
     this.resetTunnelState();
-    this.currentPlaybackRate = 1.0;
-    this.lastAppliedPlaybackRate = 1.0;
+    this.resetTapeWearState();
     this.virtualTrackSec = clamped;
     this.beatClock.resetCrossingState();
     if (this.ctx && this.ctx.state === 'running' && !this.isPaused) {
@@ -973,11 +1030,7 @@ export class FunkAudioEngine {
     this.crossfadeRemainingSec = 0;
     this.crossfadeTotalSec = 0;
     this.virtualTrackSec = 0;
-    this.currentPlaybackRate = 1.0;
-    this.lastAppliedPlaybackRate = 1.0;
-    this.offRoadEnvelope = 0;
-    this.pitchDipEnvelope = 0;
-    this.pitchDipTarget = 0;
+    this.resetTapeWearState();
     this.resetDubState();
     this.resetTunnelState();
     this.beatClock.resetCrossingState();
@@ -1003,11 +1056,7 @@ export class FunkAudioEngine {
     this.crossfadeTotalSec = 0;
     this.resetDubState();
     this.resetTunnelState();
-    this.currentPlaybackRate = 1.0;
-    this.lastAppliedPlaybackRate = 1.0;
-    this.offRoadEnvelope = 0;
-    this.pitchDipEnvelope = 0;
-    this.pitchDipTarget = 0;
+    this.resetTapeWearState();
     this.beatClock.setBeatMap(beatMap);
     this.updateDubDelayTime();
     this.currentBuffer =
@@ -1031,8 +1080,30 @@ export class FunkAudioEngine {
   }
 
   /**
+   * Swaps an on-demand hydrated `AudioBuffer` into the active track when it was previously
+   * running on the procedural synth fallback (e.g. after LRU eviction & re-decode).
+   */
+  attachHydratedBuffer(beatMap: BeatMap, audioBuffer: AudioBuffer): void {
+    if (this.beatClock.map.contentHash !== beatMap.contentHash || !this.isSynthLoopBuffer) {
+      return;
+    }
+    this.currentBuffer = audioBuffer;
+    this.isSynthLoopBuffer = false;
+    if (
+      this.ctx &&
+      this.ctx.state === 'running' &&
+      !this.isPaused &&
+      (this.isPlaying || this.previewPlaying)
+    ) {
+      this.startSourceNode(this.virtualTrackSec, 0.025);
+      this.pendingTrackStart = false;
+    }
+  }
+
+  /**
    * Performs a crisp cassette-style cut / micro-crossfade from the currently playing track
    * into `beatMap` / `audioBuffer` so outgoing outro tails never clash with the incoming track.
+   * Optionally accompanies stage forks with a procedural cassette `'scratch'` or `'rewind'` FX.
    *
    * Returns the outgoing fade duration in seconds.
    */
@@ -1041,6 +1112,7 @@ export class FunkAudioEngine {
     audioBuffer: AudioBuffer | null = null,
     crossfadeBars = 4,
     forceRestart = false,
+    transitionStyle: ForkTransitionAudioStyle = 'none',
   ): number {
     void crossfadeBars;
     // Seamless single-track synth loop optimization:
@@ -1058,12 +1130,14 @@ export class FunkAudioEngine {
       this.virtualTrackSec = 0;
       this.crossfadeRemainingSec = 0;
       this.crossfadeTotalSec = 0;
-      this.currentPlaybackRate = 1.0;
-      this.lastAppliedPlaybackRate = 1.0;
+      this.resetTapeWearState();
       this.resetDubState();
       this.resetTunnelState();
       this.beatClock.resetCrossingState();
       this.triggerFilterBlip(0.5);
+      if (transitionStyle !== 'none') {
+        this.triggerForkTransitionFx(transitionStyle);
+      }
       return 0;
     }
 
@@ -1076,11 +1150,7 @@ export class FunkAudioEngine {
     const incomingFadeSec = 0.04;
     this.crossfadeTotalSec = outgoingFadeSec;
     this.crossfadeRemainingSec = outgoingFadeSec;
-    this.currentPlaybackRate = 1.0;
-    this.lastAppliedPlaybackRate = 1.0;
-    this.offRoadEnvelope = 0;
-    this.pitchDipEnvelope = 0;
-    this.pitchDipTarget = 0;
+    this.resetTapeWearState();
     this.resetDubState();
     this.resetTunnelState();
 
@@ -1103,6 +1173,18 @@ export class FunkAudioEngine {
         this.sourceGainNode = null;
 
         try {
+          if (transitionStyle === 'scratch' && tuning.audioForkTransitionFx > 0.01) {
+            this.outgoingSpinDownActive = true;
+            this.outgoingSourceNode.playbackRate.cancelScheduledValues?.(now);
+            this.outgoingSourceNode.playbackRate.setValueAtTime(
+              Math.max(0.5, this.currentPlaybackRate),
+              now,
+            );
+            this.outgoingSourceNode.playbackRate.exponentialRampToValueAtTime(
+              0.42,
+              now + outgoingFadeSec * 0.85,
+            );
+          }
           this.outgoingGainNode.gain.cancelScheduledValues(now);
           this.outgoingGainNode.gain.setValueAtTime(
             Math.max(0.01, this.outgoingGainNode.gain.value),
@@ -1118,6 +1200,9 @@ export class FunkAudioEngine {
       // Start the incoming track at full musical impact with only a 40ms de-click micro-ramp
       this.startSourceNode(0, incomingFadeSec);
       this.triggerFilterBlip(0.9);
+      if (transitionStyle !== 'none') {
+        this.triggerForkTransitionFx(transitionStyle);
+      }
       this.pendingTrackStart = false;
     } else {
       this.stopOutgoingSource();
@@ -1218,11 +1303,38 @@ export class FunkAudioEngine {
   }
 
   /**
-   * Triggers a progressive turntable pitch sag and filter muffle (used on collisions, AGENTS.md §1 Pillar 2 & 3).
+   * Triggers a zero-lag cassette pinch-roller pitch sag, filter muffle, and Wow & Flutter burst
+   * (used on collisions, AGENTS.md §1 Pillar 2 & 3).
    */
   triggerPitchDip(depth = 0.14, muffle = 0.45): void {
-    this.pitchDipTarget = Math.max(this.pitchDipTarget, Math.min(0.35, depth));
-    this.filterMuffleTarget = Math.max(this.filterMuffleTarget, Math.min(0.75, muffle));
+    const clampedDepth = Math.min(0.35, Math.max(0, depth));
+    const clampedMuffle = Math.min(0.75, Math.max(0, muffle));
+    this.pitchDipTarget = Math.max(this.pitchDipTarget, clampedDepth);
+    this.filterMuffleTarget = Math.max(this.filterMuffleTarget, clampedMuffle);
+
+    // Immediate mechanical pinch-roller sag so collisions react in < 1 frame instead of 200ms later
+    this.pitchDipEnvelope = Math.max(this.pitchDipEnvelope, clampedDepth * 0.85);
+    this.filterMuffleEnvelope = Math.max(this.filterMuffleEnvelope, clampedMuffle * 0.85);
+    const shockIntensity = Math.min(1, clampedDepth / 0.12);
+    this.tapeShockEnvelope = Math.max(this.tapeShockEnvelope, shockIntensity);
+
+    const immediateRate = Math.max(
+      0.65,
+      1.0 - this.offRoadEnvelope * tuning.audioOffRoadPitchDip - this.pitchDipEnvelope,
+    );
+    this.currentBasePlaybackRate = Math.min(this.currentBasePlaybackRate, immediateRate);
+    this.currentPlaybackRate = this.currentBasePlaybackRate;
+
+    if (this.ctx && this.ctx.state === 'running' && !this.isPaused) {
+      if (
+        this.sourceNode &&
+        Math.abs(this.currentPlaybackRate - this.lastAppliedPlaybackRate) >= 0.001
+      ) {
+        this.sourceNode.playbackRate.value = this.currentPlaybackRate;
+        this.lastAppliedPlaybackRate = this.currentPlaybackRate;
+      }
+      this.triggerTapeCrinkle(Math.min(1, clampedDepth / 0.1));
+    }
   }
 
   /**
@@ -1254,17 +1366,20 @@ export class FunkAudioEngine {
       }
     }
 
-    // 1. Progressive off-road envelope (smooth ramp-in as car enters grass, smooth release back to road)
+    // 1. Progressive off-road envelope (snappy entry when tires hit grass/gravel, smooth release back to road)
     const depthProgress = Math.max(0, Math.min(1, driving.offRoadDepth ?? 1));
     const rawOffRoadTarget = driving.isOffRoad ? depthProgress : 0;
-    const offRoadRate = rawOffRoadTarget > this.offRoadEnvelope ? 2.6 : 2.0;
+    const offRoadRate = rawOffRoadTarget > this.offRoadEnvelope ? 14.0 : 4.5;
     this.offRoadEnvelope +=
       (rawOffRoadTarget - this.offRoadEnvelope) * (1 - Math.exp(-offRoadRate * dt));
 
-    // 2. Progressive turntable pitch-dip envelope (smooth sag on impact, vinyl torque recovery)
-    this.pitchDipTarget *= Math.exp(-2.8 * dt);
+    // 2. Progressive turntable pitch-dip & cassette shock envelopes (instant grab on impact, smooth recovery)
+    this.tapeShockEnvelope *= Math.exp(-3.4 * dt);
+    if (this.tapeShockEnvelope < 0.002) this.tapeShockEnvelope = 0;
+
+    this.pitchDipTarget *= Math.exp(-3.4 * dt);
     if (this.pitchDipTarget < 0.002) this.pitchDipTarget = 0;
-    const pitchEnvRate = this.pitchDipTarget > this.pitchDipEnvelope ? 7.5 : 2.8;
+    const pitchEnvRate = this.pitchDipTarget > this.pitchDipEnvelope ? 40.0 : 3.2;
     this.pitchDipEnvelope +=
       (this.pitchDipTarget - this.pitchDipEnvelope) * (1 - Math.exp(-pitchEnvRate * dt));
 
@@ -1281,21 +1396,44 @@ export class FunkAudioEngine {
       this.tunnelEnvelope = 0;
     }
 
-    this.filterMuffleTarget *= Math.exp(-2.5 * dt);
+    this.filterMuffleTarget *= Math.exp(-2.8 * dt);
     if (this.filterMuffleTarget < 0.002) this.filterMuffleTarget = 0;
-    const muffleEnvRate = this.filterMuffleTarget > this.filterMuffleEnvelope ? 6.5 : 2.4;
+    const muffleEnvRate = this.filterMuffleTarget > this.filterMuffleEnvelope ? 36.0 : 2.8;
     this.filterMuffleEnvelope +=
       (this.filterMuffleTarget - this.filterMuffleEnvelope) * (1 - Math.exp(-muffleEnvRate * dt));
 
     this.filterBlipBoost *= Math.exp(-4.5 * dt);
 
-    // 4. Compute target turntable playbackRate (1.0 on asphalt, momentary sag only off-road or on collision bump)
+    // 4. Compute cassette Wow & Flutter + base playbackRate (1.0 on clean asphalt, immediate sag + warble on damage)
     const dur = Math.max(1, this.beatClock.map.durationSec);
     const audioSecRemaining = Math.max(0, dur - this.virtualTrackSec);
+    const tapeDamage = Math.min(1, this.offRoadEnvelope * 0.85 + this.tapeShockEnvelope);
+    let wowFlutterOffset = 0;
+    let flutterWave = 0;
+    if (tapeDamage > 0.002) {
+      this.wowPhase = (this.wowPhase + dt * 2 * Math.PI * 2.35) % (Math.PI * 200);
+      this.flutterPhase = (this.flutterPhase + dt * 2 * Math.PI * 18.5) % (Math.PI * 200);
+      const wowWave =
+        Math.sin(this.wowPhase) * 0.72 + Math.sin(this.wowPhase * 0.63 + 1.1) * 0.28;
+      flutterWave =
+        Math.sin(this.flutterPhase) * 0.65 + Math.sin(this.flutterPhase * 1.47 + 0.7) * 0.35;
+      wowFlutterOffset =
+        tapeDamage *
+        (wowWave * tuning.audioTapeWowDepth + flutterWave * tuning.audioTapeFlutterDepth);
+    } else {
+      this.wowPhase = 0;
+      this.flutterPhase = 0;
+    }
+
     const offRoadDip = this.offRoadEnvelope * tuning.audioOffRoadPitchDip;
-    const targetRate = Math.max(0.65, 1.0 - offRoadDip - this.pitchDipEnvelope);
-    this.currentPlaybackRate +=
-      (targetRate - this.currentPlaybackRate) * (1 - Math.exp(-6.5 * dt));
+    const baseTargetRate = Math.max(0.65, 1.0 - offRoadDip - this.pitchDipEnvelope);
+    const baseRateSpeed = baseTargetRate < this.currentBasePlaybackRate ? 28.0 : 7.5;
+    this.currentBasePlaybackRate +=
+      (baseTargetRate - this.currentBasePlaybackRate) * (1 - Math.exp(-baseRateSpeed * dt));
+    this.currentPlaybackRate = Math.max(
+      0.65,
+      Math.min(1.12, this.currentBasePlaybackRate + wowFlutterOffset),
+    );
 
     // Dub Tape Delay & Reverb Wash parameters (Stage 2, docs/OUTRO_EXTENSION_PROPOSALS.md)
     const twoBarsSec = 2 * barDurationSec(this.beatClock.map);
@@ -1386,6 +1524,7 @@ export class FunkAudioEngine {
     const driftBoost = driving.isDrifting ? 0.24 : 0;
     const offRoadMuffle = -0.32 * this.offRoadEnvelope;
     const impactMuffle = -this.filterMuffleEnvelope;
+    const flutterMuffle = -0.08 * tapeDamage * (0.5 + 0.5 * flutterWave);
     const tunnelMuffle = -0.07 * this.tunnelEnvelope;
     const introMuffle = clockState.sectionRole === 'intro' ? -0.18 : 0;
     const blip = this.filterBlipBoost * 0.3;
@@ -1394,7 +1533,14 @@ export class FunkAudioEngine {
       0,
       Math.min(
         1,
-        speedCurve + driftBoost + offRoadMuffle + impactMuffle + tunnelMuffle + introMuffle + blip,
+        speedCurve +
+          driftBoost +
+          offRoadMuffle +
+          impactMuffle +
+          flutterMuffle +
+          tunnelMuffle +
+          introMuffle +
+          blip,
       ),
     );
     let targetCutoff = minHz * Math.pow(maxHz / Math.max(100, minHz), openness);
@@ -1410,8 +1556,9 @@ export class FunkAudioEngine {
       targetCutoff = Math.max(dynamicFloor, targetCutoff);
     }
 
+    const cutoffRate = targetCutoff < this.currentCutoffHz ? 16.0 : 5.5;
     this.currentCutoffHz +=
-      (targetCutoff - this.currentCutoffHz) * (1 - Math.exp(-5.5 * dt));
+      (targetCutoff - this.currentCutoffHz) * (1 - Math.exp(-cutoffRate * dt));
     const targetQ =
       (driving.isDrifting ? tuning.audioFilterDriftQ : 1.6) + 0.85 * this.tunnelEnvelope;
     this.currentQ += (targetQ - this.currentQ) * (1 - Math.exp(-8.0 * dt));
@@ -1430,10 +1577,22 @@ export class FunkAudioEngine {
       }
       if (Math.abs(this.currentPlaybackRate - this.lastAppliedPlaybackRate) >= 0.001) {
         this.sourceNode.playbackRate.value = this.currentPlaybackRate;
-        if (this.outgoingSourceNode) {
+        if (this.outgoingSourceNode && !this.outgoingSpinDownActive) {
           this.outgoingSourceNode.playbackRate.value = this.currentPlaybackRate;
         }
         this.lastAppliedPlaybackRate = this.currentPlaybackRate;
+      }
+      const targetDropoutGain =
+        tapeDamage > 0.01
+          ? Math.max(0.76, 1.0 - tapeDamage * (0.09 + 0.07 * Math.max(0, flutterWave)))
+          : 1.0;
+      if (
+        this.tapeDropoutGain &&
+        (Math.abs(targetDropoutGain - this.lastAppliedDropoutGain) >= 0.004 ||
+          (targetDropoutGain === 1.0 && this.lastAppliedDropoutGain !== 1.0))
+      ) {
+        this.tapeDropoutGain.gain.value = targetDropoutGain;
+        this.lastAppliedDropoutGain = targetDropoutGain;
       }
     }
 
@@ -1464,6 +1623,12 @@ export class FunkAudioEngine {
     this.stopOutgoingSource();
     this.stopSourceNode();
     this.resetTunnelState();
+    this.resetTapeWearState();
+    if (this.tapeDropoutGain) {
+      try { this.tapeDropoutGain.disconnect(); } catch { /* ignore */ }
+      this.tapeDropoutGain = null;
+    }
+    this.noiseBuffer = null;
     if (this.dubSendGain) {
       try { this.dubSendGain.disconnect(); } catch { /* ignore */ }
       this.dubSendGain = null;
@@ -1629,6 +1794,7 @@ export class FunkAudioEngine {
   }
 
   private stopOutgoingSource(): void {
+    this.outgoingSpinDownActive = false;
     if (this.outgoingSourceNode) {
       try {
         this.outgoingSourceNode.onended = null;
@@ -1646,6 +1812,196 @@ export class FunkAudioEngine {
         // Ignore
       }
       this.outgoingGainNode = null;
+    }
+  }
+
+  private resetTapeWearState(): void {
+    this.offRoadEnvelope = 0;
+    this.pitchDipEnvelope = 0;
+    this.pitchDipTarget = 0;
+    this.filterMuffleEnvelope = 0;
+    this.filterMuffleTarget = 0;
+    this.tapeShockEnvelope = 0;
+    this.wowPhase = 0;
+    this.flutterPhase = 0;
+    this.currentBasePlaybackRate = 1.0;
+    this.currentPlaybackRate = 1.0;
+    this.lastAppliedPlaybackRate = 1.0;
+    this.lastAppliedDropoutGain = 1.0;
+    if (this.tapeDropoutGain) {
+      this.tapeDropoutGain.gain.value = 1.0;
+    }
+  }
+
+  private buildCassetteNoiseBuffer(ctx: AudioContext): AudioBuffer | null {
+    if (typeof ctx.createBuffer !== 'function') return null;
+    try {
+      const sr = Math.max(8000, ctx.sampleRate || 44100);
+      const length = Math.max(512, Math.floor(sr * 0.35));
+      const buf = ctx.createBuffer(1, length, sr);
+      const data = buf.getChannelData(0);
+      let seed = 0x5f3759df;
+      for (let i = 0; i < length; i++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        data[i] = (seed / 0xffffffff) * 2 - 1;
+      }
+      return buf;
+    } catch {
+      return null;
+    }
+  }
+
+  private triggerTapeCrinkle(intensity: number): void {
+    if (
+      intensity <= 0.05 ||
+      !this.ctx ||
+      !this.masterGain ||
+      this.ctx.state !== 'running' ||
+      typeof this.ctx.createOscillator !== 'function' ||
+      typeof this.ctx.createBiquadFilter !== 'function'
+    ) {
+      return;
+    }
+    const now = this.ctx.currentTime;
+    const peak = Math.min(0.085, 0.055 * intensity);
+    try {
+      const osc = this.ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1450, now);
+      osc.frequency.exponentialRampToValueAtTime(480, now + 0.075);
+
+      const bp = this.ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(2100, now);
+      bp.Q.setValueAtTime(2.6, now);
+
+      const env = this.ctx.createGain();
+      env.gain.setValueAtTime(0.0001, now);
+      env.gain.linearRampToValueAtTime(peak, now + 0.006);
+      env.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+      osc.connect(bp);
+      bp.connect(env);
+      env.connect(this.masterGain);
+      osc.onended = () => {
+        try {
+          osc.disconnect();
+          bp.disconnect();
+          env.disconnect();
+        } catch {
+          // Ignore disconnect errors in mock contexts
+        }
+      };
+      osc.start(now);
+      osc.stop(now + 0.085);
+    } catch {
+      // Ignore scheduling errors in mock contexts
+    }
+  }
+
+  private triggerForkTransitionFx(style: Exclude<ForkTransitionAudioStyle, 'none'>): void {
+    const fxLevel = Math.max(0, Math.min(1, tuning.audioForkTransitionFx));
+    if (fxLevel < 0.01 || !this.ctx || !this.masterGain || this.ctx.state !== 'running') {
+      return;
+    }
+    const now = this.ctx.currentTime;
+    const isRewind = style === 'rewind';
+
+    if (this.noiseBuffer && typeof this.ctx.createBiquadFilter === 'function') {
+      try {
+        const noiseSrc = this.ctx.createBufferSource();
+        noiseSrc.buffer = this.noiseBuffer;
+        const bp = this.ctx.createBiquadFilter();
+        bp.type = 'bandpass';
+        bp.Q.setValueAtTime(isRewind ? 2.4 : 3.0, now);
+        if (isRewind) {
+          bp.frequency.setValueAtTime(1400, now);
+          bp.frequency.exponentialRampToValueAtTime(3800, now + 0.09);
+          bp.frequency.exponentialRampToValueAtTime(1900, now + 0.21);
+        } else {
+          bp.frequency.setValueAtTime(3400, now);
+          bp.frequency.exponentialRampToValueAtTime(950, now + 0.15);
+        }
+
+        const nGain = this.ctx.createGain();
+        const peak = (isRewind ? 0.11 : 0.13) * fxLevel;
+        const endSec = isRewind ? 0.21 : 0.15;
+        nGain.gain.setValueAtTime(0.0001, now);
+        nGain.gain.linearRampToValueAtTime(Math.max(0.0002, peak), now + (isRewind ? 0.012 : 0.008));
+        nGain.gain.exponentialRampToValueAtTime(0.0001, now + endSec);
+
+        noiseSrc.connect(bp);
+        bp.connect(nGain);
+        nGain.connect(this.masterGain);
+        noiseSrc.onended = () => {
+          try {
+            noiseSrc.disconnect();
+            bp.disconnect();
+            nGain.disconnect();
+          } catch {
+            // Ignore disconnect errors in mock contexts
+          }
+        };
+        noiseSrc.start(now);
+        noiseSrc.stop(now + endSec + 0.015);
+      } catch {
+        // Ignore scheduling errors in mock contexts
+      }
+    }
+
+    if (typeof this.ctx.createOscillator === 'function') {
+      try {
+        const osc = this.ctx.createOscillator();
+        const oGain = this.ctx.createGain();
+        osc.type = isRewind ? 'triangle' : 'sawtooth';
+        const oscEnd = isRewind ? 0.2 : 0.14;
+        if (isRewind) {
+          osc.frequency.setValueAtTime(900, now);
+          osc.frequency.exponentialRampToValueAtTime(2500, now + 0.085);
+          osc.frequency.exponentialRampToValueAtTime(1300, now + oscEnd);
+        } else {
+          osc.frequency.setValueAtTime(620, now);
+          osc.frequency.exponentialRampToValueAtTime(180, now + oscEnd);
+        }
+
+        const oscPeak = (isRewind ? 0.055 : 0.06) * fxLevel;
+        oGain.gain.setValueAtTime(0.0001, now);
+        oGain.gain.linearRampToValueAtTime(Math.max(0.0002, oscPeak), now + (isRewind ? 0.012 : 0.008));
+        oGain.gain.exponentialRampToValueAtTime(0.0001, now + oscEnd);
+
+        if (!isRewind && typeof this.ctx.createBiquadFilter === 'function') {
+          const lp = this.ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.setValueAtTime(1800, now);
+          osc.connect(lp);
+          lp.connect(oGain);
+          oGain.connect(this.masterGain);
+          osc.onended = () => {
+            try {
+              osc.disconnect();
+              lp.disconnect();
+              oGain.disconnect();
+            } catch {
+              // Ignore
+            }
+          };
+        } else {
+          osc.connect(oGain);
+          oGain.connect(this.masterGain);
+          osc.onended = () => {
+            try {
+              osc.disconnect();
+              oGain.disconnect();
+            } catch {
+              // Ignore
+            }
+          };
+        }
+        osc.start(now);
+        osc.stop(now + oscEnd + 0.02);
+      } catch {
+        // Ignore scheduling errors in mock contexts
+      }
     }
   }
 
