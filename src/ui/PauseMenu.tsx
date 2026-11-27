@@ -1,6 +1,12 @@
 import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
 import type { GrooveTier } from '@src/entities/PlayerCar';
-import { useEffect, useState, type MouseEvent } from 'react';
+import { useEffect, useId, useState, type MouseEvent } from 'react';
+import { CockpitOptionsSection } from './cockpit/CockpitOptionsSection';
+import {
+  COCKPIT_PRESET_LUXURY,
+  type CockpitVisibility,
+} from './cockpit/cockpitSettings';
+import { WalkmanLed, WalkmanModalFrame, WalkmanSwitchRow } from './walkman/WalkmanChrome';
 
 export interface PauseMenuProps {
   open: boolean;
@@ -25,6 +31,12 @@ export interface PauseMenuProps {
   autoShift: boolean;
   autopilotActive?: boolean;
   crtEnabled?: boolean;
+  cockpitVisibility?: CockpitVisibility;
+  visorPhotoUrl?: string | null;
+  onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
+  onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
+  onUploadVisorPhoto?: (file: File) => void;
+  onClearVisorPhoto?: () => void;
   initialView?: 'main' | 'options' | 'controls';
   onResume: () => void;
   onRestartRun?: () => void;
@@ -42,15 +54,16 @@ export interface PauseMenuProps {
 }
 
 function formatLapTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  const hundredths = Math.round((seconds * 100) % 100);
+  const totalHundredths = Math.max(0, Math.round(seconds * 100));
+  const mins = Math.floor(totalHundredths / 6000);
+  const secs = Math.floor((totalHundredths % 6000) / 100);
+  const hundredths = totalHundredths % 100;
   return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}.${String(hundredths).padStart(2, '0')}`;
 }
 
 /**
- * Mayonaka Hi-Fi Japanese Cassette J-Card Pause Menu modal.
- * Zero-scroll layout with Main, Options, and Controls views.
+ * Mayonaka Walkman Pause Menu modal (`WM-86 TAPE HOLD`).
+ * Flat flush keys and rigid 4-column service grid.
  */
 export function PauseMenu({
   open,
@@ -74,6 +87,12 @@ export function PauseMenu({
   autoShift,
   autopilotActive = false,
   crtEnabled = true,
+  cockpitVisibility = COCKPIT_PRESET_LUXURY,
+  visorPhotoUrl = null,
+  onToggleCockpitModule,
+  onApplyCockpitPreset,
+  onUploadVisorPhoto,
+  onClearVisorPhoto,
   initialView = 'main',
   onResume,
   onRestartRun,
@@ -90,13 +109,20 @@ export function PauseMenu({
   onReturnToMainMenu,
 }: PauseMenuProps) {
   const [view, setView] = useState<'main' | 'options' | 'controls'>(initialView);
+  const titleId = useId();
+
+  useEffect(() => {
+    if (!open) {
+      setView(initialView);
+    }
+  }, [open, initialView]);
 
   useEffect(() => {
     if (!open || view === 'main') return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.code === 'Escape') {
         e.preventDefault();
-        e.stopPropagation();
+        e.stopImmediatePropagation();
         setView('main');
       }
     };
@@ -115,47 +141,46 @@ export function PauseMenu({
   return (
     <div
       onClick={handleBackdropClick}
-      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#0B0E1E]/80 p-4 text-[var(--ff-cream)] select-none"
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#070911]/82 p-4 text-[var(--wm-silk)] select-none"
       role="dialog"
       aria-modal="true"
-      aria-label="Pause Menu"
+      aria-labelledby={titleId}
     >
-      <div className="ff-shadow-pink relative flex w-full max-w-md overflow-hidden rounded-[2px] border-2 border-[var(--ff-cream)] bg-[var(--ff-panel)] text-left">
-        {/* Vertical 3-Stripe Obi Spine */}
-        <div className="ff-obi-v w-2.5 shrink-0" />
-
-        <div className="min-w-0 flex-1">
-          {/* Cream J-Card Header */}
-          <div className="flex items-center justify-between bg-[var(--ff-cream)] px-4 py-2.5 text-[var(--ff-ink)]">
-            <div className="flex items-baseline gap-2">
-              <span className="ff-display text-xl font-black italic tracking-wider">PAUSED</span>
-              <span className="text-[10px] font-bold tracking-[0.18em] opacity-65">一時停止</span>
-            </div>
-            <span className="ff-mono text-[11px] font-black uppercase">
-              STAGE 0{stageNumber} · {bpm.toFixed(1)} BPM
-            </span>
-          </div>
-
+      <WalkmanModalFrame
+        title="PAUSED"
+        jpSubtitle="一時停止"
+        modelTag="WM-86 TAPE HOLD"
+        titleId={titleId}
+        maxWidthClass="max-w-md"
+        maxHeightClass="max-h-[90vh]"
+        headerRight={
+          <span className="wm-lcd ff-mono inline-flex items-center gap-1.5 rounded-[2px] px-2.5 py-1 text-[10px] font-black text-[var(--wm-silk)] uppercase">
+            <WalkmanLed lit color="amber" />
+            STAGE {String(stageNumber).padStart(2, '0')} · {bpm.toFixed(1)} BPM
+          </span>
+        }
+      >
+        <div className="ff-scroll overflow-y-auto">
           {/* VIEW: MAIN */}
           {view === 'main' && (
             <div className="space-y-3 p-4">
-              {/* Session Strip */}
-              <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3 py-2 text-[11px]">
+              {/* Recessed LCD Session Readout */}
+              <div className="wm-lcd rounded-[2px] px-3 py-2.5 text-[11px]">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-bold text-[var(--ff-cream)]">
+                  <span className="truncate font-bold text-[var(--wm-silk)]">
                     {trackArtist} — {trackTitle}
                   </span>
-                  <span className="ff-mono shrink-0 font-bold text-[var(--ff-mint)]">
+                  <span className="ff-mono shrink-0 font-bold text-[var(--wm-mint)]">
                     GROOVE {groove}% · {grooveTier}
                   </span>
                 </div>
-                <div className="ff-mono mt-1 flex items-center justify-between text-[10px] text-[var(--ff-muted)]">
+                <div className="ff-mono mt-1 flex items-center justify-between text-[10px] text-[var(--wm-silk-dim)]">
                   <span>
-                    <strong className="text-[var(--ff-gold)]">
+                    <strong className="text-[var(--wm-amber)]">
                       {stageScore.toLocaleString()} PTS
                     </strong>
                     {bestSongGrade && bestSongScore != null && (
-                      <span className="text-[var(--ff-mint)]">
+                      <span className="text-[var(--wm-mint)]">
                         {' '}
                         · BEST {bestSongGrade} · {bestSongScore.toLocaleString()}
                       </span>
@@ -164,7 +189,7 @@ export function PauseMenu({
                   <span>
                     LAP {lap} · {formatLapTime(lapTime)}
                     {lastLapTime != null && (
-                      <span className="text-[var(--ff-cream)]/75">
+                      <span className="text-[var(--wm-silk)]/75">
                         {' '}
                         (LAST {formatLapTime(lastLapTime)})
                       </span>
@@ -173,50 +198,50 @@ export function PauseMenu({
                 </div>
               </div>
 
-              {/* Primary + Symmetric Actions */}
-              <div className="space-y-2">
+              {/* Flat Flush Walkman Transport Key Bank */}
+              <div className="wm-key-bank flex flex-col">
                 <button
                   type="button"
                   onClick={onResume}
-                  className="ff-shadow-ink ff-display w-full cursor-pointer rounded-[2px] bg-[var(--ff-pink)] py-2.5 text-sm font-black tracking-[0.2em] text-[var(--ff-cream)] uppercase transition hover:brightness-110 active:translate-y-[1px]"
+                  className="wm-btn-well wm-btn-play ff-mono w-full cursor-pointer py-2.5 text-xs font-black tracking-[0.2em] uppercase"
                 >
-                  RESUME [P]
+                  ▶ RESUME [P]
                 </button>
 
-                <div className="grid grid-cols-2 gap-2 text-xs font-bold tracking-[0.12em] uppercase">
+                <div className="grid grid-cols-2 gap-[1px] text-[11px] font-bold tracking-[0.12em] uppercase">
                   <button
                     type="button"
                     onClick={() => {
                       onRestartRun?.();
                       onResume();
                     }}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel-hi)] py-2 text-[var(--ff-cream)] transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]"
+                    className="wm-btn-well ff-mono cursor-pointer py-2 text-[var(--wm-silk)] hover:text-[var(--wm-mint)]"
                   >
-                    RESTART
+                    ↺ RESTART
                   </button>
                   <button
                     type="button"
                     onClick={onOpenTrackLoader}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel-hi)] py-2 text-[var(--ff-cream)] transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]"
+                    className="wm-btn-well ff-mono cursor-pointer py-2 text-[var(--wm-silk)] hover:text-[var(--wm-mint)]"
                   >
-                    CASSETTES [M]
+                    ⏏ CASSETTES [M]
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 text-xs font-bold tracking-[0.12em] uppercase">
+                <div className="grid grid-cols-2 gap-[1px] text-[11px] font-bold tracking-[0.12em] uppercase">
                   <button
                     type="button"
                     onClick={() => setView('options')}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel-hi)] py-2 text-[var(--ff-cream)] transition hover:border-[var(--ff-gold)] hover:text-[var(--ff-gold)]"
+                    className="wm-btn-well ff-mono cursor-pointer py-2 text-[var(--wm-silk)] hover:text-[var(--wm-amber)]"
                   >
-                    OPTIONS
+                    ≡ OPTIONS
                   </button>
                   <button
                     type="button"
                     onClick={() => setView('controls')}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel-hi)] py-2 text-[var(--ff-cream)] transition hover:border-[var(--ff-gold)] hover:text-[var(--ff-gold)]"
+                    className="wm-btn-well ff-mono cursor-pointer py-2 text-[var(--wm-silk)] hover:text-[var(--wm-amber)]"
                   >
-                    CONTROLS
+                    ⌨ CONTROLS
                   </button>
                 </div>
 
@@ -224,42 +249,55 @@ export function PauseMenu({
                   <button
                     type="button"
                     onClick={onReturnToMainMenu}
-                    className="w-full cursor-pointer rounded-[2px] border border-[rgba(255,59,127,0.45)] bg-transparent py-2 text-xs font-bold tracking-[0.14em] text-[#FF7DA8] uppercase transition hover:border-[var(--ff-pink)] hover:bg-[rgba(255,59,127,0.12)] hover:text-[var(--ff-cream)]"
+                    className="wm-btn-well ff-mono w-full cursor-pointer py-2 text-[11px] font-bold tracking-[0.14em] text-[#ff8aa9] uppercase hover:text-[var(--wm-silk)]"
                   >
-                    EXIT TO TITLE
+                    ■ EXIT TO TITLE
                   </button>
                 )}
               </div>
 
-              {/* Discrete Dev Footer Bar */}
-              <div className="ff-mono flex items-center justify-between border-t border-[var(--ff-border)] pt-2.5 text-[10px] text-[var(--ff-muted)]">
-                <span className="font-bold tracking-widest uppercase">DEV</span>
-                <div className="flex flex-wrap items-center gap-1.5">
+              {/* Rigid 4-Column Hardware Service / DEV Block */}
+              <div className="wm-lcd rounded-[2px] p-1.5">
+                <div className="ff-mono mb-1 flex items-center justify-between px-1 text-[9px] font-bold tracking-[0.2em] text-[var(--wm-silk-dim)] uppercase">
+                  <span>DEV</span>
+                  <span className="opacity-65">SERVICE BUS</span>
+                </div>
+                <div className="wm-key-bank ff-mono grid grid-cols-4 text-[9px] font-bold">
                   <button
                     type="button"
                     onClick={onToggleDebug}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-2 py-0.5 font-semibold text-[var(--ff-muted)] transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-cream)]"
+                    className="wm-btn-well cursor-pointer px-1 py-1.5 text-center whitespace-nowrap text-[var(--wm-silk-dim)] hover:text-[var(--wm-silk)]"
                   >
                     [F2] TUNING
                   </button>
                   <button
                     type="button"
+                    aria-pressed={showPerfHud}
                     onClick={onTogglePerfHud}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-2 py-0.5 font-semibold text-[var(--ff-muted)] transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-cream)]"
+                    className={`wm-btn-well cursor-pointer px-1 py-1.5 text-center whitespace-nowrap ${
+                      showPerfHud
+                        ? 'text-[var(--wm-mint)]'
+                        : 'text-[var(--wm-silk-dim)] hover:text-[var(--wm-silk)]'
+                    }`}
                   >
                     [F3] PERF: {showPerfHud ? 'ON' : 'OFF'}
                   </button>
                   <button
                     type="button"
+                    aria-pressed={autopilotActive}
                     onClick={() => onToggleAutopilot?.()}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-2 py-0.5 font-semibold text-[var(--ff-muted)] transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-cream)]"
+                    className={`wm-btn-well cursor-pointer px-1 py-1.5 text-center whitespace-nowrap ${
+                      autopilotActive
+                        ? 'text-[var(--wm-mint)]'
+                        : 'text-[var(--wm-silk-dim)] hover:text-[var(--wm-silk)]'
+                    }`}
                   >
                     [F4] AUTO: {autopilotActive ? 'ON' : 'OFF'}
                   </button>
                   <button
                     type="button"
                     onClick={onOpenInspector}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-2 py-0.5 font-semibold text-[var(--ff-muted)] transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-cream)]"
+                    className="wm-btn-well cursor-pointer px-1 py-1.5 text-center whitespace-nowrap text-[var(--wm-silk-dim)] hover:text-[var(--wm-silk)]"
                   >
                     BEATMAP LAB
                   </button>
@@ -271,164 +309,139 @@ export function PauseMenu({
           {/* VIEW: OPTIONS */}
           {view === 'options' && (
             <div className="p-4">
-              <div className="mb-3 flex items-center justify-between border-b border-[var(--ff-border)] pb-2">
-                <span className="text-xs font-bold tracking-[0.16em] text-[var(--ff-gold)] uppercase">
+              <div className="mb-3 flex items-center justify-between border-b border-[var(--wm-line)] pb-2">
+                <span className="flex items-center gap-2 text-xs font-bold tracking-[0.16em] text-[var(--wm-amber)] uppercase">
+                  <WalkmanLed lit color="amber" />
                   OPTIONS
                 </span>
                 <button
                   type="button"
                   onClick={() => setView('main')}
-                  className="ff-mono cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-2.5 py-1 text-[11px] font-bold tracking-wider text-[var(--ff-cream)] transition hover:border-[var(--ff-pink)] hover:text-[var(--ff-pink)]"
+                  className="wm-btn ff-mono cursor-pointer px-2.5 py-1 text-[10px] font-black tracking-wider text-[var(--wm-silk)] uppercase hover:text-[var(--wm-play)]"
                 >
                   BACK [ESC]
                 </button>
               </div>
 
-              <div className="space-y-2 text-xs">
+              <div className="wm-key-bank flex flex-col text-xs">
                 {onToggleAutoShift && (
-                  <button
-                    type="button"
+                  <WalkmanSwitchRow
+                    label="GEARBOX [G]"
+                    valueLabel={autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
+                    active
+                    accent={autoShift ? 'amber' : 'mint'}
                     onClick={onToggleAutoShift}
-                    className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3 py-2 font-semibold transition hover:border-[var(--ff-mint)]"
-                  >
-                    <span className="tracking-wider uppercase">GEARBOX [G]</span>
-                    <span
-                      className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                        autoShift
-                          ? 'bg-[var(--ff-gold)] text-[var(--ff-ink)]'
-                          : 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
-                      }`}
-                    >
-                      {autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
-                    </span>
-                  </button>
+                  />
                 )}
 
-                <button
-                  type="button"
+                <WalkmanSwitchRow
+                  label="TOFU MODE [T]"
+                  valueLabel={tofuMode ? `ON (×2) [${sodaSpills}]` : 'OFF'}
+                  active={tofuMode}
+                  accent="mint"
                   onClick={onToggleTofuMode}
-                  className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3 py-2 font-semibold transition hover:border-[var(--ff-mint)]"
-                >
-                  <span className="tracking-wider uppercase">TOFU MODE [T]</span>
-                  <span
-                    className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                      tofuMode
-                        ? 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
-                        : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
-                    }`}
-                  >
-                    {tofuMode ? `ON (×2) [${sodaSpills}]` : 'OFF'}
-                  </span>
-                </button>
+                />
 
-                <button
-                  type="button"
+                <WalkmanSwitchRow
+                  label="DASHBOARD CUP [V]"
+                  valueLabel={SODA_SKIN_LABELS[sodaSkin]}
+                  active
+                  accent="amber"
+                  variant="cycle"
                   onClick={onCycleSodaSkin}
-                  className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3 py-2 font-semibold transition hover:border-[var(--ff-gold)]"
-                >
-                  <span className="tracking-wider uppercase">DASHBOARD CUP [V]</span>
-                  <span className="ff-mono rounded-[2px] bg-[var(--ff-gold)] px-2 py-0.5 text-[10px] font-black text-[var(--ff-ink)]">
-                    {SODA_SKIN_LABELS[sodaSkin]}
-                  </span>
-                </button>
+                />
 
-                <button
-                  type="button"
+                <WalkmanSwitchRow
+                  label="HUD [H]"
+                  valueLabel={cleanHud ? 'MINIMAL' : 'FULL'}
+                  active={cleanHud}
+                  accent="mint"
                   onClick={onToggleCleanHud}
-                  className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3 py-2 font-semibold transition hover:border-[var(--ff-mint)]"
-                >
-                  <span className="tracking-wider uppercase">HUD [H]</span>
-                  <span
-                    className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                      cleanHud
-                        ? 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
-                        : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
-                    }`}
-                  >
-                    {cleanHud ? 'MINIMAL' : 'FULL'}
-                  </span>
-                </button>
+                />
 
                 {onToggleCrt && (
-                  <button
-                    type="button"
+                  <WalkmanSwitchRow
+                    label="CRT SCANLINES"
+                    valueLabel={crtEnabled ? 'ON' : 'OFF'}
+                    active={crtEnabled}
+                    accent="play"
                     onClick={onToggleCrt}
-                    className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3 py-2 font-semibold transition hover:border-[var(--ff-pink)]"
-                  >
-                    <span className="tracking-wider uppercase">CRT SCANLINES</span>
-                    <span
-                      className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                        crtEnabled
-                          ? 'bg-[var(--ff-pink)] text-[var(--ff-cream)]'
-                          : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
-                      }`}
-                    >
-                      {crtEnabled ? 'ON' : 'OFF'}
-                    </span>
-                  </button>
+                  />
                 )}
               </div>
+
+              {onToggleCockpitModule && onApplyCockpitPreset && (
+                <CockpitOptionsSection
+                  visibility={cockpitVisibility}
+                  onToggleModule={onToggleCockpitModule}
+                  onApplyPreset={onApplyCockpitPreset}
+                  visorPhotoUrl={visorPhotoUrl}
+                  onUploadVisorPhoto={onUploadVisorPhoto}
+                  onClearVisorPhoto={onClearVisorPhoto}
+                />
+              )}
             </div>
           )}
 
           {/* VIEW: CONTROLS */}
           {view === 'controls' && (
             <div className="p-4">
-              <div className="mb-3 flex items-center justify-between border-b border-[var(--ff-border)] pb-2">
-                <span className="text-xs font-bold tracking-[0.16em] text-[var(--ff-gold)] uppercase">
+              <div className="mb-3 flex items-center justify-between border-b border-[var(--wm-line)] pb-2">
+                <span className="flex items-center gap-2 text-xs font-bold tracking-[0.16em] text-[var(--wm-amber)] uppercase">
+                  <WalkmanLed lit color="amber" />
                   CONTROLS
                 </span>
                 <button
                   type="button"
                   onClick={() => setView('main')}
-                  className="ff-mono cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-2.5 py-1 text-[11px] font-bold tracking-wider text-[var(--ff-cream)] transition hover:border-[var(--ff-pink)] hover:text-[var(--ff-pink)]"
+                  className="wm-btn ff-mono cursor-pointer px-2.5 py-1 text-[10px] font-black tracking-wider text-[var(--wm-silk)] uppercase hover:text-[var(--wm-play)]"
                 >
                   BACK [ESC]
                 </button>
               </div>
 
-              <div className="grid grid-cols-2 gap-x-3 gap-y-2 rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-3 text-[11px] text-[var(--ff-cream)]">
+              <div className="wm-lcd grid grid-cols-2 gap-x-3 gap-y-2 rounded-[2px] p-3 text-[11px] text-[var(--wm-silk)]">
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-mint)]">WASD / ARROWS</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Steer &amp; Gas</span>
+                  <span className="ff-mono font-bold text-[var(--wm-mint)]">WASD / ARROWS</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Steer &amp; Gas</span>
                 </div>
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-pink)]">S / DOWN + STEER</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Drift</span>
+                  <span className="ff-mono font-bold text-[var(--wm-play)]">S / DOWN + STEER</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Drift</span>
                 </div>
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-gold)]">SPACE / SHIFT</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Shift Up/Down</span>
+                  <span className="ff-mono font-bold text-[var(--wm-amber)]">SPACE / SHIFT</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Shift Up/Down</span>
                 </div>
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-mint)]">G</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Auto-Shift</span>
+                  <span className="ff-mono font-bold text-[var(--wm-mint)]">G</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Auto-Shift</span>
                 </div>
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-gold)]">T</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Tofu Mode</span>
+                  <span className="ff-mono font-bold text-[var(--wm-amber)]">T</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Tofu Mode</span>
                 </div>
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-gold)]">V</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Cup Skin</span>
+                  <span className="ff-mono font-bold text-[var(--wm-amber)]">V</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Cup Skin</span>
                 </div>
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-mint)]">C</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Tape Widget</span>
+                  <span className="ff-mono font-bold text-[var(--wm-mint)]">C</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Tape Widget</span>
                 </div>
                 <div>
-                  <span className="ff-mono font-bold text-[var(--ff-mint)]">H</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Minimal HUD</span>
+                  <span className="ff-mono font-bold text-[var(--wm-mint)]">H</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Minimal HUD</span>
                 </div>
-                <div className="col-span-2 border-t border-[var(--ff-border)] pt-1.5 text-center text-[10px]">
-                  <span className="ff-mono font-bold text-[var(--ff-pink)]">P / ESC</span>{' '}
-                  <span className="text-[var(--ff-muted)]">Pause / Resume</span>
+                <div className="col-span-2 border-t border-[var(--wm-line)] pt-1.5 text-center text-[10px]">
+                  <span className="ff-mono font-bold text-[var(--wm-play)]">P / ESC</span>{' '}
+                  <span className="text-[var(--wm-silk-dim)]">Pause / Resume</span>
                 </div>
               </div>
             </div>
           )}
         </div>
-      </div>
+      </WalkmanModalFrame>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { resetTuning, tuning } from '@src/config/tuning';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawMelonSodaInset, MelonSoda } from './MelonSoda';
+import { drawMelonSodaInset, MelonSoda, SODA_SKINS } from './MelonSoda';
 
 describe('MelonSoda & Tofu Mode (M5)', () => {
   beforeEach(() => {
@@ -188,5 +188,17 @@ describe('MelonSoda & Tofu Mode (M5)', () => {
     expect(fillTextCalls.join(' ')).not.toContain('GROOVE');
     expect(fillTextCalls.join(' ')).not.toContain('CREST!');
     expect(fillTextCalls.join(' ')).not.toContain('SLOSH');
+
+    fillTextCalls.length = 0;
+    for (const skin of SODA_SKINS) {
+      soda.skin = skin;
+      drawMelonSodaInset(mockCtx, soda, 360, 1);
+    }
+    expect(fillTextCalls).toEqual([
+      'SODA // x2',
+      'TOFU CUP // x2',
+      'POCARI // x2',
+      'BOSS CAN // x2',
+    ]);
   });
 });

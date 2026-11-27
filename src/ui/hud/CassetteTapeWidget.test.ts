@@ -16,13 +16,10 @@ describe('CassetteTapeWidget', () => {
     beatInBar: 1,
     sectionRole: 'drop' as const,
     barEnergy: 0.8,
-    filterCutoffHz: 12000,
-    groove: 75,
     grooveTier: 'HIGH' as const,
     tofuMode: true,
     roadBarIndex: 8,
     totalBars: 32,
-    speedRatio: 0.85,
     isSlack: false,
     visible: true,
     onToggleVisible: vi.fn(),
@@ -68,7 +65,6 @@ describe('CassetteTapeWidget', () => {
     const text = renderClean(
       createElement(CassetteTapeWidget, {
         ...defaultProps,
-        groove: 95,
         grooveTier: 'OVERDRIVE',
       }),
     );

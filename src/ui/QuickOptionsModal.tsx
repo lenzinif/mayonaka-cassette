@@ -1,5 +1,11 @@
 import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
-import { useEffect } from 'react';
+import { useEffect, useId } from 'react';
+import { CockpitOptionsSection } from './cockpit/CockpitOptionsSection';
+import {
+  COCKPIT_PRESET_LUXURY,
+  type CockpitVisibility,
+} from './cockpit/cockpitSettings';
+import { WalkmanModalFrame, WalkmanSwitchRow } from './walkman/WalkmanChrome';
 
 export interface QuickOptionsModalProps {
   open: boolean;
@@ -14,10 +20,16 @@ export interface QuickOptionsModalProps {
   onToggleCleanHud: () => void;
   crtEnabled: boolean;
   onToggleCrt: () => void;
+  cockpitVisibility?: CockpitVisibility;
+  visorPhotoUrl?: string | null;
+  onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
+  onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
+  onUploadVisorPhoto?: (file: File) => void;
+  onClearVisorPhoto?: () => void;
 }
 
 /**
- * Mayonaka Hi-Fi J-Card Settings & Options Modal.
+ * Mayonaka Walkman Hardware DIP Switches & Settings Modal (`WM-86 DIP SWITCHES`).
  */
 export function QuickOptionsModal({
   open,
@@ -32,12 +44,21 @@ export function QuickOptionsModal({
   onToggleCleanHud,
   crtEnabled,
   onToggleCrt,
+  cockpitVisibility = COCKPIT_PRESET_LUXURY,
+  visorPhotoUrl = null,
+  onToggleCockpitModule,
+  onApplyCockpitPreset,
+  onUploadVisorPhoto,
+  onClearVisorPhoto,
 }: QuickOptionsModalProps) {
+  const titleId = useId();
+
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
+      if (e.key === 'Escape' || e.code === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
         onClose();
       }
     };
@@ -52,114 +73,84 @@ export function QuickOptionsModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#0B0E1E]/80 p-4 text-[var(--ff-cream)] select-none"
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#070911]/82 p-4 text-[var(--wm-silk)] select-none"
       role="dialog"
       aria-modal="true"
-      aria-label="Options"
+      aria-labelledby={titleId}
     >
-      <div
-        className="ff-shadow-ink relative flex w-full max-w-md overflow-hidden rounded-[2px] border-2 border-[var(--ff-cream)] bg-[var(--ff-panel)]"
-        style={{ colorScheme: 'dark' }}
+      <WalkmanModalFrame
+        title="OPTIONS"
+        jpSubtitle="設定スイッチ"
+        modelTag="WM-86 DIP SWITCHES"
+        titleId={titleId}
+        maxWidthClass="max-w-md"
+        maxHeightClass="max-h-[90vh]"
+        headerRight={
+          <button
+            type="button"
+            onClick={onClose}
+            className="wm-btn ff-mono cursor-pointer px-2.5 py-1 text-[10px] font-black tracking-wider text-[var(--wm-silk)] uppercase hover:text-[var(--wm-play)]"
+          >
+            BACK [ESC]
+          </button>
+        }
       >
-        <div className="ff-obi-v w-2.5 shrink-0" />
-
-        <div className="flex-1">
-          {/* Cream J-Card Header */}
-          <div className="flex items-center justify-between bg-[var(--ff-cream)] px-4 py-2.5 text-[var(--ff-ink)]">
-            <span className="ff-display text-base font-black italic tracking-wider uppercase">
-              OPTIONS
-            </span>
-            <button
-              type="button"
-              onClick={onClose}
-              className="ff-mono cursor-pointer rounded-[2px] border-2 border-[var(--ff-ink)] px-2.5 py-0.5 text-[10px] font-black tracking-wider text-[var(--ff-ink)] transition hover:bg-[var(--ff-pink)] hover:text-[var(--ff-cream)]"
-            >
-              BACK [ESC]
-            </button>
-          </div>
-
-          <div className="space-y-2 p-4 text-xs">
-            <button
-              type="button"
+        <div className="ff-scroll overflow-y-auto p-4">
+          <div className="wm-key-bank flex flex-col text-xs">
+            <WalkmanSwitchRow
+              label="GEARBOX [G]"
+              valueLabel={autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
+              active
+              accent={autoShift ? 'amber' : 'mint'}
               onClick={onToggleAutoShift}
-              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-mint)]"
-            >
-              <span className="font-bold tracking-wider uppercase">GEARBOX [G]</span>
-              <span
-                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                  autoShift
-                    ? 'bg-[var(--ff-gold)] text-[var(--ff-ink)]'
-                    : 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
-                }`}
-              >
-                {autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
-              </span>
-            </button>
+            />
 
-            <button
-              type="button"
+            <WalkmanSwitchRow
+              label="TOFU MODE [T]"
+              valueLabel={tofuMode ? 'ON (×2)' : 'OFF'}
+              active={tofuMode}
+              accent="mint"
               onClick={onToggleTofuMode}
-              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-mint)]"
-            >
-              <span className="font-bold tracking-wider uppercase">TOFU MODE [T]</span>
-              <span
-                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                  tofuMode
-                    ? 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
-                    : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
-                }`}
-              >
-                {tofuMode ? 'ON (×2)' : 'OFF'}
-              </span>
-            </button>
+            />
 
-            <button
-              type="button"
+            <WalkmanSwitchRow
+              label="DASHBOARD CUP [V]"
+              valueLabel={SODA_SKIN_LABELS[sodaSkin]}
+              active
+              accent="amber"
+              variant="cycle"
               onClick={onCycleSodaSkin}
-              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-gold)]"
-            >
-              <span className="font-bold tracking-wider uppercase">DASHBOARD CUP [V]</span>
-              <span className="ff-mono rounded-[2px] bg-[var(--ff-gold)] px-2 py-0.5 text-[10px] font-black text-[var(--ff-ink)]">
-                {SODA_SKIN_LABELS[sodaSkin]}
-              </span>
-            </button>
+            />
 
-            <button
-              type="button"
+            <WalkmanSwitchRow
+              label="HUD [H]"
+              valueLabel={cleanHud ? 'MINIMAL' : 'FULL'}
+              active={cleanHud}
+              accent="mint"
               onClick={onToggleCleanHud}
-              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-mint)]"
-            >
-              <span className="font-bold tracking-wider uppercase">HUD [H]</span>
-              <span
-                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                  cleanHud
-                    ? 'bg-[var(--ff-mint)] text-[var(--ff-ink)]'
-                    : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
-                }`}
-              >
-                {cleanHud ? 'MINIMAL' : 'FULL'}
-              </span>
-            </button>
+            />
 
-            <button
-              type="button"
+            <WalkmanSwitchRow
+              label="CRT SCANLINES"
+              valueLabel={crtEnabled ? 'ON' : 'OFF'}
+              active={crtEnabled}
+              accent="play"
               onClick={onToggleCrt}
-              className="flex w-full cursor-pointer items-center justify-between rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] px-3.5 py-2.5 transition hover:border-[var(--ff-pink)]"
-            >
-              <span className="font-bold tracking-wider uppercase">CRT SCANLINES</span>
-              <span
-                className={`ff-mono rounded-[2px] px-2 py-0.5 text-[10px] font-black ${
-                  crtEnabled
-                    ? 'bg-[var(--ff-pink)] text-[var(--ff-cream)]'
-                    : 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
-                }`}
-              >
-                {crtEnabled ? 'ON' : 'OFF'}
-              </span>
-            </button>
+            />
           </div>
+
+          {onToggleCockpitModule && onApplyCockpitPreset && (
+            <CockpitOptionsSection
+              visibility={cockpitVisibility}
+              onToggleModule={onToggleCockpitModule}
+              onApplyPreset={onApplyCockpitPreset}
+              visorPhotoUrl={visorPhotoUrl}
+              onUploadVisorPhoto={onUploadVisorPhoto}
+              onClearVisorPhoto={onClearVisorPhoto}
+            />
+          )}
         </div>
-      </div>
+      </WalkmanModalFrame>
     </div>
   );
 }

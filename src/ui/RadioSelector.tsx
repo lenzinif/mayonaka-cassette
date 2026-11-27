@@ -2,6 +2,7 @@ import type { RunGrade, TrackLibrary } from '@src/audio/TrackLibrary';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, RunSummary, TelemetrySnapshot } from '@src/engine/Game';
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { WalkmanLed, WalkmanModalFrame } from './walkman/WalkmanChrome';
 
 export interface RadioSelectorProps {
   bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
@@ -12,16 +13,16 @@ export interface RadioSelectorProps {
 }
 
 const GRADE_BADGE_STYLES: Readonly<Record<RunGrade, string>> = {
-  SSS: 'border-[var(--ff-gold)] bg-[var(--ff-gold)] text-[var(--ff-ink)]',
-  S: 'border-[var(--ff-mint)] bg-[var(--ff-mint)] text-[var(--ff-ink)]',
-  A: 'border-[var(--ff-cream)] bg-[var(--ff-cream)] text-[var(--ff-ink)]',
-  B: 'border-[var(--ff-pink)] bg-[var(--ff-pink)] text-[var(--ff-cream)]',
-  C: 'border-[var(--ff-muted)] bg-[var(--ff-panel-hi)] text-[var(--ff-cream)]',
+  SSS: 'border-[var(--wm-amber)] bg-[var(--wm-amber)] text-[#131622]',
+  S: 'border-[var(--wm-mint)] bg-[var(--wm-mint)] text-[#090b12]',
+  A: 'border-[var(--wm-silk)] bg-[var(--wm-silk)] text-[#131622]',
+  B: 'border-[var(--wm-play)] bg-[var(--wm-play)] text-[var(--wm-silk)]',
+  C: 'border-[var(--wm-line)] bg-[#191d2d] text-[var(--wm-silk)]',
 };
 
 /**
- * M6 Stage Fork Radio Selector & End-of-Run Grade Screen
- * Harmonized under the Mayonaka Hi-Fi J-Card design system.
+ * M6 Stage Fork Radio Selector & End-of-Run Grade Screen.
+ * Unified under the flat matte Sony Walkman hardware language.
  */
 export function RadioSelector({
   bridge,
@@ -62,6 +63,11 @@ export function RadioSelector({
     } else if (dialog.open && typeof dialog.close === 'function') {
       dialog.close();
     }
+    return () => {
+      if (dialog.open && typeof dialog.close === 'function') {
+        dialog.close();
+      }
+    };
   }, [runSummary]);
 
   const forkActive = snap?.forkActive ?? false;
@@ -75,26 +81,27 @@ export function RadioSelector({
       {/* 1. Stage Fork Selector Overlay */}
       {forkActive && leftOpt && rightOpt && (
         <div className="pointer-events-none absolute inset-x-0 top-20 z-10 flex justify-center px-4 select-none [contain:layout_style_paint] [transform:translateZ(0)]">
-          <div className="ff-shadow-ink pointer-events-auto w-full max-w-xl overflow-hidden rounded-[2px] border-2 border-[var(--ff-cream)] bg-[#12172E]/95 text-[var(--ff-cream)]">
-            <div className="ff-obi-h h-[3px] w-full" />
+          <div className="wm-shell wm-faceplate pointer-events-auto w-full max-w-xl overflow-hidden text-[var(--wm-silk)]">
+            <div className="wm-accent-strip" />
             <div className="p-3">
               <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase">
-                <span className="text-[var(--ff-gold)]">
+                <span className="flex items-center gap-1.5 text-[var(--wm-amber)]">
+                  <WalkmanLed lit color="amber" />
                   NEXT STAGE — STEER OR PRESS 1 / 2
                 </span>
-                <span className="ff-mono text-[var(--ff-mint)]">
+                <span className="ff-mono text-[var(--wm-mint)]">
                   {Math.round(forkProgress * 100)}%
                 </span>
               </div>
 
-              <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-[2px] bg-[var(--ff-ink)]">
+              <div className="wm-lcd mt-1.5 h-1.5 w-full overflow-hidden rounded-[1px] p-[1px]">
                 <div
-                  className="ff-obi-h h-full w-full origin-left will-change-transform"
+                  className="wm-accent-strip h-full w-full origin-left will-change-transform"
                   style={{ transform: `scaleX(${Math.max(0, Math.min(1, forkProgress))})` }}
                 />
               </div>
 
-              <div className="mt-2.5 grid grid-cols-2 gap-2.5">
+              <div className="wm-key-bank mt-2.5 grid grid-cols-2">
                 {/* Left Branch */}
                 <button
                   type="button"
@@ -102,30 +109,30 @@ export function RadioSelector({
                     onSelectForkBranch?.('left');
                     e.currentTarget.blur();
                   }}
-                  className={`cursor-pointer rounded-[2px] border-2 p-2.5 text-left transition ${
+                  className={`wm-btn-well cursor-pointer p-2.5 text-left ${
                     forkChoice === 'left'
-                      ? 'border-[var(--ff-mint)] bg-[var(--ff-ink)]'
-                      : 'border-[var(--ff-border)] bg-[var(--ff-ink)]/70 opacity-75 hover:border-[var(--ff-mint)] hover:opacity-100'
+                      ? 'border-l-[3px] border-l-[var(--wm-mint)] bg-[#22283e]'
+                      : 'border-l-[3px] border-l-transparent opacity-78 hover:opacity-100'
                   }`}
                 >
                   <div className="flex items-center justify-between text-[10px] font-bold tracking-wider uppercase">
-                    <span className="text-[var(--ff-mint)]">◄ LEFT LANE [1]</span>
+                    <span className="text-[var(--wm-mint)]">◄ LEFT LANE [1]</span>
                     {forkChoice === 'left' && (
-                      <span className="ff-mono rounded-[2px] bg-[var(--ff-mint)] px-1.5 py-[1px] text-[9px] font-black text-[var(--ff-ink)]">
+                      <span className="ff-mono rounded-[1px] bg-[var(--wm-mint)] px-1.5 py-[1px] text-[9px] font-black text-[#090b12]">
                         LOCKED
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 text-[10px] font-bold tracking-widest text-[var(--ff-pink)] uppercase">
+                  <div className="mt-1 text-[10px] font-bold tracking-widest text-[var(--wm-play)] uppercase">
                     {leftOpt.label}
                   </div>
-                  <div className="truncate text-xs font-extrabold text-[var(--ff-cream)]">
+                  <div className="truncate text-xs font-extrabold text-[var(--wm-silk)]">
                     {leftOpt.artist} — {leftOpt.title}
                   </div>
-                  <div className="ff-mono mt-1 flex items-center justify-between text-[10px] text-[var(--ff-muted)]">
+                  <div className="ff-mono mt-1 flex items-center justify-between text-[10px] text-[var(--wm-silk-dim)]">
                     <span>{leftOpt.bpm.toFixed(1)} BPM</span>
                     {leftOpt.bestScore !== null && leftOpt.bestGrade !== null ? (
-                      <span className="text-[var(--ff-mint)]">
+                      <span className="text-[var(--wm-mint)]">
                         BEST {leftOpt.bestGrade} · {leftOpt.bestScore.toLocaleString()}
                       </span>
                     ) : (
@@ -141,42 +148,42 @@ export function RadioSelector({
                     onSelectForkBranch?.('right');
                     e.currentTarget.blur();
                   }}
-                  className={`cursor-pointer rounded-[2px] border-2 p-2.5 text-left transition ${
+                  className={`wm-btn-well cursor-pointer p-2.5 text-left ${
                     forkChoice === 'right'
-                      ? 'border-[var(--ff-gold)] bg-[var(--ff-ink)]'
-                      : 'border-[var(--ff-border)] bg-[var(--ff-ink)]/70 opacity-75 hover:border-[var(--ff-gold)] hover:opacity-100'
+                      ? 'border-r-[3px] border-r-[var(--wm-amber)] bg-[#22283e]'
+                      : 'border-r-[3px] border-r-transparent opacity-78 hover:opacity-100'
                   }`}
                 >
                   <div className="flex items-center justify-between text-[10px] font-bold tracking-wider uppercase">
                     {forkChoice === 'right' ? (
-                      <span className="ff-mono rounded-[2px] bg-[var(--ff-gold)] px-1.5 py-[1px] text-[9px] font-black text-[var(--ff-ink)]">
+                      <span className="ff-mono rounded-[1px] bg-[var(--wm-amber)] px-1.5 py-[1px] text-[9px] font-black text-[#131622]">
                         LOCKED
                       </span>
                     ) : (
                       <span />
                     )}
-                    <span className="text-[var(--ff-gold)]">RIGHT LANE [2] ►</span>
+                    <span className="text-[var(--wm-amber)]">RIGHT LANE [2] ►</span>
                   </div>
-                  <div className="mt-1 text-[10px] font-bold tracking-widest text-[var(--ff-mint)] uppercase">
+                  <div className="mt-1 text-[10px] font-bold tracking-widest text-[var(--wm-mint)] uppercase">
                     {rightOpt.label}
                   </div>
-                  <div className="truncate text-xs font-extrabold text-[var(--ff-cream)]">
+                  <div className="truncate text-xs font-extrabold text-[var(--wm-silk)]">
                     {rightOpt.mode === 'finishRun'
                       ? rightOpt.title
                       : `${rightOpt.artist} — ${rightOpt.title}`}
                   </div>
-                  <div className="ff-mono mt-1 flex items-center justify-between text-[10px] text-[var(--ff-muted)]">
+                  <div className="ff-mono mt-1 flex items-center justify-between text-[10px] text-[var(--wm-silk-dim)]">
                     <span>
                       {rightOpt.mode === 'finishRun'
                         ? rightOpt.artist
                         : `${rightOpt.bpm.toFixed(1)} BPM`}
                     </span>
                     {rightOpt.bestScore !== null && rightOpt.bestGrade !== null ? (
-                      <span className="text-[var(--ff-mint)]">
+                      <span className="text-[var(--wm-mint)]">
                         BEST {rightOpt.bestGrade} · {rightOpt.bestScore.toLocaleString()}
                       </span>
                     ) : (
-                      <span className="text-[var(--ff-gold)]">NEW STAGE</span>
+                      <span className="text-[var(--wm-amber)]">NEW STAGE</span>
                     )}
                   </div>
                 </button>
@@ -190,149 +197,145 @@ export function RadioSelector({
       <dialog
         ref={dialogRef}
         aria-labelledby={dialogTitleId}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) setRunSummary(null);
+        }}
         onClose={() => {
           if (dialogRef.current) {
             dialogRef.current.returnValue = '';
           }
           setRunSummary(null);
         }}
-        className="ff-shadow-pink m-auto max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-[2px] border-2 border-[var(--ff-cream)] bg-[var(--ff-panel)] p-0 text-xs text-[var(--ff-cream)] open:flex"
-        style={{ colorScheme: 'dark', scrollbarColor: '#FF3B7F #0B0E1E', scrollbarWidth: 'thin' }}
+        className="m-auto max-h-[90vh] w-full max-w-2xl overflow-hidden bg-transparent p-0 text-xs text-[var(--wm-silk)] open:flex"
+        style={{ colorScheme: 'dark' }}
       >
         {runSummary && (
-          <div className="flex w-full">
-            <div className="ff-obi-v w-2.5 shrink-0" />
-
-            <div className="flex min-w-0 flex-1 flex-col">
-              {/* Cream J-Card Header */}
-              <div className="flex items-center justify-between bg-[var(--ff-cream)] px-5 py-3 text-[var(--ff-ink)]">
-                <div>
-                  <div className="ff-mono text-[10px] font-bold tracking-[0.2em] uppercase opacity-70">
-                    88.4 FM · RUN COMPLETE
-                  </div>
-                  <h2
-                    id={dialogTitleId}
-                    className="ff-display text-lg font-black italic tracking-wider uppercase"
-                  >
-                    STAGE RECORDS
-                  </h2>
+          <WalkmanModalFrame
+            title="STAGE RECORDS"
+            subtitle="88.4 FM · RUN COMPLETE"
+            jpSubtitle="走行記録"
+            modelTag="WM-86 TAPE LOG"
+            titleId={dialogTitleId}
+            maxWidthClass="max-w-2xl"
+            maxHeightClass="max-h-[90vh]"
+            headerRight={
+              <div
+                className={`rounded-[2px] border px-3.5 py-1 text-center ${
+                  GRADE_BADGE_STYLES[runSummary.overallGrade]
+                }`}
+              >
+                <div className="text-[8px] font-black tracking-widest uppercase">GRADE</div>
+                <div className="ff-display text-xl leading-none font-black">
+                  {runSummary.overallGrade}
                 </div>
-                <div
-                  className={`rounded-[2px] border-2 px-4 py-1 text-center ${
-                    GRADE_BADGE_STYLES[runSummary.overallGrade]
-                  }`}
-                >
-                  <div className="text-[8px] font-black tracking-widest uppercase">GRADE</div>
-                  <div className="ff-display text-2xl leading-none font-black italic">
-                    {runSummary.overallGrade}
+              </div>
+            }
+          >
+            <div className="ff-scroll flex flex-col gap-4 overflow-y-auto p-4 sm:p-5">
+              {/* Aggregate Run Metrics */}
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
+                <div className="wm-lcd rounded-[2px] p-2.5">
+                  <div className="text-[10px] font-bold text-[var(--wm-silk-dim)]">SCORE</div>
+                  <div className="ff-mono mt-0.5 text-base font-black text-[var(--wm-amber)]">
+                    {runSummary.totalScore.toLocaleString()}
+                  </div>
+                </div>
+                <div className="wm-lcd rounded-[2px] p-2.5">
+                  <div className="text-[10px] font-bold text-[var(--wm-silk-dim)]">PEAK GROOVE</div>
+                  <div className="ff-mono mt-0.5 text-base font-black text-[var(--wm-play)]">
+                    {runSummary.maxGroove}%
+                  </div>
+                </div>
+                <div className="wm-lcd rounded-[2px] p-2.5">
+                  <div className="text-[10px] font-bold text-[var(--wm-silk-dim)]">
+                    PERFECT SHIFTS
+                  </div>
+                  <div className="ff-mono mt-0.5 text-base font-black text-[var(--wm-mint)]">
+                    {runSummary.totalPerfectShifts}
+                  </div>
+                </div>
+                <div className="wm-lcd rounded-[2px] p-2.5">
+                  <div className="text-[10px] font-bold text-[var(--wm-silk-dim)]">DROP SYNCS</div>
+                  <div className="ff-mono mt-0.5 text-base font-black text-[var(--wm-amber)]">
+                    {runSummary.totalDropSyncs}
+                  </div>
+                </div>
+                <div className="wm-lcd col-span-2 rounded-[2px] p-2.5 sm:col-span-1">
+                  <div className="text-[10px] font-bold text-[var(--wm-silk-dim)]">
+                    BUMPS / SPILLS
+                  </div>
+                  <div className="ff-mono mt-0.5 text-base font-black text-[var(--wm-silk)]">
+                    {runSummary.totalCollisions} / {runSummary.totalSodaSpills}
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-col gap-4 p-5">
-                {/* Aggregate Run Metrics */}
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-5">
-                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
-                    <div className="text-[10px] font-bold text-[var(--ff-muted)]">SCORE</div>
-                    <div className="ff-mono mt-0.5 text-base font-black text-[var(--ff-gold)]">
-                      {runSummary.totalScore.toLocaleString()}
-                    </div>
-                  </div>
-                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
-                    <div className="text-[10px] font-bold text-[var(--ff-muted)]">PEAK GROOVE</div>
-                    <div className="ff-mono mt-0.5 text-base font-black text-[var(--ff-pink)]">
-                      {runSummary.maxGroove}%
-                    </div>
-                  </div>
-                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
-                    <div className="text-[10px] font-bold text-[var(--ff-muted)]">
-                      PERFECT SHIFTS
-                    </div>
-                    <div className="ff-mono mt-0.5 text-base font-black text-[var(--ff-mint)]">
-                      {runSummary.totalPerfectShifts}
-                    </div>
-                  </div>
-                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
-                    <div className="text-[10px] font-bold text-[var(--ff-muted)]">DROP SYNCS</div>
-                    <div className="ff-mono mt-0.5 text-base font-black text-[var(--ff-gold)]">
-                      {runSummary.totalDropSyncs}
-                    </div>
-                  </div>
-                  <div className="rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)] p-2.5">
-                    <div className="text-[10px] font-bold text-[var(--ff-muted)]">
-                      BUMPS / SPILLS
-                    </div>
-                    <div className="ff-mono mt-0.5 text-base font-black text-[var(--ff-cream)]">
-                      {runSummary.totalCollisions} / {runSummary.totalSodaSpills}
-                    </div>
-                  </div>
+              {/* Per-Stage Breakdown */}
+              <div>
+                <div className="mb-1.5 text-[10px] font-bold tracking-[0.18em] text-[var(--wm-silk-dim)] uppercase">
+                  STAGES ({runSummary.stages.length})
                 </div>
-
-                {/* Per-Stage Breakdown */}
-                <div>
-                  <div className="mb-1.5 text-[10px] font-bold tracking-[0.18em] text-[var(--ff-muted)] uppercase">
-                    STAGES ({runSummary.stages.length})
-                  </div>
-                  <div className="divide-y divide-[var(--ff-border)] rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-ink)]">
-                    {runSummary.stages.map((st, idx) => {
-                      const savedBest = library.getBestScore(st.contentHash);
-                      return (
-                        <div
-                          key={`${st.contentHash}-${idx}`}
-                          className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5"
-                        >
-                          <div className="flex items-center gap-3">
-                            <span className="ff-mono text-xs font-black text-[var(--ff-pink)]">
-                              STAGE {String(st.stageNumber).padStart(2, '0')}
-                            </span>
-                            <div>
-                              <div className="flex items-center gap-2 font-bold text-[var(--ff-cream)]">
-                                <span>
-                                  {st.artist} — {st.title}
+                <div className="wm-lcd divide-y divide-[var(--wm-line)] rounded-[2px]">
+                  {runSummary.stages.map((st, idx) => {
+                    const savedBest = library.getBestScore(st.contentHash);
+                    return (
+                      <div
+                        key={`${st.contentHash}-${idx}`}
+                        className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5"
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className="ff-mono text-xs font-black text-[var(--wm-play)]">
+                            STAGE {String(st.stageNumber).padStart(2, '0')}
+                          </span>
+                          <div>
+                            <div className="flex items-center gap-2 font-bold text-[var(--wm-silk)]">
+                              <span>
+                                {st.artist} — {st.title}
+                              </span>
+                              {st.isNewRecord && (
+                                <span className="ff-mono rounded-[1px] bg-[var(--wm-amber)] px-1.5 py-[1px] text-[9px] font-black text-[#131622]">
+                                  NEW RECORD
                                 </span>
-                                {st.isNewRecord && (
-                                  <span className="ff-mono rounded-[2px] bg-[var(--ff-gold)] px-1.5 py-[1px] text-[9px] font-black text-[var(--ff-ink)]">
-                                    NEW RECORD
-                                  </span>
-                                )}
-                              </div>
-                              <div className="ff-mono text-[10px] text-[var(--ff-muted)]">
-                                AVG {st.avgGroove}% · PERFECT {st.perfectShifts} · DROP SYNCS{' '}
-                                {st.dropSyncs}
-                                {savedBest
-                                  ? ` · BEST ${savedBest.bestGrade} (${savedBest.bestScore.toLocaleString()})`
-                                  : ''}
-                              </div>
+                              )}
+                            </div>
+                            <div className="ff-mono text-[10px] text-[var(--wm-silk-dim)]">
+                              AVG {st.avgGroove}% · PERFECT {st.perfectShifts} · DROP SYNCS{' '}
+                              {st.dropSyncs}
+                              {savedBest
+                                ? ` · BEST ${savedBest.bestGrade} (${savedBest.bestScore.toLocaleString()})`
+                                : ''}
                             </div>
                           </div>
-
-                          <div className="ff-mono flex items-center gap-3">
-                            <span className="text-sm font-bold text-[var(--ff-cream)]">
-                              {st.score.toLocaleString()} PTS
-                            </span>
-                            <span
-                              className={`rounded-[2px] border px-2 py-0.5 text-xs font-black ${
-                                GRADE_BADGE_STYLES[st.grade]
-                              }`}
-                            >
-                              {st.grade}
-                            </span>
-                          </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
 
-                {/* Modal Actions */}
-                <div className="flex flex-wrap items-center justify-end gap-2.5 border-t border-[var(--ff-border)] pt-3">
+                        <div className="ff-mono flex items-center gap-3">
+                          <span className="text-sm font-bold text-[var(--wm-silk)]">
+                            {st.score.toLocaleString()} PTS
+                          </span>
+                          <span
+                            className={`rounded-[1px] border px-2 py-0.5 text-xs font-black ${
+                              GRADE_BADGE_STYLES[st.grade]
+                            }`}
+                          >
+                            {st.grade}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex justify-end border-t border-[var(--wm-line)] pt-3">
+                <div className="wm-key-bank ff-mono grid grid-cols-3 text-xs font-bold uppercase">
                   <button
                     type="button"
                     onClick={() => {
                       setRunSummary(null);
                       onOpenTrackLoader();
                     }}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-border)] bg-[var(--ff-panel-hi)] px-3 py-1.5 text-xs font-bold text-[var(--ff-cream)] uppercase transition hover:border-[var(--ff-mint)] hover:text-[var(--ff-mint)]"
+                    className="wm-btn-well cursor-pointer px-3 py-1.5 text-[var(--wm-silk)] hover:text-[var(--wm-mint)]"
                   >
                     CASSETTES [M]
                   </button>
@@ -340,7 +343,7 @@ export function RadioSelector({
                     type="button"
                     autoFocus
                     onClick={() => setRunSummary(null)}
-                    className="cursor-pointer rounded-[2px] border border-[var(--ff-mint)] bg-[var(--ff-ink)] px-3.5 py-1.5 text-xs font-bold text-[var(--ff-mint)] uppercase transition hover:bg-[var(--ff-mint)] hover:text-[var(--ff-ink)]"
+                    className="wm-btn-well cursor-pointer px-3.5 py-1.5 text-[var(--wm-mint)]"
                   >
                     KEEP DRIVING [ESC]
                   </button>
@@ -350,14 +353,14 @@ export function RadioSelector({
                       setRunSummary(null);
                       onRestartRun();
                     }}
-                    className="ff-shadow-ink cursor-pointer rounded-[2px] bg-[var(--ff-pink)] px-4 py-1.5 text-xs font-black tracking-wider text-[var(--ff-cream)] uppercase transition hover:brightness-110"
+                    className="wm-btn-well wm-btn-play cursor-pointer px-4 py-1.5 font-black tracking-wider"
                   >
                     RESTART RUN
                   </button>
                 </div>
               </div>
             </div>
-          </div>
+          </WalkmanModalFrame>
         )}
       </dialog>
     </>

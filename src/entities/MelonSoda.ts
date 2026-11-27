@@ -429,6 +429,13 @@ export class MelonSoda {
 
 const ICE_POSITIONS = [-8, 7] as const;
 
+const SODA_FASCIA_LABELS: Readonly<Record<SodaSkin, string>> = {
+  'melon-soda': 'SODA // x2',
+  'tofu-cup': 'TOFU CUP // x2',
+  pocari: 'POCARI // x2',
+  'boss-coffee': 'BOSS CAN // x2',
+};
+
 function computeWaveYAt(
   xNorm: number,
   baseLevelY: number,
@@ -447,12 +454,13 @@ function computeWaveYAt(
 }
 
 /**
- * Renders the 120×80 px dashboard Melon Cream Soda inset at bottom-left of the `<canvas>`
- * ONLY when Tofu Mode (`soda.active`) is enabled (AGENTS.md §4.9, docs/DESIGN.md §5).
+ * Renders the diegetic 80s JDM dashboard cup-holder shelf & Melon Cream Soda cup
+ * physically resting at bottom-left of the `<canvas>` ONLY when Tofu Mode (`soda.active`)
+ * is enabled (AGENTS.md §4.9, docs/DESIGN.md §5).
  *
  * Uses multi-mode wave interpolation (`theta`, `crestWave`, `heaveY`, `floatY`, `floatTilt`)
  * so the liquid surface, foam crest, ice cubes, vanilla float, and droplets animate at full
- * display refresh rate.
+ * display refresh rate with zero heap allocations.
  */
 export function drawMelonSodaInset(
   ctx: CanvasRenderingContext2D,
@@ -461,11 +469,6 @@ export function drawMelonSodaInset(
   alpha = 1,
 ): void {
   if (!soda.active) return;
-
-  const boxW = 120;
-  const boxH = 80;
-  const boxX = 14;
-  const boxY = canvasHeight - boxH - 14;
 
   // Interpolate all physical degrees of freedom
   const theta = soda.prevTheta + (soda.theta - soda.prevTheta) * alpha;
@@ -481,58 +484,88 @@ export function drawMelonSodaInset(
   const isSpilling = soda.spillFlash > 0.05 || soda.sloshState === 'SPILLING';
   const isCresting = soda.sloshState === 'CRESTING';
 
+  const shelfTopY = canvasHeight - 36;
+  const shelfRightX = 132;
+  const cx = 64;
+  const cupScale = 1.18;
+  const cy = canvasHeight - 48;
+
   ctx.save();
-  ctx.translate(boxX, boxY);
 
-  // 1. Dashboard inset panel background & reactive neon border
-  ctx.fillStyle = isSpilling
-    ? 'rgba(46, 6, 36, 0.94)'
-    : isCresting
-      ? 'rgba(28, 10, 44, 0.92)'
-      : 'rgba(13, 2, 33, 0.9)';
-  ctx.fillRect(0, 0, boxW, boxH);
+  // 1. Sculpted 80s JDM Luxury GT left-side dashboard ledge (leather brow + woodgrain fascia)
+  ctx.fillStyle = isSpilling ? '#26101c' : '#141118';
+  ctx.beginPath();
+  ctx.moveTo(0, shelfTopY);
+  ctx.lineTo(shelfRightX - 16, shelfTopY);
+  ctx.lineTo(shelfRightX, shelfTopY + 14);
+  ctx.lineTo(shelfRightX, canvasHeight);
+  ctx.lineTo(0, canvasHeight);
+  ctx.closePath();
+  ctx.fill();
 
-  ctx.strokeStyle = isSpilling ? '#ff2a6d' : isCresting ? '#ffd319' : '#14f1d9';
-  ctx.lineWidth = isSpilling || isCresting ? 1.5 : 1;
-  ctx.strokeRect(0.5, 0.5, boxW - 1, boxH - 1);
+  // Leather upper bevel highlight & warm saddle stitch ticks
+  ctx.fillStyle = isSpilling ? '#441a2e' : '#241e2b';
+  ctx.fillRect(0, shelfTopY, shelfRightX - 16, 2);
+  ctx.fillStyle = isSpilling ? '#ff4778' : 'rgba(214, 174, 114, 0.42)';
+  for (let sx = 4; sx < shelfRightX - 20; sx += 7) {
+    ctx.fillRect(sx, shelfTopY + 3, 4, 1);
+  }
 
-  // Header strip with static skin label + danger meter
-  ctx.fillStyle = isSpilling ? '#ff2a6d' : isCresting ? '#522608' : '#1b0938';
-  ctx.fillRect(1, 1, boxW - 2, 13);
+  // Warm woodgrain fascia strip along the front face of the dash shelf
+  const woodY = canvasHeight - 22;
+  ctx.fillStyle = '#3a1f16';
+  ctx.fillRect(0, woodY, shelfRightX - 4, 18);
+  ctx.fillStyle = '#4e2a1e';
+  for (let wx = 6; wx < shelfRightX - 10; wx += 12) {
+    ctx.fillRect(wx, woodY + 2, 4, 14);
+  }
 
-  ctx.fillStyle = isSpilling ? '#ffffff' : isCresting ? '#ffd319' : '#14f1d9';
+  // Satin brass trim line (turns coral/amber when cresting/spilling)
+  ctx.fillStyle = isSpilling ? '#ff4778' : isCresting ? '#ffbd4a' : '#d9a75c';
+  ctx.fillRect(0, woodY, shelfRightX - 4, 1);
+  ctx.fillStyle = 'rgba(217, 167, 92, 0.35)';
+  ctx.fillRect(0, canvasHeight - 4, shelfRightX, 1);
+
+  // Recessed nameplate & integrated LED danger bar + spill pips on woodgrain fascia
+  ctx.fillStyle = '#070b10';
+  ctx.fillRect(4, woodY + 3, shelfRightX - 12, 13);
+  ctx.strokeStyle = isSpilling ? '#ff4778' : 'rgba(217, 167, 92, 0.38)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(4.5, woodY + 3.5, shelfRightX - 13, 12);
+
+  ctx.fillStyle = isSpilling ? '#ffffff' : isCresting ? '#ffbd4a' : '#f4ead8';
   ctx.font = 'bold 8px monospace';
-  const skinShort =
-    soda.skin === 'tofu-cup'
-      ? 'TOFU CUP'
-      : soda.skin === 'pocari'
-        ? 'POCARI'
-        : soda.skin === 'boss-coffee'
-          ? 'BOSS CAN'
-          : 'SODA';
-  ctx.fillText(`${skinShort} // x2`, 5, 10);
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(SODA_FASCIA_LABELS[soda.skin] ?? SODA_FASCIA_LABELS['melon-soda'], 8, woodY + 12);
 
-  // Danger meter bar on right side of header
-  const meterW = 24;
-  ctx.fillStyle = '#090117';
-  ctx.fillRect(boxW - meterW - 4, 4, meterW, 6);
-  ctx.fillStyle = danger >= 0.95 ? '#ff2a6d' : danger >= 0.7 ? '#ffd319' : '#00f59b';
+  // Micro LED danger meter in fascia right side
+  const meterW = 30;
+  const meterX = shelfRightX - meterW - 12;
+  const meterY = woodY + 6;
+  ctx.fillStyle = '#121722';
+  ctx.fillRect(meterX, meterY, meterW, 4);
+  ctx.fillStyle = danger >= 0.95 ? '#ff4778' : danger >= 0.7 ? '#ffbd4a' : '#38f2c8';
   ctx.fillRect(
-    boxW - meterW - 4,
-    4,
+    meterX,
+    meterY,
     Math.min(meterW, Math.round(meterW * Math.min(1, danger))),
-    6,
+    4,
   );
 
-  // 2. Cup-holder saucer tray & pixel-art pedestal base at bottom center
-  const cx = Math.floor(boxW / 2);
-  const cy = 48;
+  // Compact spill counter pips beneath the LED bar (up to 5 pips)
+  for (let p = 0; p < 5; p++) {
+    ctx.fillStyle = p < soda.spillCount ? '#ff4778' : '#2a1c22';
+    ctx.fillRect(meterX + p * 6, meterY + 6, 4, 2);
+  }
 
-  ctx.fillStyle = '#241138';
-  ctx.fillRect(cx - 36, 70, 72, 5);
-  ctx.strokeStyle = '#5b2d86';
+  // 2. Cup-holder rubber coaster & brass well on top of the dash shelf
+  const coasterY = shelfTopY + 8;
+  ctx.fillStyle = '#09070d';
+  ctx.fillRect(cx - 38, coasterY - 1, 76, 6);
+  ctx.strokeStyle = isSpilling ? '#ff4778' : isCresting ? '#ffbd4a' : '#d9a75c';
   ctx.lineWidth = 1;
-  ctx.strokeRect(cx - 36.5, 70.5, 73, 5);
+  ctx.strokeRect(cx - 38.5, coasterY - 1.5, 77, 7);
 
   const liquidColor =
     soda.skin === 'tofu-cup'
@@ -556,17 +589,20 @@ export function drawMelonSodaInset(
         : '#9effdc';
 
   if (soda.trayLevel > 0.01) {
-    // Persistent spilled puddle on the saucer tray that grows with each spill
-    const puddleW = Math.round(22 + soda.trayLevel * 44);
+    // Persistent spilled puddle on the dashboard coaster tray that grows with each spill
+    const puddleW = Math.round(24 + soda.trayLevel * 46);
     ctx.fillStyle = liquidColor;
-    ctx.globalAlpha = 0.78;
-    ctx.fillRect(cx - Math.floor(puddleW / 2), 68, puddleW, 3);
+    ctx.globalAlpha = 0.82;
+    ctx.fillRect(cx - Math.floor(puddleW / 2), coasterY, puddleW, 3);
     ctx.globalAlpha = 1;
   }
 
-  // 3. Draw container exterior/pedestal, interior clip & multi-mode wave surface around (cx, cy)
+  // 3. Draw physical container standing on the dash shelf around (cx, cy)
   ctx.save();
   ctx.translate(cx, cy);
+  if (typeof ctx.scale === 'function') {
+    ctx.scale(cupScale, cupScale);
+  }
 
   const isCan = soda.skin === 'pocari' || soda.skin === 'boss-coffee';
   const topHalfW = isCan ? 16 : 19;
@@ -579,6 +615,9 @@ export function drawMelonSodaInset(
     ctx.fillRect(-4, 18, 8, 3);
     ctx.fillRect(-11, 20, 22, 2);
     // Red-and-white striped retro bendy straw emerging from the left rim
+    ctx.fillStyle = 'rgba(11, 8, 18, 0.8)';
+    ctx.fillRect(-16, -32, 5, 16);
+    ctx.fillRect(-21, -32, 8, 4);
     for (let sy = -31; sy < -16; sy += 2) {
       ctx.fillStyle = (sy & 2) === 0 ? '#ff2a6d' : '#ffffff';
       ctx.fillRect(-15, sy, 3, 2);
@@ -619,11 +658,11 @@ export function drawMelonSodaInset(
     }
   }
 
-  // Interior dark backdrop without slow per-frame ctx.clip() stencil layer
+  // Interior dark smoked-glass backdrop so liquid stands out cleanly against road & sky
   const minTopY = isCan ? -15 : -22;
   const maxX = isCan ? 14 : topHalfW;
   ctx.fillStyle =
-    soda.skin === 'tofu-cup' ? 'rgba(28, 36, 58, 0.88)' : 'rgba(18, 10, 38, 0.84)';
+    soda.skin === 'tofu-cup' ? 'rgba(20, 26, 44, 0.92)' : 'rgba(10, 8, 18, 0.88)';
   if (isCan) {
     ctx.fillRect(-14, -15, 28, 33);
   } else {
@@ -655,8 +694,6 @@ export function drawMelonSodaInset(
   }
 
   // Compute pixel-column wave meniscus across container width (zero ctx.clip / path tessellation)
-  // Base resting level is y = -7 (15 px below the rim at y = -22).
-  // At `theta = threshold`, the wave edge reaches right up to the rim (`y = -22`)!
   const baseLevelY = -7 + heave * 0.85;
   const slopeScale = 14 / threshold;
   const colW = 2;
@@ -709,7 +746,7 @@ export function drawMelonSodaInset(
       }
     }
 
-    // Two independent buoyant pixel-art ice cubes riding the local wave height (zero save/rotate overhead)
+    // Two independent buoyant pixel-art ice cubes riding the local wave height
     for (let i = 0; i < ICE_POSITIONS.length; i++) {
       const ix = Math.max(-11, Math.min(11, Math.round(ICE_POSITIONS[i]! + floatTilt * 2.5)));
       const iy = Math.max(
@@ -731,12 +768,10 @@ export function drawMelonSodaInset(
       Math.min(12, Math.round(computeWaveYAt(scoopX / 22, baseLevelY, theta, slopeScale, crest, threshold, phase) + 1 + floatY * 0.35)),
     );
 
-    // Pixel-stepped dome for vanilla scoop
     ctx.fillStyle = '#fff6d6';
     ctx.fillRect(scoopX - 6, scoopY - 4, 12, 4);
     ctx.fillRect(scoopX - 5, scoopY - 6, 10, 2);
     ctx.fillRect(scoopX - 3, scoopY - 7, 6, 1);
-    // Scalloped cream base
     ctx.fillStyle = '#ffebb3';
     ctx.fillRect(scoopX - 7, scoopY - 1, 14, 2);
 
@@ -751,7 +786,6 @@ export function drawMelonSodaInset(
     ctx.fillRect(scoopX + 2, scoopY - 15, 2, 2);
     ctx.fillRect(scoopX + 4, scoopY - 16, 2, 1);
   } else if (soda.skin === 'tofu-cup') {
-    // Subtle water surface specular glint in the Initial D paper cup
     const glintX = Math.max(-9, Math.min(9, Math.round(floatTilt * 4)));
     const glintY = Math.max(
       minTopY + 1,
@@ -761,8 +795,8 @@ export function drawMelonSodaInset(
     ctx.fillRect(glintX - 5, glintY, 10, 1);
   }
 
-  // 4. Container rim & outline
-  ctx.strokeStyle = isSpilling ? '#ff2a6d' : isCresting ? '#ffd319' : '#c8f6ff';
+  // 4. Crisp outer contrast silhouette & container rim
+  ctx.strokeStyle = isSpilling ? '#ff4778' : isCresting ? '#ffbd4a' : '#d6f7ff';
   ctx.lineWidth = 1.5;
   if (isCan) {
     ctx.strokeRect(-14.5, -15.5, 29, 34);
@@ -776,11 +810,12 @@ export function drawMelonSodaInset(
   }
 
   // Spill threshold warning ticks at the lip
-  ctx.fillStyle = isSpilling || isCresting ? '#ff2a6d' : '#14f1d9';
-  ctx.fillRect(-topHalfW - 3, -21, 3, 2);
-  ctx.fillRect(topHalfW, -21, 3, 2);
+  const tickY = isCan ? minTopY + 1 : -21;
+  ctx.fillStyle = isSpilling || isCresting ? '#ff4778' : '#38f2c8';
+  ctx.fillRect(-topHalfW - 3, tickY, 3, 2);
+  ctx.fillRect(topHalfW, tickY, 3, 2);
 
-  // 5. Render interpolated splash droplets arcing over the rim onto the saucer tray
+  // 5. Render interpolated splash droplets arcing over the rim onto the dash coaster
   ctx.fillStyle = liquidColor;
   for (let i = 0; i < soda.droplets.length; i++) {
     const d = soda.droplets[i]!;

@@ -1,8 +1,10 @@
 import type { PreloadProgress } from '@src/core/AssetPreloader';
 import type { SodaSkin } from '@src/entities/MelonSoda';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CockpitVisibility } from './cockpit/cockpitSettings';
 import { DriverManualModal } from './DriverManualModal';
 import { QuickOptionsModal } from './QuickOptionsModal';
+import { CassetteReel, WalkmanLed, WalkmanScrew } from './walkman/WalkmanChrome';
 
 export interface MainMenuProps {
   progress: PreloadProgress;
@@ -25,17 +27,23 @@ export interface MainMenuProps {
   onToggleCleanHud: () => void;
   crtEnabled: boolean;
   onToggleCrt: () => void;
+  cockpitVisibility?: CockpitVisibility;
+  visorPhotoUrl?: string | null;
+  onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
+  onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
+  onUploadVisorPhoto?: (file: File) => void;
+  onClearVisorPhoto?: () => void;
 }
 
 const MENU_ITEMS = [
-  { id: 'drive', label: 'DRIVE' },
-  { id: 'cassette', label: 'CASSETTES' },
-  { id: 'options', label: 'OPTIONS' },
-  { id: 'manual', label: 'GUIDE' },
+  { id: 'drive', label: 'DRIVE', glyph: '▶', code: '01' },
+  { id: 'cassette', label: 'CASSETTES', glyph: '⏏', code: '02' },
+  { id: 'options', label: 'OPTIONS', glyph: '≡', code: '03' },
+  { id: 'manual', label: 'GUIDE', glyph: '?', code: '04' },
 ] as const;
 
 /**
- * Mayonaka Hi-Fi (Future Funk 1986) Attract-Mode Title Screen.
+ * Mayonaka Walkman Title & Transport Stage (City Pop Sleeve × Flat Matte Walkman).
  * Keeps the live pixel-art sky, moon, skyline, and cruising car unobstructed in the center.
  */
 export function MainMenu({
@@ -58,14 +66,27 @@ export function MainMenu({
   onToggleCleanHud,
   crtEnabled,
   onToggleCrt,
+  cockpitVisibility,
+  visorPhotoUrl,
+  onToggleCockpitModule,
+  onApplyCockpitPreset,
+  onUploadVisorPhoto,
+  onClearVisorPhoto,
 }: MainMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [manualOpen, setManualOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const navRef = useRef<HTMLElement | null>(null);
+
+  const unlockIfNeeded = useCallback(() => {
+    if (!audioUnlocked) {
+      onUnlockAudio();
+    }
+  }, [audioUnlocked, onUnlockAudio]);
 
   const executeAction = useCallback(
     (index: number) => {
-      onUnlockAudio();
+      unlockIfNeeded();
       switch (index) {
         case 0:
           if (ready) onStartDrive();
@@ -81,13 +102,15 @@ export function MainMenu({
           break;
       }
     },
-    [ready, onStartDrive, onOpenCassetteDeck, onUnlockAudio],
+    [ready, onStartDrive, onOpenCassetteDeck, unlockIfNeeded],
   );
 
   // Keyboard navigation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      onUnlockAudio();
+      if (e.code !== 'Escape') {
+        unlockIfNeeded();
+      }
 
       if (manualOpen || optionsOpen) {
         if (e.code === 'Escape') {
@@ -104,6 +127,14 @@ export function MainMenu({
         e.preventDefault();
         setSelectedIndex((prev) => (prev - 1 + MENU_ITEMS.length) % MENU_ITEMS.length);
       } else if (e.code === 'Enter' || e.code === 'Space') {
+        const target = e.target;
+        if (
+          target instanceof HTMLButtonElement &&
+          navRef.current &&
+          !navRef.current.contains(target)
+        ) {
+          return;
+        }
         e.preventDefault();
         executeAction(selectedIndex);
       } else if (e.code === 'Digit1') {
@@ -127,13 +158,13 @@ export function MainMenu({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedIndex, executeAction, manualOpen, optionsOpen, onUnlockAudio]);
+  }, [selectedIndex, executeAction, manualOpen, optionsOpen, unlockIfNeeded]);
 
   return (
     <>
       <div
-        onClick={onUnlockAudio}
-        className="pointer-events-auto fixed inset-0 z-40 flex flex-col justify-between overflow-hidden p-5 sm:p-7 text-[var(--ff-cream)] select-none"
+        onClick={unlockIfNeeded}
+        className="pointer-events-auto absolute inset-0 z-40 flex flex-col justify-between overflow-hidden px-4 py-3.5 text-[var(--wm-silk)] select-none sm:px-6 sm:py-5"
       >
         {/* Targeted edge-only framing gradients so moon, skyline & car stay vivid */}
         <div
@@ -141,58 +172,74 @@ export function MainMenu({
           className="pointer-events-none absolute inset-x-0 top-0 h-[34%]"
           style={{
             background:
-              'linear-gradient(180deg, rgba(11,14,30,0.62) 0%, rgba(11,14,30,0.18) 65%, rgba(11,14,30,0) 100%)',
+              'linear-gradient(180deg, rgba(9,11,18,0.74) 0%, rgba(9,11,18,0.22) 68%, rgba(9,11,18,0) 100%)',
           }}
         />
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[28%]"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-[30%]"
           style={{
             background:
-              'linear-gradient(0deg, rgba(11,14,30,0.72) 0%, rgba(11,14,30,0.18) 65%, rgba(11,14,30,0) 100%)',
+              'linear-gradient(0deg, rgba(9,11,18,0.82) 0%, rgba(9,11,18,0.24) 68%, rgba(9,11,18,0) 100%)',
           }}
         />
 
-        {/* Top Bar: Minimalist Broadcast Header */}
-        <header className="relative z-10 flex w-full items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-[11px] font-bold tracking-[0.22em] uppercase text-[var(--ff-cream)]">
-            <span
-              className="inline-block h-2 w-2 rounded-full bg-[var(--ff-mint)]"
-              style={{ boxShadow: '0 0 8px rgba(46, 232, 196, 0.75)' }}
-            />
-            <span className="ff-mono">88.4 FM</span>
-            <span className="opacity-45">·</span>
-            <span className="text-[10px] tracking-[0.18em] opacity-75">TOKYO BAY</span>
+        {/* Top Editorial Hairline Tuner Bar */}
+        <header className="relative z-10 flex w-full items-center gap-3 border-b border-[var(--wm-line)] pb-2">
+          <div className="flex shrink-0 items-center gap-2 text-[10px] font-bold tracking-[0.2em] uppercase">
+            <WalkmanLed lit color="mint" />
+            <span className="ff-mono text-[var(--wm-silk)]">88.4 FM</span>
+            <span className="text-[var(--wm-silk-dim)]">· TOKYO BAY</span>
+          </div>
+
+          <div
+            aria-hidden="true"
+            className="hidden min-w-0 flex-1 items-center gap-2 opacity-60 sm:flex"
+          >
+            <span className="h-[1px] flex-1 bg-[var(--wm-line)]" />
+            <span className="ff-mono text-[9px] tracking-[0.24em] text-[var(--wm-silk-dim)] uppercase">
+              C-60 · CrO₂
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-[1px] bg-[var(--wm-silk-dim)]" />
+              <span className="h-1 w-[1px] bg-[var(--wm-silk-dim)]" />
+              <span className="h-2.5 w-[1.5px] bg-[var(--wm-amber)]" />
+              <span className="h-1 w-[1px] bg-[var(--wm-silk-dim)]" />
+              <span className="h-2 w-[1px] bg-[var(--wm-silk-dim)]" />
+            </span>
+            <span className="h-[1px] flex-1 bg-[var(--wm-line)]" />
           </div>
 
           {!audioUnlocked ? (
             <button
               type="button"
               onClick={onUnlockAudio}
-              className="flex cursor-pointer items-center gap-2 rounded-[2px] border border-[rgba(255,245,228,0.24)] bg-[#12172E]/85 px-2.5 py-1 text-[11px] font-bold tracking-[0.14em] text-[var(--ff-cream)] uppercase transition hover:border-[var(--ff-pink)]"
+              className="wm-btn ml-auto flex shrink-0 cursor-pointer items-center gap-2 px-2.5 py-1 text-[10px] font-bold tracking-[0.16em] text-[var(--wm-silk)] uppercase sm:ml-0"
             >
+              <WalkmanLed lit={false} color="play" />
               <svg
                 aria-hidden="true"
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="#FF3B7F"
+                stroke="#ff3b6b"
                 strokeWidth="2.2"
                 strokeLinecap="square"
               >
                 <path d="M11 5L6 9H2v6h4l5 4V5z" />
                 <path d="M22 9l-6 6M16 9l6 6" />
               </svg>
-              <span className="ff-mono text-[10px]">SOUND</span>
+              <span className="ff-mono">SOUND</span>
             </button>
           ) : (
-            <div className="flex items-center gap-2 rounded-[2px] border border-[rgba(255,245,228,0.24)] bg-[#12172E]/85 px-2.5 py-1 text-[11px] font-bold tracking-[0.14em] text-[var(--ff-cream)] uppercase">
+            <div className="wm-lcd ml-auto flex shrink-0 items-center gap-2 rounded-[2px] px-2.5 py-1 text-[10px] font-bold tracking-[0.16em] uppercase sm:ml-0">
+              <WalkmanLed lit color="mint" />
               <svg
                 aria-hidden="true"
-                className="h-3.5 w-3.5"
+                className="h-3 w-3"
                 viewBox="0 0 24 24"
                 fill="none"
-                stroke="#2EE8C4"
+                stroke="#2ee2be"
                 strokeWidth="2.2"
                 strokeLinecap="square"
               >
@@ -200,70 +247,48 @@ export function MainMenu({
                 <path d="M15.5 8.5a5 5 0 010 7" />
                 <path d="M18.8 5.2a9.5 9.5 0 010 13.6" />
               </svg>
-              <span className="ff-mono text-[10px]">STEREO</span>
+              <span className="ff-mono text-[var(--wm-mint)]">STEREO</span>
             </div>
           )}
         </header>
 
-        {/* Upper-Sky Hero Logo Lockup */}
-        <div className="relative z-10 mt-1 flex flex-col items-center text-center">
-          <div className="mb-1 text-[10px] font-bold tracking-[0.42em] text-[var(--ff-gold)]">
-            マヨナカ・カセット
-          </div>
-
-          <div className="relative inline-flex items-baseline gap-2.5 sm:gap-3.5">
+        {/* City Pop Sleeve Hero Title Lockup (Flat Ivory Silkscreen + Single Coral Accent) */}
+        <div className="relative z-10 mt-2 flex flex-col items-center text-center">
+          <h1
+            className="flex items-center gap-3 whitespace-nowrap sm:gap-4"
+            style={{ textShadow: '0 2px 0 #090b12' }}
+          >
+            <span className="text-3xl font-black tracking-[0.12em] text-[var(--wm-silk)] sm:text-4xl md:text-5xl">
+              真夜中
+            </span>
             <span
               aria-hidden="true"
-              className="ff-display pointer-events-none absolute top-[4px] left-[4px] flex items-baseline gap-2.5 whitespace-nowrap text-[var(--ff-pink)] sm:gap-3.5"
-            >
-              <span className="text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
-                真夜中
-              </span>
-              <span className="text-4xl font-black italic tracking-wider sm:text-5xl md:text-6xl">
-                CASSETTE
-              </span>
+              className="inline-block h-6 w-[2px] bg-[var(--wm-play)] sm:h-8 md:h-10"
+            />
+            <span className="ff-display text-3xl font-black tracking-[0.14em] text-[var(--wm-silk)] uppercase sm:text-4xl md:text-5xl">
+              CASSETTE
             </span>
-
-            <h1
-              className="ff-display relative flex items-baseline gap-2.5 whitespace-nowrap sm:gap-3.5"
-              style={{
-                background:
-                  'linear-gradient(180deg, #FFF5E4 0%, #FFF5E4 48%, #FFD166 78%, #2EE8C4 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                filter: 'drop-shadow(0 2px 0 rgba(11,14,30,0.9))',
-              }}
-            >
-              <span className="text-4xl font-black tracking-tight sm:text-5xl md:text-6xl">
-                真夜中
-              </span>
-              <span className="text-4xl font-black italic tracking-wider sm:text-5xl md:text-6xl">
-                CASSETTE
-              </span>
-            </h1>
-          </div>
-
-          <div className="mt-2 flex items-center gap-3">
-            <span className="ff-obi-h block h-[3px] w-14 sm:w-20" />
-            <span
-              className="text-[11px] font-extrabold tracking-[0.45em] text-[var(--ff-cream)] uppercase sm:text-xs"
-              style={{ textShadow: '0 2px 6px rgba(11,14,30,0.95)' }}
-            >
-              MAYONAKA CASSETTE
-            </span>
-            <span className="ff-obi-h block h-[3px] w-14 sm:w-20" />
-          </div>
+          </h1>
         </div>
 
         {/* Open Middle Spacer: Moon, Skyline, Highway & Car remain unobstructed */}
         <div className="flex-1" />
 
-        {/* Bottom Asymmetric Stage: Left Obi Menu Rail + Whisper Key Hints + Right Mini J-Card */}
+        {/* Bottom Asymmetric Walkman Control Deck */}
         <div className="relative z-10 flex items-end justify-between gap-4">
-          {/* Bottom-Left Menu along 3-Stripe Vertical Obi Rail */}
-          <div className="flex items-stretch gap-3.5">
-            <div className="ff-obi-v ff-shadow-ink w-1.5 shrink-0 rounded-[2px]" />
-            <nav aria-label="Main Menu" className="flex flex-col items-start gap-1.5">
+          {/* Bottom-Left: Flat Flush Walkman Membrane Transport Bank */}
+          <div className="wm-shell wm-faceplate w-52 shrink-0 p-2 sm:w-56">
+            <div className="mb-1.5 flex items-center justify-between border-b border-[var(--wm-line)] pb-1">
+              <div className="flex items-center gap-1.5">
+                <WalkmanScrew />
+                <span className="ff-mono text-[8px] font-bold tracking-[0.22em] text-[var(--wm-silk-dim)] uppercase">
+                  TRANSPORT
+                </span>
+              </div>
+              <WalkmanLed lit={ready} color={ready ? 'mint' : 'amber'} />
+            </div>
+
+            <nav ref={navRef} aria-label="Main Menu" className="wm-key-bank flex flex-col">
               {MENU_ITEMS.map((item, index) => {
                 const isSelected = selectedIndex === index;
                 const isDriveItem = item.id === 'drive';
@@ -274,109 +299,122 @@ export function MainMenu({
                   <button
                     key={item.id}
                     type="button"
+                    aria-disabled={isDriveItem && !ready ? true : undefined}
+                    data-pressed={isSelected ? 'true' : 'false'}
                     onMouseEnter={() => setSelectedIndex(index)}
+                    onFocus={() => setSelectedIndex(index)}
                     onClick={() => executeAction(index)}
-                    className="group cursor-pointer text-left focus:outline-none"
+                    className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left ${
+                      isDriveItem && !ready ? 'cursor-wait' : 'cursor-pointer'
+                    } ${
+                      isDriveItem && isSelected
+                        ? 'wm-btn-well wm-btn-play border-0'
+                        : isSelected
+                          ? 'wm-btn-well border-l-[3px] border-l-[var(--wm-mint)] bg-[#22283e] text-[var(--wm-silk)]'
+                          : 'wm-btn-well border-l-[3px] border-l-transparent text-[var(--wm-silk-dim)] hover:text-[var(--wm-silk)]'
+                    }`}
                   >
-                    <span
-                      className={`ff-skew inline-flex items-center gap-2.5 transition-all duration-120 ${
-                        isSelected
-                          ? 'ff-shadow-ink bg-[var(--ff-pink)] px-4 py-1.5 text-[var(--ff-cream)]'
-                          : 'bg-transparent px-3 py-1 text-[#FFF5E4]/82 hover:text-[var(--ff-cream)]'
-                      }`}
-                    >
+                    <span className="flex min-w-0 items-center gap-2">
                       <span
-                        className={`ff-unskew text-xs font-black ${
-                          isSelected ? 'opacity-100' : 'opacity-0'
+                        className={`ff-mono text-[10px] font-black ${
+                          isSelected
+                            ? isDriveItem
+                              ? 'text-[var(--wm-silk)]'
+                              : 'text-[var(--wm-mint)]'
+                            : 'opacity-50'
                         }`}
                       >
-                        ▶
+                        {item.glyph}
                       </span>
-                      <span
-                        className="ff-unskew ff-display text-sm font-black tracking-[0.16em] uppercase sm:text-base"
-                        style={
-                          isSelected
-                            ? undefined
-                            : { textShadow: '0 2px 8px rgba(11,14,30,0.95)' }
-                        }
-                      >
+                      <span className="ff-mono truncate text-[11px] font-bold tracking-[0.14em] uppercase sm:text-xs">
                         {labelText}
                       </span>
                     </span>
 
-                    {isDriveItem && !ready && (
-                      <div className="mt-1 h-[3px] w-32 overflow-hidden rounded-[2px] bg-[var(--ff-panel)]">
-                        <div
-                          className="ff-obi-h h-full transition-all duration-150"
-                          style={{ width: `${progress.percent}%` }}
-                        />
-                      </div>
-                    )}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <span className="ff-mono text-[9px] opacity-55">{item.code}</span>
+                      <WalkmanLed
+                        lit={isSelected}
+                        color={isDriveItem ? 'amber' : 'mint'}
+                      />
+                    </span>
                   </button>
                 );
               })}
             </nav>
+
+            {!ready && (
+              <div className="wm-lcd mt-1.5 h-1.5 w-full overflow-hidden rounded-[1px] p-[1px]">
+                <div
+                  className="wm-accent-strip h-full transition-all duration-150"
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Center Whisper Hint */}
-          <div className="hidden items-center gap-2 pb-1 text-[10px] font-semibold tracking-[0.16em] text-[#FFF5E4]/60 uppercase md:flex">
-            <span className="ff-mono rounded-[2px] border border-[rgba(255,245,228,0.22)] bg-[#0B0E1E]/65 px-1.5 py-0.5">
+          <div className="hidden items-center gap-2 pb-1 text-[10px] font-semibold tracking-[0.16em] text-[#f4efe6]/65 uppercase md:flex">
+            <span className="wm-lcd ff-mono rounded-[1px] px-1.5 py-0.5 text-[var(--wm-silk)]">
               ↑↓
             </span>
             <span>MOVE</span>
             <span className="opacity-40">·</span>
-            <span className="ff-mono rounded-[2px] border border-[rgba(255,245,228,0.22)] bg-[#0B0E1E]/65 px-1.5 py-0.5">
+            <span className="wm-lcd ff-mono rounded-[1px] px-1.5 py-0.5 text-[var(--wm-silk)]">
               ENTER
             </span>
             <span>SELECT</span>
           </div>
 
-          {/* Bottom-Right Tactile Mini Cassette J-Card */}
+          {/* Bottom-Right: TDK/Sony-Style Walkman Cassette Door Preview */}
           <button
             type="button"
             onClick={() => {
-              onUnlockAudio();
+              unlockIfNeeded();
               onOpenCassetteDeck();
             }}
-            className="ff-shadow-ink group w-56 shrink-0 cursor-pointer overflow-hidden rounded-[2px] border-2 border-[rgba(255,245,228,0.28)] bg-[#12172E]/94 text-left transition hover:-translate-y-0.5 sm:w-64"
+            className="wm-shell wm-faceplate group w-60 shrink-0 cursor-pointer overflow-hidden text-left transition hover:border-[var(--wm-line-hi)] focus-visible:outline-1 focus-visible:outline-[var(--wm-mint)] sm:w-72"
           >
-            <div className="flex items-center justify-between bg-[var(--ff-cream)] px-2.5 py-1 text-[10px] font-black tracking-[0.16em] text-[var(--ff-ink)] uppercase">
+            {/* Ruled Paper Tape Label Top Strip */}
+            <div className="wm-paper-label flex items-center justify-between px-2.5 py-1 text-[10px] font-black tracking-[0.14em] text-[#131622] uppercase">
               <span className="flex items-center gap-1.5">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--ff-pink)]" />
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--wm-play)]" />
                 SIDE A
               </span>
-              <span className="ff-mono font-bold">{Math.round(currentTrackBpm)} BPM</span>
-            </div>
-            <div className="ff-obi-h h-[3px] w-full" />
-            <div className="flex items-center justify-between gap-2.5 px-3 py-2.5">
-              <div className="min-w-0">
-                <div className="truncate text-xs font-extrabold tracking-tight text-[var(--ff-cream)] sm:text-sm">
-                  {currentTrackTitle}
-                </div>
-                <div className="truncate text-[10px] font-medium text-[var(--ff-muted)]">
-                  {currentTrackArtist}
-                </div>
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <svg aria-hidden="true" className="ff-spin-slow h-6 w-6" viewBox="0 0 24 24" fill="none">
-                  <circle
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="rgba(255,245,228,0.25)"
-                    strokeWidth="2"
-                    fill="#0B0E1E"
-                  />
-                  <circle cx="12" cy="12" r="4.5" stroke="#2EE8C4" strokeWidth="1.8" />
-                  <path
-                    d="M12 7.5V10M12 14V16.5M7.5 12H10M14 12H16.5"
-                    stroke="#FFF5E4"
-                    strokeWidth="1.5"
-                  />
-                </svg>
-                <span className="text-[10px] font-black tracking-wider text-[var(--ff-mint)] uppercase group-hover:underline">
+              <div className="flex items-center gap-2">
+                <span className="ff-mono font-bold">{Math.round(currentTrackBpm)} BPM</span>
+                <span className="text-[10px] font-black text-[#131622] transition group-hover:text-[var(--wm-play)]">
                   ⏏
                 </span>
+              </div>
+            </div>
+            <div className="wm-accent-strip" />
+
+            {/* Smoked-Acrylic Cassette Window */}
+            <div className="p-2">
+              <div className="wm-window flex items-center justify-between gap-2.5 rounded-[2px] px-2.5 py-2">
+                <CassetteReel size={30} spinning packScale={0.82} accentColor="#2ee2be" />
+
+                <div className="min-w-0 flex-1 text-center">
+                  <div className="truncate text-xs font-extrabold tracking-tight text-[var(--wm-silk)]">
+                    {currentTrackTitle}
+                  </div>
+                  <div className="truncate text-[10px] font-medium text-[var(--wm-silk-dim)]">
+                    {currentTrackArtist}
+                  </div>
+                  <div
+                    aria-hidden="true"
+                    className="ff-mono mt-1 flex items-center justify-center gap-3 text-[7px] tracking-widest text-[var(--wm-silk-dim)]/65"
+                  >
+                    <span>0</span>
+                    <span>·</span>
+                    <span>50</span>
+                    <span>·</span>
+                    <span>100</span>
+                  </div>
+                </div>
+
+                <CassetteReel size={30} spinning packScale={0.58} accentColor="#f5b94c" />
               </div>
             </div>
           </button>
@@ -400,6 +438,12 @@ export function MainMenu({
         onToggleCleanHud={onToggleCleanHud}
         crtEnabled={crtEnabled}
         onToggleCrt={onToggleCrt}
+        cockpitVisibility={cockpitVisibility}
+        visorPhotoUrl={visorPhotoUrl}
+        onToggleCockpitModule={onToggleCockpitModule}
+        onApplyCockpitPreset={onApplyCockpitPreset}
+        onUploadVisorPhoto={onUploadVisorPhoto}
+        onClearVisorPhoto={onClearVisorPhoto}
       />
     </>
   );

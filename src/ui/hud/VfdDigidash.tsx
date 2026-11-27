@@ -1,6 +1,7 @@
 import { GEAR_NUMBERS, MAX_GEAR } from '@src/entities/Gearbox';
 import type { GrooveTier } from '@src/entities/PlayerCar';
 import { memo } from 'react';
+import '../cockpit/cockpit.css';
 
 export interface VfdDigidashProps {
   speedKmh: number;
@@ -19,15 +20,15 @@ const TACH_SEGMENT_INDICES = Array.from({ length: TACH_SEGMENTS }, (_, i) => i);
 const GROOVE_SEGMENTS = Array.from({ length: 24 }, (_, i) => i);
 
 const TIER_BADGE_COLORS: Readonly<Record<GrooveTier, string>> = {
-  LOW: 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]',
-  MEDIUM: 'bg-[var(--ff-mint)] text-[var(--ff-ink)]',
-  HIGH: 'bg-[var(--ff-pink)] text-[var(--ff-cream)]',
-  OVERDRIVE: 'bg-[var(--ff-gold)] text-[var(--ff-ink)]',
+  LOW: 'bg-[#1c1a24] text-[#9e97aa]',
+  MEDIUM: 'bg-[var(--ck-vfd-mint)] text-[#070b10]',
+  HIGH: 'bg-[var(--ck-vfd-coral)] text-[#fff5e4]',
+  OVERDRIVE: 'bg-[var(--ck-vfd-amber)] text-[#070b10]',
 };
 
 /**
- * 1980s Japanese Vacuum Fluorescent Display (VFD) Digital Cockpit Instrument Cluster.
- * Harmonized under the Mayonaka Hi-Fi 7-token palette.
+ * 1980s JDM Luxury GT Hooded Leather Binnacle & VFD Digital Instrument Cluster.
+ * Anchored at bottom-right (RHD driver side) with woodgrain fascia & satin brass bezel.
  */
 export const VfdDigidash = memo(function VfdDigidash({
   speedKmh,
@@ -47,38 +48,44 @@ export const VfdDigidash = memo(function VfdDigidash({
   const tierBadge = TIER_BADGE_COLORS[grooveTier] ?? TIER_BADGE_COLORS.LOW;
 
   return (
-    <div className="flex origin-bottom-right scale-75 flex-col items-end gap-1.5 sm:scale-100 [contain:layout_style_paint]">
-      <div className="ff-shadow-ink w-80 overflow-hidden rounded-[2px] border-2 border-[rgba(255,245,228,0.26)] bg-[#0B0E1E]/94 sm:w-[360px]">
-        <div className="ff-obi-h h-[3px] w-full" />
+    <div className="flex origin-bottom-right scale-75 flex-col items-end gap-1.5 lg:scale-100 [contain:layout_style_paint]">
+      {/* Sculpted Hooded JDM Dashboard Binnacle */}
+      <div className="ck-dash-pad w-80 overflow-hidden rounded-t-[8px] rounded-b-[3px] sm:w-[360px]">
+        {/* Stitched leather brow */}
+        <div className="ck-stitch-top mx-2 mt-1 flex items-center justify-between pt-0.5 text-[7px] font-bold tracking-[0.22em] text-[var(--ck-brass)] uppercase">
+          <span className="ff-mono opacity-80">DIGITAL COCKPIT</span>
+          <span className="ff-mono opacity-80">GT-APEX · VFD</span>
+        </div>
 
-        <div className="space-y-2.5 p-3">
+        {/* Recessed Smoked-Glass Instrument Well */}
+        <div className="ck-vfd-well m-2 mt-1.5 space-y-2.5 rounded-[3px] p-2.5">
           {/* Upper Deck: Groove Meter */}
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[10px] font-black tracking-[0.16em] uppercase">
               <div className="flex items-center gap-2">
-                <span className="text-[var(--ff-muted)]">GROOVE</span>
-                <span className="ff-mono text-xs text-[var(--ff-cream)]">{groove}%</span>
+                <span className="text-[#a89f96]">GROOVE</span>
+                <span className="ff-mono text-xs text-[#fff5e4]">{groove}%</span>
               </div>
               <span className={`ff-mono rounded-[2px] px-1.5 py-[1px] text-[9px] font-black ${tierBadge}`}>
                 {grooveTier}
               </span>
             </div>
 
-            <div className="flex h-2 w-full gap-0.5">
+            <div aria-hidden="true" className="flex h-2 w-full gap-0.5">
               {GROOVE_SEGMENTS.map((segIdx) => {
                 const segPct = (segIdx / 24) * 100;
                 const isActive = groove >= segPct;
-                let activeColor = 'bg-[var(--ff-mint)]';
+                let activeColor = 'bg-[var(--ck-vfd-mint)]';
                 if (segIdx >= 20) {
-                  activeColor = 'bg-[var(--ff-gold)]';
+                  activeColor = 'bg-[var(--ck-vfd-amber)]';
                 } else if (segIdx >= 12) {
-                  activeColor = 'bg-[var(--ff-pink)]';
+                  activeColor = 'bg-[var(--ck-vfd-coral)]';
                 }
 
                 return (
                   <div
                     key={segIdx}
-                    className={`flex-1 rounded-[1px] ${isActive ? activeColor : 'bg-[var(--ff-panel-hi)]'}`}
+                    className={`flex-1 rounded-[1px] ${isActive ? activeColor : 'bg-[#171c26]'}`}
                   />
                 );
               })}
@@ -91,10 +98,10 @@ export const VfdDigidash = memo(function VfdDigidash({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-baseline gap-1">
-                  <span className="ff-display text-3xl leading-none font-black italic text-[var(--ff-mint)]">
+                  <span className="ff-display text-3xl leading-none font-black italic text-[var(--ck-vfd-mint)]">
                     {gear}
                   </span>
-                  <span className="ff-mono text-[10px] font-bold text-[var(--ff-muted)]">
+                  <span className="ff-mono text-[10px] font-bold text-[#a89f96]">
                     /{MAX_GEAR}
                   </span>
                 </div>
@@ -106,10 +113,10 @@ export const VfdDigidash = memo(function VfdDigidash({
                         key={g}
                         className={`rounded-[2px] px-1 py-0.5 ${
                           gear === g
-                            ? 'bg-[var(--ff-mint)] font-black text-[var(--ff-ink)]'
+                            ? 'bg-[var(--ck-vfd-mint)] font-black text-[#070b10]'
                             : g < gear
-                              ? 'bg-[var(--ff-panel-hi)] text-[var(--ff-muted)]'
-                              : 'bg-[var(--ff-panel)] text-[#94A0C4]/35'
+                              ? 'bg-[#19202c] text-[#a89f96]'
+                              : 'bg-[#11151e] text-[#6d768d]/50'
                         }`}
                       >
                         {g}
@@ -118,8 +125,13 @@ export const VfdDigidash = memo(function VfdDigidash({
                   </div>
                   <button
                     type="button"
-                    onClick={onToggleAutoShift}
-                    className="ff-mono pointer-events-auto cursor-pointer rounded-[2px] border border-[rgba(255,245,228,0.22)] bg-[var(--ff-panel)] px-1.5 py-0.5 text-[8px] font-bold text-[var(--ff-cream)] transition hover:border-[var(--ff-pink)]"
+                    aria-pressed={autoShift}
+                    aria-label="Toggle auto-shift"
+                    onClick={(e) => {
+                      onToggleAutoShift();
+                      e.currentTarget.blur();
+                    }}
+                    className="ff-mono pointer-events-auto cursor-pointer rounded-[2px] border border-[rgba(217,167,92,0.38)] bg-[#19151e] px-1.5 py-0.5 text-[8px] font-bold text-[#fff5e4] transition hover:border-[var(--ck-brass)] hover:text-[var(--ck-vfd-amber)]"
                     title="Toggle Auto/Manual shifting [G]"
                   >
                     {autoShift ? 'AUTO' : 'MAN'}
@@ -128,7 +140,7 @@ export const VfdDigidash = memo(function VfdDigidash({
               </div>
 
               {/* Segmented Tachometer */}
-              <div className="flex h-2.5 w-full gap-0.5">
+              <div aria-hidden="true" className="flex h-2.5 w-full gap-0.5">
                 {TACH_SEGMENT_INDICES.map((idx) => {
                   const segRatio = (idx + 1) / TACH_SEGMENTS;
                   const isLit = idx < activeTachSegments;
@@ -141,15 +153,15 @@ export const VfdDigidash = memo(function VfdDigidash({
                       className={`flex-1 rounded-[1px] ${
                         isLit
                           ? isRedZone
-                            ? 'bg-[var(--ff-pink)]'
+                            ? 'bg-[var(--ck-vfd-coral)]'
                             : isSweetZone || isLugging
-                              ? 'bg-[var(--ff-gold)]'
-                              : 'bg-[var(--ff-mint)]'
+                              ? 'bg-[var(--ck-vfd-amber)]'
+                              : 'bg-[var(--ck-vfd-mint)]'
                           : isSweetZone
-                            ? 'border-b border-[#FFD166]/45 bg-[#241E19]'
+                            ? 'border-b border-[#ffbd4a]/45 bg-[#231d15]'
                             : isRedZone
-                              ? 'bg-[#2A1630]'
-                              : 'bg-[var(--ff-panel)]'
+                              ? 'bg-[#261423]'
+                              : 'bg-[#121721]'
                       }`}
                     />
                   );
@@ -157,55 +169,55 @@ export const VfdDigidash = memo(function VfdDigidash({
               </div>
 
               {/* Continuous RPM Micro-Bar */}
-              <div className="relative h-1 w-full overflow-hidden rounded-[1px] bg-[var(--ff-panel)]">
+              <div className="relative h-1 w-full overflow-hidden rounded-[1px] bg-[#121721]">
                 <div
-                  className="absolute inset-y-0 left-[72%] w-[18%] bg-[#FFD166]/30"
+                  className="absolute inset-y-0 left-[72%] w-[18%] bg-[#ffbd4a]/30"
                   title="Beat-Shift Sweet Spot"
                 />
                 <div
                   className={`h-full w-full origin-left will-change-transform ${
                     rpm >= 0.92
-                      ? 'bg-[var(--ff-pink)]'
+                      ? 'bg-[var(--ck-vfd-coral)]'
                       : isLugging || rpm >= 0.72
-                        ? 'bg-[var(--ff-gold)]'
-                        : 'bg-[var(--ff-mint)]'
+                        ? 'bg-[var(--ck-vfd-amber)]'
+                        : 'bg-[var(--ck-vfd-mint)]'
                   }`}
                   style={{ transform: `scaleX(${rpmPct / 100})` }}
                 />
               </div>
 
-              <div className="ff-mono flex items-center justify-between text-[9px] text-[var(--ff-muted)]">
+              <div className="ff-mono flex items-center justify-between text-[9px] text-[#a89f96]">
                 <span>{displayRpm.toLocaleString()} RPM</span>
-                <span className="font-bold text-[var(--ff-gold)]">SHIFT BEAT</span>
+                <span className="font-bold text-[var(--ck-vfd-amber)]">SHIFT BEAT</span>
               </div>
             </div>
 
             {/* Vertical Divider */}
-            <div className="h-full w-px bg-[rgba(255,245,228,0.14)]" />
+            <div className="h-full w-px bg-[rgba(217,167,92,0.2)]" />
 
             {/* Module 2: Digital Speedometer */}
             <div className="space-y-1 text-right">
               <div className="relative inline-block ff-mono">
                 <span
                   aria-hidden="true"
-                  className="ff-display text-4xl leading-none font-black italic tracking-tight text-[#1A2140] select-none"
+                  className="ff-display text-4xl leading-none font-black italic tracking-tight text-[#161c28] select-none"
                 >
                   888
                 </span>
-                <span className="ff-display absolute inset-0 text-4xl leading-none font-black italic tracking-tight text-[var(--ff-cream)]">
+                <span className="ff-display absolute inset-0 text-4xl leading-none font-black italic tracking-tight text-[#fff5e4]">
                   {String(speedKmh).padStart(3, '0')}
                 </span>
               </div>
 
-              <div className="flex items-center justify-end text-[10px] font-black tracking-[0.18em] text-[var(--ff-pink)]">
+              <div className="flex items-center justify-end text-[10px] font-black tracking-[0.18em] text-[var(--ck-vfd-amber)]">
                 KM/H
               </div>
 
-              <div className="h-1.5 w-full overflow-hidden rounded-[2px] bg-[var(--ff-panel-hi)]">
+              <div className="h-1.5 w-full overflow-hidden rounded-[2px] bg-[#171c26]">
                 <div
                   className="h-full w-full origin-left will-change-transform"
                   style={{
-                    background: 'linear-gradient(90deg, #2EE8C4, #FFD166, #FF3B7F)',
+                    background: 'linear-gradient(90deg, #38f2c8, #ffbd4a, #ff4778)',
                     transform: `scaleX(${speedPct / 100})`,
                   }}
                 />
@@ -213,6 +225,9 @@ export const VfdDigidash = memo(function VfdDigidash({
             </div>
           </div>
         </div>
+
+        {/* Lower Woodgrain Fascia Trim */}
+        <div className="ck-wood-trim h-[5px] w-full" />
       </div>
     </div>
   );
