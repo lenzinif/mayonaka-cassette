@@ -1,6 +1,7 @@
 import type { PreloadProgress } from '@src/core/AssetPreloader';
 import type { SodaSkin } from '@src/entities/MelonSoda';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { CockpitVisibility } from './cockpit/cockpitSettings';
 import { DriverManualModal } from './DriverManualModal';
 import { QuickOptionsModal } from './QuickOptionsModal';
 import { CassetteReel, WalkmanLed, WalkmanScrew } from './walkman/WalkmanChrome';
@@ -26,6 +27,12 @@ export interface MainMenuProps {
   onToggleCleanHud: () => void;
   crtEnabled: boolean;
   onToggleCrt: () => void;
+  cockpitVisibility?: CockpitVisibility;
+  visorPhotoUrl?: string | null;
+  onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
+  onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
+  onUploadVisorPhoto?: (file: File) => void;
+  onClearVisorPhoto?: () => void;
 }
 
 const MENU_ITEMS = [
@@ -59,6 +66,12 @@ export function MainMenu({
   onToggleCleanHud,
   crtEnabled,
   onToggleCrt,
+  cockpitVisibility,
+  visorPhotoUrl,
+  onToggleCockpitModule,
+  onApplyCockpitPreset,
+  onUploadVisorPhoto,
+  onClearVisorPhoto,
 }: MainMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [manualOpen, setManualOpen] = useState(false);
@@ -425,6 +438,12 @@ export function MainMenu({
         onToggleCleanHud={onToggleCleanHud}
         crtEnabled={crtEnabled}
         onToggleCrt={onToggleCrt}
+        cockpitVisibility={cockpitVisibility}
+        visorPhotoUrl={visorPhotoUrl}
+        onToggleCockpitModule={onToggleCockpitModule}
+        onApplyCockpitPreset={onApplyCockpitPreset}
+        onUploadVisorPhoto={onUploadVisorPhoto}
+        onClearVisorPhoto={onClearVisorPhoto}
       />
     </>
   );

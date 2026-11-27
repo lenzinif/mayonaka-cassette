@@ -1,6 +1,11 @@
 import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
 import type { GrooveTier } from '@src/entities/PlayerCar';
 import { useEffect, useId, useState, type MouseEvent } from 'react';
+import { CockpitOptionsSection } from './cockpit/CockpitOptionsSection';
+import {
+  COCKPIT_PRESET_LUXURY,
+  type CockpitVisibility,
+} from './cockpit/cockpitSettings';
 import { WalkmanLed, WalkmanModalFrame, WalkmanSwitchRow } from './walkman/WalkmanChrome';
 
 export interface PauseMenuProps {
@@ -26,6 +31,12 @@ export interface PauseMenuProps {
   autoShift: boolean;
   autopilotActive?: boolean;
   crtEnabled?: boolean;
+  cockpitVisibility?: CockpitVisibility;
+  visorPhotoUrl?: string | null;
+  onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
+  onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
+  onUploadVisorPhoto?: (file: File) => void;
+  onClearVisorPhoto?: () => void;
   initialView?: 'main' | 'options' | 'controls';
   onResume: () => void;
   onRestartRun?: () => void;
@@ -76,6 +87,12 @@ export function PauseMenu({
   autoShift,
   autopilotActive = false,
   crtEnabled = true,
+  cockpitVisibility = COCKPIT_PRESET_LUXURY,
+  visorPhotoUrl = null,
+  onToggleCockpitModule,
+  onApplyCockpitPreset,
+  onUploadVisorPhoto,
+  onClearVisorPhoto,
   initialView = 'main',
   onResume,
   onRestartRun,
@@ -352,6 +369,17 @@ export function PauseMenu({
                   />
                 )}
               </div>
+
+              {onToggleCockpitModule && onApplyCockpitPreset && (
+                <CockpitOptionsSection
+                  visibility={cockpitVisibility}
+                  onToggleModule={onToggleCockpitModule}
+                  onApplyPreset={onApplyCockpitPreset}
+                  visorPhotoUrl={visorPhotoUrl}
+                  onUploadVisorPhoto={onUploadVisorPhoto}
+                  onClearVisorPhoto={onClearVisorPhoto}
+                />
+              )}
             </div>
           )}
 

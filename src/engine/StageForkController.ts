@@ -1,4 +1,5 @@
 import type { BeatMap } from '@src/audio/BeatMap';
+import type { ForkTransitionAudioStyle } from '@src/audio/FunkAudioEngine';
 import type { RunGrade, TrackLibrary } from '@src/audio/TrackLibrary';
 import { FORK_APPROACH_BARS } from '@src/config/constants';
 import type { PlayerCar } from '@src/entities/PlayerCar';
@@ -58,6 +59,22 @@ export class StageForkController {
     this.forkActive = false;
     this.forkProgress = 0;
     this.forkLastSign = 0;
+  }
+
+  /**
+   * Selects the cassette transition FX accompanying a fork crossfade:
+   * `'rewind'` when looping the current track or restarting at playlist end,
+   * `'scratch'` when cutting forward into the next stage track.
+   */
+  getTransitionAudioStyle(
+    forkChoice: 'left' | 'right',
+    hasNextTrack: boolean,
+    hasCustomTrack: boolean,
+  ): ForkTransitionAudioStyle {
+    if (hasCustomTrack || forkChoice === 'left' || !hasNextTrack) {
+      return 'rewind';
+    }
+    return 'scratch';
   }
 
   getForkZoneStartZ(

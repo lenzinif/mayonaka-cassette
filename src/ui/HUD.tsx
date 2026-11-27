@@ -1,14 +1,20 @@
 import type { SectionRole } from '@src/audio/BeatMap';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
-import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
+import type { SodaSkin } from '@src/entities/MelonSoda';
 import type { GrooveTier } from '@src/entities/PlayerCar';
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import { WalkmanLed } from './walkman/WalkmanChrome';
+import {
+  COCKPIT_PRESET_LUXURY,
+  type CockpitVisibility,
+} from './cockpit/cockpitSettings';
+import { RadioConsole, type RadioPlaylistEntry } from './cockpit/RadioConsole';
+import { SunVisorPhoto } from './cockpit/SunVisorPhoto';
 import { CassetteTapeWidget } from './hud/CassetteTapeWidget';
 import { RhythmBezel } from './hud/RhythmBezel';
 import { VfdDigidash } from './hud/VfdDigidash';
 import { PauseMenu } from './PauseMenu';
+import { WalkmanLed } from './walkman/WalkmanChrome';
 
 export interface HUDProps {
   bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
@@ -34,6 +40,16 @@ export interface HUDProps {
   minimalPerfOnly?: boolean;
   hideCassette?: boolean;
   hideVfd?: boolean;
+  cockpitVisibility?: CockpitVisibility;
+  onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
+  onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
+  visorPhotoUrl?: string | null;
+  onUploadVisorPhoto?: (file: File) => void;
+  onClearVisorPhoto?: () => void;
+  playlistItems?: readonly RadioPlaylistEntry[];
+  onPrevTrack?: () => void;
+  onNextTrack?: () => void;
+  onSelectPlaylistIndex?: (index: number) => void;
 }
 
 /**
@@ -65,21 +81,57 @@ export function HUD({
   minimalPerfOnly = false,
   hideCassette = false,
   hideVfd = false,
+  cockpitVisibility,
+  onToggleCockpitModule,
+  onApplyCockpitPreset,
+  visorPhotoUrl = null,
+  onUploadVisorPhoto,
+  onClearVisorPhoto,
+  playlistItems,
+  onPrevTrack,
+  onNextTrack,
+  onSelectPlaylistIndex,
 }: HUDProps) {
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot, bridge.getSnapshot);
   const [internalCleanHud, setInternalCleanHud] = useState(false);
   const [showPerfHud, setShowPerfHud] = useState(false);
-  const [showCassetteDeck, setShowCassetteDeck] = useState(true);
+  const [internalCockpit, setInternalCockpit] = useState<CockpitVisibility>(COCKPIT_PRESET_LUXURY);
   const [isTapeSlack, setIsTapeSlack] = useState(false);
 
   const effectiveCleanHud = cleanHud ?? internalCleanHud;
+  const effectiveCockpit = cockpitVisibility ?? internalCockpit;
   const handleToggleCleanHud = useCallback(() => {
     if (onToggleCleanHud) onToggleCleanHud();
     else setInternalCleanHud((prev) => !prev);
   }, [onToggleCleanHud]);
+  const handleToggleCockpitModule = useCallback(
+    (key: keyof CockpitVisibility) => {
+      if (onToggleCockpitModule) {
+        onToggleCockpitModule(key);
+      } else {
+        setInternalCockpit((prev) => {
+          const nextVal = !prev[key];
+          if (nextVal) setInternalCleanHud(false);
+          return { ...prev, [key]: nextVal };
+        });
+      }
+    },
+    [onToggleCockpitModule],
+  );
+  const handleApplyCockpitPreset = useCallback(
+    (preset: CockpitVisibility) => {
+      if (onApplyCockpitPreset) {
+        onApplyCockpitPreset(preset);
+      } else {
+        setInternalCleanHud(false);
+        setInternalCockpit(preset);
+      }
+    },
+    [onApplyCockpitPreset],
+  );
   const handleToggleCassetteDeck = useCallback(
-    () => setShowCassetteDeck((prev) => !prev),
-    [],
+    () => handleToggleCockpitModule('showCassetteWidget'),
+    [handleToggleCockpitModule],
   );
   const handleToggleAutoShift = useCallback(() => {
     onToggleAutoShift?.();
@@ -97,7 +149,7 @@ export function HUD({
         handleToggleCleanHud();
       } else if (e.code === 'KeyC') {
         e.preventDefault();
-        setShowCassetteDeck((prev) => !prev);
+        handleToggleCassetteDeck();
       } else if (e.code === 'F3') {
         e.preventDefault();
         setShowPerfHud((prev) => !prev);
@@ -105,7 +157,7 @@ export function HUD({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [gameStarted, trackLoaderOpen, inspectorOpen, handleToggleCleanHud]);
+  }, [gameStarted, trackLoaderOpen, inspectorOpen, handleToggleCleanHud, handleToggleCassetteDeck]);
 
   // Telemetry event listeners & tape slack triggers
   useEffect(() => {
@@ -159,7 +211,6 @@ export function HUD({
   const grooveTier: GrooveTier = snap?.grooveTier ?? 'LOW';
   const tofuMode = snap?.tofuMode ?? false;
   const sodaSkin: SodaSkin = snap?.sodaSkin ?? 'melon-soda';
-  const sodaDanger = snap?.sodaDanger ?? 0;
   const sodaSpills = snap?.sodaSpills ?? 0;
   const stageNumber = snap?.stageNumber ?? 1;
   const stagePaletteName = snap?.stagePaletteName ?? 'MAYONAKA BAY';
@@ -171,8 +222,21 @@ export function HUD({
   const isPaused = snap?.isPaused ?? false;
   const gamepadConnected = snap?.gamepadConnected ?? false;
 
-  const sodaDangerPct = Math.min(100, Math.round(sodaDanger * 100));
-  const cassetteVisible = !hideCassette && showCassetteDeck && !effectiveCleanHud;
+  const cassetteVisible = !hideCassette && effectiveCockpit.showCassetteWidget && !effectiveCleanHud;
+  const visorVisible = effectiveCockpit.showSunVisor && !effectiveCleanHud;
+  const radioVisible = effectiveCockpit.showRadioConsole && !effectiveCleanHud;
+  const vfdVisible = !hideVfd && effectiveCockpit.showInstrumentCluster && !effectiveCleanHud;
+  const effectivePlaylistItems: readonly RadioPlaylistEntry[] =
+    playlistItems && playlistItems.length > 0
+      ? playlistItems
+      : [
+          {
+            id: 'active-track',
+            title: trackTitle,
+            artist: trackArtist,
+            bpm,
+          },
+        ];
 
   if (!gameStarted) return null;
 
@@ -199,10 +263,10 @@ export function HUD({
         />
       )}
 
-      {/* TOP BAR: Left Cassette Tape Deck + Right Minimalist Controls */}
+      {/* TOP BAR: Left Cassette Tape Deck + Center-Right Sun Visor + Right Controls */}
       <div className="relative z-1 flex items-start justify-between gap-2.5 sm:gap-3">
         <div className="flex min-w-0 items-start [contain:layout_style_paint] [transform:translateZ(0)]">
-          {!hideCassette && (
+          {!hideCassette && !effectiveCleanHud && (
             <CassetteTapeWidget
               trackArtist={trackArtist}
               trackTitle={trackTitle}
@@ -218,11 +282,22 @@ export function HUD({
               playlistIndex={playlistIndex}
               playlistLength={playlistLength}
               isSlack={isTapeSlack}
-              visible={showCassetteDeck && !effectiveCleanHud}
+              visible={effectiveCockpit.showCassetteWidget}
               onToggleVisible={handleToggleCassetteDeck}
             />
           )}
         </div>
+
+        {/* Center-Right RHD Driver Sun Visor hanging from windshield top edge */}
+        {visorVisible && (
+          <div className="-mt-5 hidden shrink-0 lg:ml-auto lg:mr-3 lg:flex">
+            <SunVisorPhoto
+              photoUrl={visorPhotoUrl}
+              onUploadPhoto={onUploadVisorPhoto}
+              onClearPhoto={onClearVisorPhoto}
+            />
+          </div>
+        )}
 
         {/* Right: Walkman Tactile Status & Transport Controls */}
         <div className="pointer-events-auto flex items-center gap-1.5 [contain:layout_style_paint] [transform:translateZ(0)]">
@@ -333,41 +408,27 @@ export function HUD({
         </div>
       )}
 
-      {/* BOTTOM BAR: Left Tofu Cup Strip + Right JDM VFD Digidash */}
+      {/* BOTTOM BAR: Left Autoradio DIN Console (clearing canvas Tofu shelf) + Right JDM VFD Digidash */}
       <div className="relative z-1 flex items-end justify-between gap-4">
-        {/* Bottom-Left: Offset above the 120x80 canvas Melon Soda cup inset */}
-        <div
-          className={`flex flex-col gap-1.5 [contain:layout_style_paint] [transform:translateZ(0)] ${
-            tofuMode ? 'mb-24 sm:mb-26' : ''
-          }`}
-        >
-          {tofuMode && (
-            <div className="ff-shadow-ink flex items-center gap-2.5 rounded-[2px] border-2 border-[rgba(46,232,196,0.55)] bg-[#12172E]/92 px-3 py-1.5 text-[10px] tracking-wider uppercase">
-              <span className="font-black text-[var(--ff-mint)]">TOFU ×2</span>
-              <span className="text-[var(--ff-muted)]">{SODA_SKIN_LABELS[sodaSkin]}</span>
-              <div className="flex items-center gap-1.5">
-                <div className="h-1.5 w-14 overflow-hidden rounded-[2px] bg-[var(--ff-ink)]">
-                  <div
-                    className={`h-full w-full origin-left ${
-                      sodaDanger >= 0.9
-                        ? 'bg-[var(--ff-pink)]'
-                        : sodaDanger >= 0.65
-                          ? 'bg-[var(--ff-gold)]'
-                          : 'bg-[var(--ff-mint)]'
-                    }`}
-                    style={{ transform: `scaleX(${sodaDangerPct / 100})` }}
-                  />
-                </div>
-              </div>
-              <span className="ff-mono font-bold text-[var(--ff-gold)]">
-                {sodaSpills} {sodaSpills === 1 ? 'SPILL' : 'SPILLS'}
-              </span>
-            </div>
+        <div className="flex min-w-0 items-end">
+          {radioVisible && (
+            <RadioConsole
+              items={effectivePlaylistItems}
+              activeIndex={playlistIndex}
+              trackTitle={trackTitle}
+              trackArtist={trackArtist}
+              bpm={bpm}
+              tofuMode={tofuMode}
+              onPrevTrack={onPrevTrack}
+              onNextTrack={onNextTrack}
+              onSelectIndex={onSelectPlaylistIndex}
+              onOpenDeck={onOpenTrackLoader}
+            />
           )}
         </div>
 
-        {/* Bottom-Right: Harmonized Future Funk VFD Digidash */}
-        {!hideVfd && (
+        {/* Bottom-Right: 80s JDM Luxury GT VFD Binnacle */}
+        {vfdVisible && (
           <div className="[contain:layout_style_paint] [transform:translateZ(0)]">
             <VfdDigidash
               speedKmh={speedKmh}
@@ -408,6 +469,12 @@ export function HUD({
         autoShift={autoShift}
         autopilotActive={snap?.autopilotActive ?? false}
         crtEnabled={crtEnabled}
+        cockpitVisibility={effectiveCockpit}
+        visorPhotoUrl={visorPhotoUrl}
+        onToggleCockpitModule={handleToggleCockpitModule}
+        onApplyCockpitPreset={handleApplyCockpitPreset}
+        onUploadVisorPhoto={onUploadVisorPhoto}
+        onClearVisorPhoto={onClearVisorPhoto}
         onResume={() => onTogglePause?.()}
         onRestartRun={onRestartRun}
         onOpenTrackLoader={onOpenTrackLoader}

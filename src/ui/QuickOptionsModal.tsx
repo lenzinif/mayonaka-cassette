@@ -1,5 +1,10 @@
 import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
 import { useEffect, useId } from 'react';
+import { CockpitOptionsSection } from './cockpit/CockpitOptionsSection';
+import {
+  COCKPIT_PRESET_LUXURY,
+  type CockpitVisibility,
+} from './cockpit/cockpitSettings';
 import { WalkmanModalFrame, WalkmanSwitchRow } from './walkman/WalkmanChrome';
 
 export interface QuickOptionsModalProps {
@@ -15,6 +20,12 @@ export interface QuickOptionsModalProps {
   onToggleCleanHud: () => void;
   crtEnabled: boolean;
   onToggleCrt: () => void;
+  cockpitVisibility?: CockpitVisibility;
+  visorPhotoUrl?: string | null;
+  onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
+  onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
+  onUploadVisorPhoto?: (file: File) => void;
+  onClearVisorPhoto?: () => void;
 }
 
 /**
@@ -33,6 +44,12 @@ export function QuickOptionsModal({
   onToggleCleanHud,
   crtEnabled,
   onToggleCrt,
+  cockpitVisibility = COCKPIT_PRESET_LUXURY,
+  visorPhotoUrl = null,
+  onToggleCockpitModule,
+  onApplyCockpitPreset,
+  onUploadVisorPhoto,
+  onClearVisorPhoto,
 }: QuickOptionsModalProps) {
   const titleId = useId();
 
@@ -121,6 +138,17 @@ export function QuickOptionsModal({
               onClick={onToggleCrt}
             />
           </div>
+
+          {onToggleCockpitModule && onApplyCockpitPreset && (
+            <CockpitOptionsSection
+              visibility={cockpitVisibility}
+              onToggleModule={onToggleCockpitModule}
+              onApplyPreset={onApplyCockpitPreset}
+              visorPhotoUrl={visorPhotoUrl}
+              onUploadVisorPhoto={onUploadVisorPhoto}
+              onClearVisorPhoto={onClearVisorPhoto}
+            />
+          )}
         </div>
       </WalkmanModalFrame>
     </div>

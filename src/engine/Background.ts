@@ -1,5 +1,5 @@
 import { tuning } from '@src/config/tuning';
-import type { StagePalette } from '@src/road/palette';
+import { lerpHexColor, type StagePalette } from '@src/road/palette';
 
 // ---------------------------------------------------------------------------
 // Pre-allocated array sizes & geometry spans (AGENTS.md §4.3: ZERO GC in loop)
@@ -378,6 +378,7 @@ export class Background {
   private cachedSkyTop = '';
   private cachedSkyMid = '';
   private cachedSkyHorizon = '';
+  private cachedSkyHorizonMist = '';
   private cachedSkyGrad: CanvasGradient | null = null;
 
   private cachedSunCtx: CanvasRenderingContext2D | null = null;
@@ -398,12 +399,14 @@ export class Background {
   private cachedWaterSkyMid = '';
   private cachedWaterSkyHorizon = '';
   private cachedWaterDeep = '';
+  private cachedWaterHorizonMist = '';
   private cachedWaterGrad: CanvasGradient | null = null;
 
   private cachedGroundCtx: CanvasRenderingContext2D | null = null;
   private cachedGroundHorizonY = -1;
   private cachedGroundHeight = -1;
   private cachedGroundFog = '';
+  private cachedGroundMist = '';
   private cachedGroundTop = '';
   private cachedGroundBase = '';
   private cachedGroundGrad: CanvasGradient | null = null;
@@ -772,6 +775,7 @@ export class Background {
     const glowPitch = Math.round(renderPitchOffset * 0.35);
 
     const lTheme = LIGHTNING_THEMES[this.lightningThemeIdx] ?? LIGHTNING_THEMES[0]!;
+    const horizonMist = palette.horizonMist ?? palette.fog;
 
     // -------------------------------------------------------------------------
     // 1. SKY GRADIENT (Cached across frames unless palette or height changes)
@@ -782,17 +786,20 @@ export class Background {
       this.cachedSkyTop !== palette.skyTop ||
       this.cachedSkyMid !== palette.skyMid ||
       this.cachedSkyHorizon !== palette.skyHorizon ||
+      this.cachedSkyHorizonMist !== horizonMist ||
       !this.cachedSkyGrad
     ) {
       const grad = ctx.createLinearGradient(0, 0, 0, horizonY);
       grad.addColorStop(0, palette.skyTop);
-      grad.addColorStop(0.62, palette.skyMid);
-      grad.addColorStop(1, palette.skyHorizon);
+      grad.addColorStop(0.58, palette.skyMid);
+      grad.addColorStop(0.84, palette.skyHorizon);
+      grad.addColorStop(1, horizonMist);
       this.cachedSkyCtx = ctx;
       this.cachedSkyHorizonY = horizonY;
       this.cachedSkyTop = palette.skyTop;
       this.cachedSkyMid = palette.skyMid;
       this.cachedSkyHorizon = palette.skyHorizon;
+      this.cachedSkyHorizonMist = horizonMist;
       this.cachedSkyGrad = grad;
     }
     ctx.fillStyle = this.cachedSkyGrad;
@@ -1007,19 +1014,22 @@ export class Background {
         this.cachedGroundHorizonY !== horizonY ||
         this.cachedGroundHeight !== height ||
         this.cachedGroundFog !== palette.fog ||
+        this.cachedGroundMist !== horizonMist ||
         this.cachedGroundTop !== groundTop ||
         this.cachedGroundBase !== groundBase ||
         !this.cachedGroundGrad
       ) {
         const gGrad = ctx.createLinearGradient(0, horizonY, 0, height);
-        gGrad.addColorStop(0, palette.fog);
-        gGrad.addColorStop(0.09, groundTop);
-        gGrad.addColorStop(0.22, groundBase);
+        gGrad.addColorStop(0, horizonMist);
+        gGrad.addColorStop(0.08, palette.fog);
+        gGrad.addColorStop(0.18, groundTop);
+        gGrad.addColorStop(0.34, groundBase);
         gGrad.addColorStop(1, groundBase);
         this.cachedGroundCtx = ctx;
         this.cachedGroundHorizonY = horizonY;
         this.cachedGroundHeight = height;
         this.cachedGroundFog = palette.fog;
+        this.cachedGroundMist = horizonMist;
         this.cachedGroundTop = groundTop;
         this.cachedGroundBase = groundBase;
         this.cachedGroundGrad = gGrad;
@@ -1034,6 +1044,7 @@ export class Background {
     // 6. LAYER 1: LONTANISSIMO (Scroll ~0.10x)
     // -------------------------------------------------------------------------
     const seaDeep = palette.water?.[0] ?? palette.grass[0];
+    const seaHorizonBase = lerpHexColor(seaDeep, horizonMist, 0.72);
     const canTranslateMountain = mountainPitch !== 0 && typeof ctx.translate === 'function';
     const mountainBaseY = Math.max(horizonY + 2, horizonY + mountainPitch + 2);
     if (isSunsetBoulevard) {
@@ -1051,13 +1062,14 @@ export class Background {
         this.cachedWaterSkyHorizon !== palette.skyHorizon ||
         this.cachedWaterFog !== palette.fog ||
         this.cachedWaterDeep !== seaDeep ||
+        this.cachedWaterHorizonMist !== seaHorizonBase ||
         !this.cachedWaterGrad
       ) {
         const wGrad = ctx.createLinearGradient(0, baseSeaTopY, 0, horizonY);
         wGrad.addColorStop(0, hexToRgba(palette.skyMid, 0.65));
         wGrad.addColorStop(0.35, hexToRgba(palette.skyHorizon, 0.45));
         wGrad.addColorStop(0.75, hexToRgba(palette.fog, 0.78));
-        wGrad.addColorStop(1, seaDeep);
+        wGrad.addColorStop(1, seaHorizonBase);
         this.cachedWaterCtx = ctx;
         this.cachedWaterHorizonY = horizonY;
         this.cachedWaterStyle = 'sunset';
@@ -1065,6 +1077,7 @@ export class Background {
         this.cachedWaterSkyHorizon = palette.skyHorizon;
         this.cachedWaterFog = palette.fog;
         this.cachedWaterDeep = seaDeep;
+        this.cachedWaterHorizonMist = seaHorizonBase;
         this.cachedWaterGrad = wGrad;
       }
 
@@ -1078,7 +1091,7 @@ export class Background {
 
       // Distant calm sea horizon line (delicate, light and soft)
       ctx.fillStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
-      ctx.globalAlpha = 0.35 + pulse * 0.18;
+      ctx.globalAlpha = 0.18 + pulse * 0.12;
       ctx.fillRect(0, seaTopY, width, 1);
       ctx.globalAlpha = 1;
 
@@ -1111,7 +1124,7 @@ export class Background {
         ctx.restore();
       }
       if (mountainPitch < 0) {
-        ctx.fillStyle = seaDeep;
+        ctx.fillStyle = seaHorizonBase;
         ctx.fillRect(0, horizonY + mountainPitch, width, -mountainPitch + 2);
       }
       void seaRefSunY;
@@ -1129,18 +1142,20 @@ export class Background {
         this.cachedWaterFog !== palette.fog ||
         this.cachedWaterSkyHorizon !== palette.skyHorizon ||
         this.cachedWaterDeep !== seaDeep ||
+        this.cachedWaterHorizonMist !== seaHorizonBase ||
         !this.cachedWaterGrad
       ) {
         const wGrad = ctx.createLinearGradient(0, baseSeaTopY, 0, horizonY);
         wGrad.addColorStop(0, hexToRgba(palette.fog, 0.85));
         wGrad.addColorStop(0.55, hexToRgba(palette.skyHorizon, 0.42));
-        wGrad.addColorStop(1, seaDeep);
+        wGrad.addColorStop(1, seaHorizonBase);
         this.cachedWaterCtx = ctx;
         this.cachedWaterHorizonY = horizonY;
         this.cachedWaterStyle = 'bay';
         this.cachedWaterFog = palette.fog;
         this.cachedWaterSkyHorizon = palette.skyHorizon;
         this.cachedWaterDeep = seaDeep;
+        this.cachedWaterHorizonMist = seaHorizonBase;
         this.cachedWaterGrad = wGrad;
       }
 
@@ -1154,7 +1169,7 @@ export class Background {
 
       // Distant calm sea horizon line across the bay
       ctx.fillStyle = this.lightningAlpha > 0.1 ? lTheme.boltMid : palette.mountainRim;
-      ctx.globalAlpha = 0.55 + pulse * 0.25;
+      ctx.globalAlpha = 0.24 + pulse * 0.14;
       ctx.fillRect(0, seaTopY, width, 1);
       ctx.globalAlpha = 1;
 
@@ -1229,7 +1244,7 @@ export class Background {
         ctx.restore();
       }
       if (mountainPitch < 0) {
-        ctx.fillStyle = seaDeep;
+        ctx.fillStyle = seaHorizonBase;
         ctx.fillRect(0, horizonY + mountainPitch, width, -mountainPitch + 2);
       }
 
@@ -1437,8 +1452,8 @@ export class Background {
     // -------------------------------------------------------------------------
     // 8. LAYER 3: TRANSIZIONE (Scroll ~0.85x) — Breakwater Horizon Wash
     // -------------------------------------------------------------------------
-    const glowH = 24;
-    const glowBelowH = 10;
+    const glowH = 26;
+    const glowBelowH = 16;
     const glowColor = palette.horizonGlow ?? palette.skyHorizon;
     if (
       this.cachedGlowCtx !== ctx ||
@@ -1450,8 +1465,8 @@ export class Background {
       const peakStop = glowH / totalGlowH;
       const grad = ctx.createLinearGradient(0, horizonY - glowH, 0, horizonY + glowBelowH);
       grad.addColorStop(0, hexToRgba(glowColor, 0));
-      grad.addColorStop(peakStop * 0.45, hexToRgba(glowColor, 0.35));
-      grad.addColorStop(peakStop, hexToRgba(glowColor, 0.85));
+      grad.addColorStop(peakStop * 0.45, hexToRgba(glowColor, 0.25));
+      grad.addColorStop(peakStop, hexToRgba(glowColor, 0.5));
       grad.addColorStop(1, hexToRgba(glowColor, 0));
       this.cachedGlowCtx = ctx;
       this.cachedGlowHorizonY = horizonY;

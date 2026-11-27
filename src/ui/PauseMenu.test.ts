@@ -123,6 +123,27 @@ describe('PauseMenu (UI Layer)', () => {
     expect(text).not.toContain('BACK TO PAUSE');
   });
 
+  it('renders cockpit module switches and presets in options view when cockpit handlers are provided', () => {
+    const rawHtml = renderToString(
+      createElement(PauseMenu, {
+        ...defaultProps,
+        initialView: 'options',
+        onToggleCockpitModule: vi.fn(),
+        onApplyCockpitPreset: vi.fn(),
+      }),
+    );
+    const text = rawHtml.replace(/<!--.*?-->/g, '');
+
+    expect(text).toContain('COCKPIT MODULES');
+    expect(text).toContain('LUXURY FULL');
+    expect(text).toContain('CLEAN DRIVE');
+    expect(text).toContain('INSTRUMENTS (VFD)');
+    expect(text).toContain('AUTORADIO PLAYLIST');
+    expect(text).toContain('SUN VISOR PHOTO');
+    expect(text).toContain('CASSETTE DECK [C]');
+    expect(text).toContain('VISOR PHOTO');
+  });
+
   it('renders controls sub-view with 2-column reference card', () => {
     const rawHtml = renderToString(
       createElement(PauseMenu, {
