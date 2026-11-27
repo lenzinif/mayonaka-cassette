@@ -41,6 +41,21 @@ export async function hashAudioBytes(bytes: ArrayBuffer): Promise<string> {
 }
 
 /**
+ * Decodes compressed audio bytes on the main thread into a full-quality `AudioBuffer`
+ * without paying the extra 22 050 Hz mono resampling pass (used for on-demand buffer hydration).
+ */
+export async function decodeAudioBufferOnly(bytes: ArrayBuffer): Promise<AudioBuffer> {
+  const OfflineCtx =
+    window.OfflineAudioContext ||
+    (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext })
+      .webkitOfflineAudioContext;
+
+  // Use a 1-frame OfflineAudioContext at native rate (44.1 kHz) to decode without opening hardware output
+  const decoderCtx = new OfflineCtx(2, 1, 44100);
+  return decoderCtx.decodeAudioData(bytes.slice(0));
+}
+
+/**
  * Decodes compressed audio bytes on the main thread and downmixes/resamples to
  * 22 050 Hz mono `Float32Array` via `OfflineAudioContext` (AGENTS.md §4.5, §4.7).
  */
@@ -50,9 +65,7 @@ export async function decodeAudioForAnalysis(bytes: ArrayBuffer): Promise<Decode
     (window as unknown as { webkitOfflineAudioContext: typeof OfflineAudioContext })
       .webkitOfflineAudioContext;
 
-  // Use a 1-frame OfflineAudioContext at native rate (44.1 kHz) to decode without opening hardware output
-  const decoderCtx = new OfflineCtx(2, 1, 44100);
-  const audioBuffer = await decoderCtx.decodeAudioData(bytes.slice(0));
+  const audioBuffer = await decodeAudioBufferOnly(bytes);
 
   const targetFrames = Math.max(1, Math.ceil(audioBuffer.duration * ANALYSIS_SAMPLE_RATE));
   const resampleCtx = new OfflineCtx(1, targetFrames, ANALYSIS_SAMPLE_RATE);

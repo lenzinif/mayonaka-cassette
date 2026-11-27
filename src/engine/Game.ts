@@ -349,6 +349,7 @@ export class Game {
   private lastInternalPosition = 0;
   private suppressLibraryPrewarm = false;
   private unsubscribeLibrary?: () => void;
+  private unsubscribeBufferHydrated?: () => void;
   private activeNextTrackLookahead: SongTrack | undefined = undefined;
   private cachedForkLeftOption: ForkOptionInfo | null = null;
   private cachedForkRightOption: ForkOptionInfo | null = null;
@@ -888,12 +889,23 @@ export class Game {
         this.prewarmNextLookaheadTrack();
       }
     });
+    this.unsubscribeBufferHydrated = this.library.onBufferHydrated((item) => {
+      if (
+        this.library.activeItem.contentHash === item.contentHash &&
+        item.audioBuffer &&
+        this.audio.isUsingSynthFallback
+      ) {
+        this.audio.attachHydratedBuffer(item.beatMap, item.audioBuffer);
+      }
+    });
     this.updateRoadProgressTelemetry();
   }
 
   dispose(): void {
     this.unsubscribeLibrary?.();
     this.unsubscribeLibrary = undefined;
+    this.unsubscribeBufferHydrated?.();
+    this.unsubscribeBufferHydrated = undefined;
   }
 
   get isAutopilotActive(): boolean {
@@ -1939,6 +1951,7 @@ export class Game {
       this.horizonAssembler?.setNextBlueprint(null, this.position, tuning.drawDistance);
       return;
     }
+    this.library.prewarmNextAudioBuffer();
     const nextItem = this.library.nextTrackItem;
     if (!nextItem) return;
     const nextPalette = getStagePalette(this.runManager.stageNumber);
@@ -2012,7 +2025,12 @@ export class Game {
     // Custom-track loop OR player chose Left branch (LOOP CURRENT TRACK):
     if (this.hasCustomTrack || this.forkChoice === 'left') {
       const currentItem = this.library.activeItem;
-      this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true);
+      const fxStyle = this.forkController.getTransitionAudioStyle(
+        this.forkChoice,
+        this.library.hasNextTrack,
+        this.hasCustomTrack,
+      );
+      this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true, fxStyle);
       if (this.horizonAssembler && isStreamingTrack(this.track)) {
         const prevEndZ = this.track.stageFinishWorldZ ?? this.track.length;
         const overshoot = Math.max(0, nextPos - prevEndZ);
@@ -2069,7 +2087,18 @@ export class Game {
       this.lastPaletteBlendStep = -1;
       blendStagePalette(prevRenderPalette, this.palette, 0, this.blendedPalette);
       this.renderPalette = this.blendedPalette;
-      this.audio.crossfadeToTrack(nextItem.beatMap, nextItem.audioBuffer, DEFAULT_CROSSFADE_BARS);
+      const fxStyle = this.forkController.getTransitionAudioStyle(
+        this.forkChoice,
+        true,
+        this.hasCustomTrack,
+      );
+      this.audio.crossfadeToTrack(
+        nextItem.beatMap,
+        nextItem.audioBuffer,
+        DEFAULT_CROSSFADE_BARS,
+        false,
+        fxStyle,
+      );
       this.transitionToNextStage(nextItem.beatMap, nextPos);
 
       const best = this.library.getBestScore(nextItem.contentHash);
@@ -2114,7 +2143,12 @@ export class Game {
       this.lapTime = 0;
       this.runManager.resetStageMetrics(this.car.groove, this.melonSoda.active);
       const currentItem = this.library.activeItem;
-      this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true);
+      const fxStyle = this.forkController.getTransitionAudioStyle(
+        this.forkChoice,
+        this.library.hasNextTrack,
+        this.hasCustomTrack,
+      );
+      this.audio.crossfadeToTrack(currentItem.beatMap, currentItem.audioBuffer, 2, true, fxStyle);
     }
   }
 

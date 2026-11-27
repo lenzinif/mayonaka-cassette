@@ -1,13 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isBeatMap, type BeatMap } from './BeatMap';
 import {
   DEFAULT_SYNTH_BEATMAP,
   BUNDLED_WANGAN_BEATMAP,
   BUNDLED_COASTAL_BEATMAP,
 } from './FunkAudioEngine';
-import { TrackLibrary } from './TrackLibrary';
+import { DEFAULT_MAX_DECODED_BUFFERS, TrackLibrary } from './TrackLibrary';
 
 describe('TrackLibrary — Playlist Track Management & Removal', () => {
   beforeEach(() => {
@@ -274,5 +274,197 @@ describe('TrackLibrary — Playlist Track Management & Removal', () => {
     } finally {
       g.indexedDB = prevIdb;
     }
+  });
+});
+
+describe('TrackLibrary — AudioBuffer LRU Memory Eviction & On-Demand Hydration', () => {
+  const g = globalThis as unknown as { window?: Record<string, unknown> };
+  let prevWindow: Record<string, unknown> | undefined;
+  let decodeCalls = 0;
+
+  function makeFakeAudioBuffer(tag: number, durationSec = 8, sampleRate = 44100): AudioBuffer {
+    const length = Math.floor(durationSec * sampleRate);
+    const ch0 = new Float32Array(length);
+    ch0[0] = tag;
+    return {
+      duration: durationSec,
+      length,
+      numberOfChannels: 2,
+      sampleRate,
+      getChannelData: () => ch0,
+      copyFromChannel: vi.fn(),
+      copyToChannel: vi.fn(),
+    } as unknown as AudioBuffer;
+  }
+
+  class FakeOfflineAudioContext {
+    private readonly channels: number;
+    private readonly length: number;
+    private readonly sampleRate: number;
+
+    constructor(channels: number, length: number, sampleRate: number) {
+      this.channels = channels;
+      this.length = length;
+      this.sampleRate = sampleRate;
+    }
+
+    async decodeAudioData(bytes: ArrayBuffer): Promise<AudioBuffer> {
+      decodeCalls++;
+      const view = new Uint8Array(bytes);
+      const tag = view[0] ?? decodeCalls;
+      return makeFakeAudioBuffer(tag, 8, 44100);
+    }
+
+    createBufferSource() {
+      return {
+        buffer: null as AudioBuffer | null,
+        connect: vi.fn(),
+        start: vi.fn(),
+      };
+    }
+
+    get destination() {
+      return {};
+    }
+
+    async startRendering(): Promise<AudioBuffer> {
+      const pcm = new Float32Array(this.length);
+      return {
+        duration: this.length / this.sampleRate,
+        length: this.length,
+        numberOfChannels: this.channels,
+        sampleRate: this.sampleRate,
+        getChannelData: () => pcm,
+        copyFromChannel: vi.fn(),
+        copyToChannel: vi.fn(),
+      } as unknown as AudioBuffer;
+    }
+  }
+
+  function makeFakeAudioFile(index: number): File {
+    const bytes = new Uint8Array(64);
+    bytes[0] = index + 1;
+    bytes[1] = (index * 37) & 0xff;
+    return new File([bytes], `Artist ${index} - Track ${index}.mp3`, { type: 'audio/mpeg' });
+  }
+
+  beforeEach(() => {
+    decodeCalls = 0;
+    prevWindow = g.window;
+    g.window = {
+      ...(prevWindow ?? {}),
+      OfflineAudioContext: FakeOfflineAudioContext,
+    };
+  });
+
+  afterEach(() => {
+    g.window = prevWindow;
+  });
+
+  it('caps decoded AudioBuffers via LRU eviction on long playlists while preserving BeatMaps and active+next tracks', async () => {
+    const lib = new TrackLibrary(undefined, { maxDecodedBuffers: 3 });
+    expect(lib.maxDecodedBuffers).toBe(DEFAULT_MAX_DECODED_BUFFERS);
+
+    const files = Array.from({ length: 7 }, (_, i) => makeFakeAudioFile(i));
+    const imported = await lib.importFiles(files);
+
+    expect(imported.length).toBe(7);
+    expect(lib.decodedBufferCount).toBeLessThanOrEqual(3);
+
+    const expectedPerBufferBytes = 8 * 44100 * 2 * 4;
+    expect(lib.getEstimatedAudioMemoryBytes()).toBeLessThanOrEqual(3 * expectedPerBufferBytes);
+
+    // Active track (imported[0]) and upcoming track (imported[1]) are pinned in RAM
+    expect(lib.activeItem.contentHash).toBe(imported[0]!.contentHash);
+    expect(lib.activeItem.audioBuffer).not.toBeNull();
+    expect(lib.nextTrackItem?.contentHash).toBe(imported[1]!.contentHash);
+    expect(lib.nextTrackItem?.audioBuffer).not.toBeNull();
+
+    // Evicted items still retain their BeatMap (in memoryCache & playlist)
+    const evictedItem = imported.find((it) => it.audioBuffer === null);
+    expect(evictedItem).toBeDefined();
+    if (evictedItem) {
+      expect(await lib.getCachedBeatMap(evictedItem.contentHash)).not.toBeNull();
+    }
+
+    lib.dispose();
+    expect(lib.decodedBufferCount).toBe(0);
+    expect(lib.getEstimatedAudioMemoryBytes()).toBe(0);
+  });
+
+  it('skips eager decode beyond maxDecodedBuffers when BeatMaps are cached and re-hydrates on-demand on advance', async () => {
+    const lib = new TrackLibrary(undefined, { maxDecodedBuffers: 2 });
+    const files = Array.from({ length: 5 }, (_, i) => makeFakeAudioFile(i));
+
+    // Pre-populate BeatMap cache for all 5 files (simulating cached IndexedDB BeatMaps)
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]!;
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      const hash =
+        'sha256:' +
+        Array.from(new Uint8Array(digest))
+          .map((b) => b.toString(16).padStart(2, '0'))
+          .join('');
+      await lib.putCachedBeatMap({
+        ...DEFAULT_SYNTH_BEATMAP,
+        contentHash: hash,
+        title: `Cached ${i}`,
+        source: 'analysis',
+        spectralSpans: [],
+      });
+    }
+
+    const imported = await lib.importFiles(files);
+    // Only the first 2 (active + next) needed eager decode during cached import
+    expect(decodeCalls).toBe(2);
+    expect(lib.decodedBufferCount).toBe(2);
+    expect(imported[0]!.audioBuffer).not.toBeNull();
+    expect(imported[1]!.audioBuffer).not.toBeNull();
+    expect(imported[2]!.audioBuffer).toBeNull();
+    expect(imported[3]!.audioBuffer).toBeNull();
+    expect(imported[4]!.audioBuffer).toBeNull();
+
+    // Advancing to track 1 automatically pre-warms track 2 on-demand
+    const hydratedHashes: string[] = [];
+    const unsub = lib.onBufferHydrated((item) => hydratedHashes.push(item.contentHash));
+    lib.advanceToNextTrack();
+
+    await new Promise((r) => setTimeout(r, 20));
+    unsub();
+
+    expect(hydratedHashes).toContain(imported[2]!.contentHash);
+    expect(imported[2]!.audioBuffer).not.toBeNull();
+    expect(lib.decodedBufferCount).toBe(2);
+    // Track 0 was evicted once we moved past it
+    expect(imported[0]!.audioBuffer).toBeNull();
+
+    lib.dispose();
+  });
+
+  it('keeps single-track audioBuffer safe from eviction and releases buffers on remove/restore', async () => {
+    const lib = new TrackLibrary(undefined, { maxDecodedBuffers: 2 });
+    const [single] = await lib.importFiles([makeFakeAudioFile(10)]);
+    expect(single).toBeDefined();
+
+    // Attempting to shrink limit below 2 clamps to 2 and never evicts active single track
+    lib.setMaxDecodedBuffers(1);
+    expect(lib.maxDecodedBuffers).toBe(2);
+    expect(lib.activeItem.audioBuffer).not.toBeNull();
+
+    // Removing the imported track releases its buffer from RAM
+    const activeIdx = lib.currentIndex;
+    lib.removeTrack(activeIdx);
+    expect(lib.decodedBufferCount).toBe(0);
+    expect(lib.getEstimatedAudioMemoryBytes()).toBe(0);
+
+    // Re-import then restoreDefaultPlaylist clears all user buffers
+    await lib.importFiles([makeFakeAudioFile(11)]);
+    expect(lib.decodedBufferCount).toBe(1);
+    lib.restoreDefaultPlaylist();
+    expect(lib.decodedBufferCount).toBe(0);
+    expect(lib.items.length).toBe(3);
+
+    lib.dispose();
   });
 });
