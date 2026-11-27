@@ -5,7 +5,20 @@ import {
   BUNDLED_WANGAN_BEATMAP,
   DEFAULT_SYNTH_BEATMAP,
 } from './FunkAudioEngine';
-import { decodeAudioForAnalysis, hashAudioBytes, TrackAnalyzer } from './TrackAnalyzer';
+import {
+  decodeAudioBufferOnly,
+  decodeAudioForAnalysis,
+  hashAudioBytes,
+  TrackAnalyzer,
+} from './TrackAnalyzer';
+
+/** Default number of decoded user `AudioBuffer` instances retained in RAM via LRU eviction. */
+export const DEFAULT_MAX_DECODED_BUFFERS = 3;
+
+export interface TrackLibraryOptions {
+  /** Maximum decoded user `AudioBuffer` entries kept in memory simultaneously (minimum 2). */
+  maxDecodedBuffers?: number;
+}
 
 const IDB_NAME = 'mayonaka-cassette-audio';
 const IDB_VERSION = 6;
@@ -153,10 +166,15 @@ export function computeOverallRunGrade(stages: readonly StageScoreSummary[]): Ru
  */
 export class TrackLibrary {
   private readonly memoryCache = new Map<string, BeatMap>();
+  private readonly audioBufferCache = new Map<string, AudioBuffer>();
+  private readonly sourceFiles = new Map<string, Blob>();
+  private readonly pendingDecodes = new Map<string, Promise<AudioBuffer | null>>();
   private readonly bestScores = new Map<string, SongBestScore>();
   private readonly analyzer = new TrackAnalyzer();
   private readonly listeners = new Set<() => void>();
+  private readonly bufferHydratedListeners = new Set<(item: PlaylistItem) => void>();
   private readonly preloader?: { getJson<T = unknown>(id: string): T | null };
+  private maxBuffers: number;
 
   private playlist: PlaylistItem[] = BUNDLED_BEATMAPS.map((beatMap) => ({
     id: beatMap.contentHash,
@@ -167,10 +185,54 @@ export class TrackLibrary {
   }));
   private activeIndex = 0;
 
-  constructor(preloader?: { getJson<T = unknown>(id: string): T | null }) {
+  constructor(
+    preloader?: { getJson<T = unknown>(id: string): T | null },
+    options?: TrackLibraryOptions,
+  ) {
     this.preloader = preloader;
+    this.maxBuffers = Math.max(
+      2,
+      Math.floor(options?.maxDecodedBuffers ?? DEFAULT_MAX_DECODED_BUFFERS),
+    );
     this.loadBestScoresFromLocalStorage();
     void this.loadBestScoresFromIdb();
+  }
+
+  get maxDecodedBuffers(): number {
+    return this.maxBuffers;
+  }
+
+  /**
+   * Updates the maximum number of decoded `AudioBuffer` entries kept in memory (clamped to >= 2)
+   * and immediately evicts excess LRU buffers not pinned as active or upcoming.
+   */
+  setMaxDecodedBuffers(limit: number): void {
+    if (!Number.isFinite(limit)) return;
+    this.maxBuffers = Math.max(2, Math.floor(limit));
+    this.evictAudioBuffersIfNeeded();
+  }
+
+  /** Number of decoded `AudioBuffer` entries currently retained in the LRU cache. */
+  get decodedBufferCount(): number {
+    return this.audioBufferCache.size;
+  }
+
+  /** Approximate PCM memory footprint (bytes) of all currently retained `AudioBuffer` entries. */
+  getEstimatedAudioMemoryBytes(): number {
+    let bytes = 0;
+    for (const buf of this.audioBufferCache.values()) {
+      const channels = typeof buf.numberOfChannels === 'number' && buf.numberOfChannels > 0 ? buf.numberOfChannels : 2;
+      bytes += buf.length * channels * 4;
+    }
+    return bytes;
+  }
+
+  /** Subscribes to asynchronous on-demand buffer hydration events (e.g. pre-warmed or re-decoded tracks). */
+  onBufferHydrated(listener: (item: PlaylistItem) => void): () => void {
+    this.bufferHydratedListeners.add(listener);
+    return () => {
+      this.bufferHydratedListeners.delete(listener);
+    };
   }
 
   get items(): readonly PlaylistItem[] {
@@ -215,6 +277,7 @@ export class TrackLibrary {
   selectTrack(index: number): PlaylistItem {
     if (index >= 0 && index < this.playlist.length) {
       this.activeIndex = index;
+      this.onActiveTrackChanged();
       this.notify();
     }
     return this.activeItem;
@@ -224,6 +287,7 @@ export class TrackLibrary {
   advanceToNextTrack(): PlaylistItem | null {
     if (!this.hasNextTrack) return null;
     this.activeIndex += 1;
+    this.onActiveTrackChanged();
     this.notify();
     return this.activeItem;
   }
@@ -232,6 +296,7 @@ export class TrackLibrary {
     const idx = this.playlist.findIndex((it) => it.contentHash === contentHash);
     if (idx >= 0) {
       this.activeIndex = idx;
+      this.onActiveTrackChanged();
       this.notify();
     }
     return this.activeItem;
@@ -252,12 +317,19 @@ export class TrackLibrary {
     const [removed] = this.playlist.splice(index, 1);
     if (!removed) return null;
 
+    if (!this.playlist.some((it) => it.contentHash === removed.contentHash)) {
+      this.audioBufferCache.delete(removed.contentHash);
+      this.sourceFiles.delete(removed.contentHash);
+      removed.audioBuffer = null;
+    }
+
     if (index < this.activeIndex) {
       this.activeIndex = Math.max(0, this.activeIndex - 1);
     } else if (index === this.activeIndex) {
       this.activeIndex = Math.min(this.activeIndex, this.playlist.length - 1);
     }
 
+    this.onActiveTrackChanged();
     this.notify();
     return removed;
   }
@@ -284,6 +356,9 @@ export class TrackLibrary {
    * Restores the default 3-stage Future Funk playlist from bundled BeatMaps.
    */
   restoreDefaultPlaylist(): void {
+    this.audioBufferCache.clear();
+    this.sourceFiles.clear();
+    this.pendingDecodes.clear();
     this.playlist = BUNDLED_BEATMAPS.map((beatMap) => ({
       id: beatMap.contentHash,
       contentHash: beatMap.contentHash,
@@ -415,40 +490,55 @@ export class TrackLibrary {
     if (fileArray.length === 0) return [];
 
     const imported: PlaylistItem[] = [];
+    const keepImportHashes = new Set<string>();
     let completed = 0;
 
-    for (const file of fileArray) {
+    for (let i = 0; i < fileArray.length; i++) {
+      const file = fileArray[i]!;
       const bytes = await file.arrayBuffer();
       const contentHash = await hashAudioBytes(bytes);
       const cachedBeatMap = await this.getCachedBeatMap(contentHash);
-      const decoded = await decodeAudioForAnalysis(bytes);
+      this.sourceFiles.set(contentHash, file);
 
       let beatMap: BeatMap;
+      let audioBuffer: AudioBuffer | null;
       const needsSpectralReanalysis =
         cachedBeatMap !== null &&
         cachedBeatMap.source === 'analysis' &&
         (cachedBeatMap.barBrightness === undefined || cachedBeatMap.spectralSpans === undefined);
       const fromCache = cachedBeatMap !== null && !needsSpectralReanalysis;
 
-      if (cachedBeatMap && !needsSpectralReanalysis) {
+      if (fromCache && cachedBeatMap && i >= this.maxBuffers) {
+        // Long playlist with BeatMap already cached in IndexedDB: defer PCM decode until track becomes upcoming
         beatMap = cachedBeatMap;
+        audioBuffer = this.touchBufferLru(contentHash);
       } else {
-        const parsed = parseTitleArtistFromFilename(file.name);
-        const res = await this.analyzer.analyzeMonoPcm(decoded.monoPcm, decoded.sampleRate, {
-          contentHash,
-          title: parsed.title,
-          artist: parsed.artist,
-          durationSec: decoded.durationSec,
-        });
-        beatMap = res.beatMap;
-        await this.putCachedBeatMap(beatMap);
+        const decoded = await decodeAudioForAnalysis(bytes);
+        if (cachedBeatMap && !needsSpectralReanalysis) {
+          beatMap = cachedBeatMap;
+        } else {
+          const parsed = parseTitleArtistFromFilename(file.name);
+          const res = await this.analyzer.analyzeMonoPcm(decoded.monoPcm, decoded.sampleRate, {
+            contentHash,
+            title: parsed.title,
+            artist: parsed.artist,
+            durationSec: decoded.durationSec,
+          });
+          beatMap = res.beatMap;
+          await this.putCachedBeatMap(beatMap);
+        }
+        audioBuffer = decoded.audioBuffer;
+      }
+
+      if (keepImportHashes.size < 2) {
+        keepImportHashes.add(contentHash);
       }
 
       const item: PlaylistItem = {
         id: `${contentHash}:${Date.now()}:${completed}`,
         contentHash,
         beatMap,
-        audioBuffer: decoded.audioBuffer,
+        audioBuffer,
         isBundled: false,
       };
 
@@ -458,6 +548,12 @@ export class TrackLibrary {
         this.playlist = this.playlist.map((p, idx) => (idx === existingIdx ? item : p));
       } else {
         this.playlist = [...this.playlist, item];
+      }
+
+      if (audioBuffer) {
+        this.registerDecodedBuffer(contentHash, audioBuffer, keepImportHashes);
+      } else {
+        this.evictAudioBuffersIfNeeded(keepImportHashes);
       }
 
       imported.push(item);
@@ -474,8 +570,66 @@ export class TrackLibrary {
     if (imported[0]) {
       this.selectByContentHash(imported[0].contentHash);
     }
+    this.prewarmNextAudioBuffer();
 
     return imported;
+  }
+
+  /**
+   * Ensures a user-imported track's `AudioBuffer` is decoded in memory, re-decoding on-demand
+   * from its retained `Blob`/`File` reference if it was evicted by the LRU cache.
+   */
+  async ensureAudioBuffer(contentHash: string): Promise<AudioBuffer | null> {
+    const cached = this.touchBufferLru(contentHash);
+    if (cached) {
+      this.syncPlaylistItemBuffer(contentHash, cached);
+      return cached;
+    }
+
+    const pending = this.pendingDecodes.get(contentHash);
+    if (pending) {
+      return pending;
+    }
+
+    const source = this.sourceFiles.get(contentHash);
+    if (!source) {
+      return null;
+    }
+
+    const task = (async (): Promise<AudioBuffer | null> => {
+      try {
+        const bytes = await source.arrayBuffer();
+        const buffer = await decodeAudioBufferOnly(bytes);
+        if (!this.playlist.some((it) => it.contentHash === contentHash)) {
+          return null;
+        }
+        this.registerDecodedBuffer(contentHash, buffer, [contentHash]);
+        const updatedItem = this.playlist.find((it) => it.contentHash === contentHash);
+        if (updatedItem) {
+          this.notifyBufferHydrated(updatedItem);
+        }
+        this.notify();
+        return buffer;
+      } catch {
+        return null;
+      } finally {
+        this.pendingDecodes.delete(contentHash);
+      }
+    })();
+
+    this.pendingDecodes.set(contentHash, task);
+    return task;
+  }
+
+  /**
+   * Pre-decodes the upcoming playlist track in the background if its `AudioBuffer` was
+   * deferred or evicted, preventing audio gaps or hitches at the next stage fork.
+   */
+  prewarmNextAudioBuffer(): void {
+    const next = this.nextTrackItem;
+    if (!next || next.isBundled || next.audioBuffer !== null) return;
+    if (!this.sourceFiles.has(next.contentHash)) return;
+    void this.ensureAudioBuffer(next.contentHash);
   }
 
   /**
@@ -538,7 +692,101 @@ export class TrackLibrary {
 
   dispose(): void {
     this.analyzer.dispose();
+    this.audioBufferCache.clear();
+    this.sourceFiles.clear();
+    this.pendingDecodes.clear();
     this.listeners.clear();
+    this.bufferHydratedListeners.clear();
+  }
+
+  private onActiveTrackChanged(): void {
+    const active = this.playlist[this.activeIndex];
+    const next = this.playlist[this.activeIndex + 1];
+    if (active) {
+      const cached = this.touchBufferLru(active.contentHash);
+      if (cached && active.audioBuffer !== cached) {
+        this.syncPlaylistItemBuffer(active.contentHash, cached);
+      }
+    }
+    if (next) {
+      const cached = this.touchBufferLru(next.contentHash);
+      if (cached && next.audioBuffer !== cached) {
+        this.syncPlaylistItemBuffer(next.contentHash, cached);
+      }
+    }
+    this.evictAudioBuffersIfNeeded();
+    if (
+      active &&
+      !active.isBundled &&
+      active.audioBuffer === null &&
+      this.sourceFiles.has(active.contentHash)
+    ) {
+      void this.ensureAudioBuffer(active.contentHash);
+    }
+    this.prewarmNextAudioBuffer();
+  }
+
+  private touchBufferLru(contentHash: string): AudioBuffer | null {
+    const buf = this.audioBufferCache.get(contentHash);
+    if (!buf) return null;
+    this.audioBufferCache.delete(contentHash);
+    this.audioBufferCache.set(contentHash, buf);
+    return buf;
+  }
+
+  private syncPlaylistItemBuffer(contentHash: string, buffer: AudioBuffer | null): void {
+    for (let i = 0; i < this.playlist.length; i++) {
+      const item = this.playlist[i]!;
+      if (item.contentHash === contentHash && item.audioBuffer !== buffer) {
+        item.audioBuffer = buffer;
+      }
+    }
+  }
+
+  private getPinnedHashes(extraHashes?: Iterable<string>): Set<string> {
+    const pinned = new Set<string>();
+    const active = this.playlist[this.activeIndex];
+    if (active) pinned.add(active.contentHash);
+    const next = this.playlist[this.activeIndex + 1];
+    if (next) pinned.add(next.contentHash);
+    if (extraHashes) {
+      for (const h of extraHashes) pinned.add(h);
+    }
+    return pinned;
+  }
+
+  private evictAudioBuffersIfNeeded(extraPinned?: Iterable<string>): void {
+    if (this.audioBufferCache.size <= this.maxBuffers) return;
+    const pinned = this.getPinnedHashes(extraPinned);
+    while (this.audioBufferCache.size > this.maxBuffers) {
+      let evictedHash: string | null = null;
+      for (const hash of this.audioBufferCache.keys()) {
+        if (!pinned.has(hash)) {
+          evictedHash = hash;
+          break;
+        }
+      }
+      if (!evictedHash) break;
+      this.audioBufferCache.delete(evictedHash);
+      this.syncPlaylistItemBuffer(evictedHash, null);
+    }
+  }
+
+  private registerDecodedBuffer(
+    contentHash: string,
+    buffer: AudioBuffer,
+    extraPinned?: Iterable<string>,
+  ): void {
+    this.audioBufferCache.delete(contentHash);
+    this.audioBufferCache.set(contentHash, buffer);
+    this.syncPlaylistItemBuffer(contentHash, buffer);
+    this.evictAudioBuffersIfNeeded(extraPinned);
+  }
+
+  private notifyBufferHydrated(item: PlaylistItem): void {
+    for (const listener of this.bufferHydratedListeners) {
+      listener(item);
+    }
   }
 
   private notify(): void {

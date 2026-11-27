@@ -15,6 +15,17 @@ import type { SodaSkin } from '@src/entities/MelonSoda';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { BeatMapInspector } from './ui/BeatMapInspector';
 import { CanvasStage } from './ui/CanvasStage';
+import {
+  loadCockpitVisibility,
+  saveCockpitVisibility,
+  type CockpitVisibility,
+} from './ui/cockpit/cockpitSettings';
+import type { RadioPlaylistEntry } from './ui/cockpit/RadioConsole';
+import {
+  clearVisorPhoto,
+  loadVisorPhotoDataUrl,
+  saveVisorPhotoFile,
+} from './ui/cockpit/visorPhotoStore';
 import { CRTOverlay } from './ui/CRTOverlay';
 import { DebugPanel, loadSavedTuning } from './ui/DebugPanel';
 import { HUD } from './ui/HUD';
@@ -74,6 +85,7 @@ export function App() {
   const wasPausedBeforeModalRef = useRef(false);
   const wasModalOpenRef = useRef(false);
   const trackLoaderOpeningRef = useRef(false);
+  const visorPhotoReqIdRef = useRef(0);
 
   // Quick settings state
   const [crtEnabled, setCrtEnabled] = useState(() => {
@@ -88,6 +100,18 @@ export function App() {
   const [tofuMode, setTofuMode] = useState(false);
   const [sodaSkin, setSodaSkin] = useState<SodaSkin>('melon-soda');
   const [cleanHud, setCleanHud] = useState(false);
+  const [cockpitVisibility, setCockpitVisibility] = useState<CockpitVisibility>(() =>
+    loadCockpitVisibility(),
+  );
+  const [visorPhotoUrl, setVisorPhotoUrl] = useState<string | null>(null);
+  const [playlistItems, setPlaylistItems] = useState<readonly RadioPlaylistEntry[]>(() =>
+    library.items.map((it) => ({
+      id: it.id,
+      title: it.beatMap.title,
+      artist: it.beatMap.artist,
+      bpm: it.beatMap.bpm,
+    })),
+  );
 
   const [debugOpen, setDebugOpen] = useState(() => {
     const params = new URLSearchParams(window.location.search);
@@ -268,6 +292,69 @@ export function App() {
   }, [preloader, library, loadTestTrack]);
 
   useEffect(() => {
+    const reqId = ++visorPhotoReqIdRef.current;
+    void loadVisorPhotoDataUrl().then((url) => {
+      if (reqId === visorPhotoReqIdRef.current && url) {
+        setVisorPhotoUrl(url);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const syncPlaylist = () => {
+      setPlaylistItems(
+        library.items.map((it) => ({
+          id: it.id,
+          title: it.beatMap.title,
+          artist: it.beatMap.artist,
+          bpm: it.beatMap.bpm,
+        })),
+      );
+    };
+    syncPlaylist();
+    return library.subscribe(syncPlaylist);
+  }, [library]);
+
+  const handleToggleCockpitModule = useCallback((key: keyof CockpitVisibility) => {
+    setCockpitVisibility((prev) => {
+      const nextVal = !prev[key];
+      if (nextVal) {
+        setCleanHud(false);
+      }
+      const next = { ...prev, [key]: nextVal };
+      saveCockpitVisibility(next);
+      return next;
+    });
+  }, []);
+
+  const handleApplyCockpitPreset = useCallback((preset: CockpitVisibility) => {
+    const next = { ...preset };
+    setCleanHud(false);
+    saveCockpitVisibility(next);
+    setCockpitVisibility(next);
+  }, []);
+
+  const handleUploadVisorPhoto = useCallback(async (file: File) => {
+    const reqId = ++visorPhotoReqIdRef.current;
+    try {
+      const url = await saveVisorPhotoFile(file);
+      if (reqId === visorPhotoReqIdRef.current) {
+        setVisorPhotoUrl(url);
+      }
+    } catch {
+      // Ignore invalid or unreadable image files
+    }
+  }, []);
+
+  const handleClearVisorPhoto = useCallback(async () => {
+    const reqId = ++visorPhotoReqIdRef.current;
+    await clearVisorPhoto();
+    if (reqId === visorPhotoReqIdRef.current) {
+      setVisorPhotoUrl(null);
+    }
+  }, []);
+
+  useEffect(() => {
     return () => {
       audio.dispose();
       library.dispose();
@@ -310,11 +397,45 @@ export function App() {
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, openTrackLoader, closeTrackLoader]);
 
-  const handleSelectTrack = (item: PlaylistItem) => {
-    void audio.unlock().then(() => setAudioUnlocked(true));
-    audio.loadTrack(item.beatMap, item.audioBuffer);
-    gameRef.current?.loadBeatMapRoad(item.beatMap, true);
-  };
+  const handleSelectTrack = useCallback(
+    (item: PlaylistItem) => {
+      void audio.unlock().then(() => setAudioUnlocked(true));
+      audio.loadTrack(item.beatMap, item.audioBuffer);
+      gameRef.current?.loadBeatMapRoad(item.beatMap, true);
+    },
+    [audio],
+  );
+
+  const handleSelectPlaylistIndex = useCallback(
+    (index: number) => {
+      if (index === library.currentIndex) return;
+      const item = library.selectTrack(index);
+      handleSelectTrack(item);
+    },
+    [library, handleSelectTrack],
+  );
+
+  const handleOpenDeckModal = useCallback(() => {
+    openTrackLoader(false);
+  }, [openTrackLoader]);
+
+  const handleToggleAutoShiftCallback = useCallback(() => {
+    gameRef.current?.toggleAutoShift();
+  }, []);
+
+  const handlePrevTrack = useCallback(() => {
+    const len = library.items.length;
+    if (len <= 1) return;
+    const prevIdx = (library.currentIndex - 1 + len) % len;
+    handleSelectPlaylistIndex(prevIdx);
+  }, [library, handleSelectPlaylistIndex]);
+
+  const handleNextTrack = useCallback(() => {
+    const len = library.items.length;
+    if (len <= 1) return;
+    const nextIdx = (library.currentIndex + 1) % len;
+    handleSelectPlaylistIndex(nextIdx);
+  }, [library, handleSelectPlaylistIndex]);
 
   const handleUpdateBeatMap = (contentHash: string, updated: BeatMap) => {
     void library.updateBeatMap(contentHash, updated);
@@ -419,15 +540,25 @@ export function App() {
           minimalPerfOnly={noHud}
           hideCassette={noCassette}
           hideVfd={noVfd}
+          cockpitVisibility={cockpitVisibility}
+          onToggleCockpitModule={handleToggleCockpitModule}
+          onApplyCockpitPreset={handleApplyCockpitPreset}
+          visorPhotoUrl={visorPhotoUrl}
+          onUploadVisorPhoto={handleUploadVisorPhoto}
+          onClearVisorPhoto={handleClearVisorPhoto}
+          playlistItems={playlistItems}
+          onPrevTrack={handlePrevTrack}
+          onNextTrack={handleNextTrack}
+          onSelectPlaylistIndex={handleSelectPlaylistIndex}
           onToggleCrt={() => setCrtEnabled((prev) => !prev)}
           onToggleCleanHud={() => setCleanHud((prev) => !prev)}
           onTogglePause={() => gameRef.current?.togglePause()}
-          onToggleAutoShift={() => gameRef.current?.toggleAutoShift()}
+          onToggleAutoShift={handleToggleAutoShiftCallback}
           onToggleTofuMode={() => gameRef.current?.toggleTofuMode()}
           onCycleSodaSkin={() => gameRef.current?.cycleSodaSkin()}
           onToggleAutopilot={() => gameRef.current?.toggleAutopilot()}
           onToggleDebug={() => setDebugOpen((prev) => !prev)}
-          onOpenTrackLoader={() => openTrackLoader(false)}
+          onOpenTrackLoader={handleOpenDeckModal}
           onOpenInspector={() => setInspectorOpen(true)}
           onRestartRun={() => gameRef.current?.restartPlaylistRun()}
           onReturnToMainMenu={handleReturnToMainMenu}
@@ -490,6 +621,12 @@ export function App() {
             onToggleCleanHud={() => setCleanHud((prev) => !prev)}
             crtEnabled={crtEnabled}
             onToggleCrt={() => setCrtEnabled((prev) => !prev)}
+            cockpitVisibility={cockpitVisibility}
+            visorPhotoUrl={visorPhotoUrl}
+            onToggleCockpitModule={handleToggleCockpitModule}
+            onApplyCockpitPreset={handleApplyCockpitPreset}
+            onUploadVisorPhoto={handleUploadVisorPhoto}
+            onClearVisorPhoto={handleClearVisorPhoto}
           />
         )}
       </div>

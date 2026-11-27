@@ -39,4 +39,23 @@ describe('QuickOptionsModal (UI Layer)', () => {
     const matches = text.match(/BACK/g);
     expect(matches).toHaveLength(1);
   });
+
+  it('renders cockpit module toggles and preserves single BACK button when cockpit handlers are provided', () => {
+    const rawHtml = renderToString(
+      createElement(QuickOptionsModal, {
+        ...defaultProps,
+        onToggleCockpitModule: vi.fn(),
+        onApplyCockpitPreset: vi.fn(),
+      }),
+    );
+    const text = rawHtml.replace(/<!--.*?-->/g, '');
+
+    expect(text).toContain('COCKPIT MODULES');
+    expect(text).toContain('LUXURY FULL');
+    expect(text).toContain('CLEAN DRIVE');
+    expect(text).toContain('AUTORADIO PLAYLIST');
+    expect(text).toContain('SUN VISOR PHOTO');
+    const matches = text.match(/BACK/g);
+    expect(matches).toHaveLength(1);
+  });
 });

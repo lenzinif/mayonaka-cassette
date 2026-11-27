@@ -130,9 +130,11 @@ describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
     expect(text).toContain('88%');
 
     expect(text).toContain('TOFU ×2');
-    expect(text).toContain('1 SPILL');
+    expect(text).not.toContain('1 SPILL');
     expect(text).toContain('GP');
 
+    expect(text).toContain('88.4 FM · DIN TUNER');
+    expect(text).toContain('SUN VISOR');
     expect(text).toContain('GROOVE');
     expect(text).toContain('214');
     expect(text).toContain('KM/H');
@@ -236,5 +238,58 @@ describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
     );
 
     expect(rawHtml).toBe('');
+  });
+
+  it('respects individual cockpitVisibility toggles for modular cockpit stripping', () => {
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const snap = createMockSnapshot();
+    bridge.publish(() => snap);
+
+    const text = renderToString(
+      createElement(HUD, {
+        bridge,
+        debugOpen: false,
+        cockpitVisibility: {
+          showInstrumentCluster: false,
+          showRadioConsole: false,
+          showSunVisor: false,
+          showCassetteWidget: true,
+        },
+        onToggleDebug: vi.fn(),
+        onOpenTrackLoader: vi.fn(),
+        onOpenInspector: vi.fn(),
+        onRestartRun: vi.fn(),
+      }),
+    ).replace(/<!--.*?-->/g, '');
+
+    expect(text).toContain('Mayonaka FM — Plastic Love Night');
+    expect(text).not.toContain('88.4 FM · DIN TUNER');
+    expect(text).not.toContain('SUN VISOR');
+    expect(text).not.toContain('KM/H');
+  });
+
+  it('hides all cockpit modules including CassetteTapeWidget when cleanHud [H] is enabled', () => {
+    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
+    const snap = createMockSnapshot();
+    bridge.publish(() => snap);
+
+    const text = renderToString(
+      createElement(HUD, {
+        bridge,
+        debugOpen: false,
+        cleanHud: true,
+        onToggleDebug: vi.fn(),
+        onOpenTrackLoader: vi.fn(),
+        onOpenInspector: vi.fn(),
+        onRestartRun: vi.fn(),
+      }),
+    ).replace(/<!--.*?-->/g, '');
+
+    expect(text).toContain('FULL H');
+    expect(text).not.toContain('WM-86 · STEREO CASSETTE');
+    expect(text).not.toContain('Plastic Love Night [C]');
+    expect(text).not.toContain('88.4 FM · DIN TUNER');
+    expect(text).not.toContain('SUN VISOR');
+    expect(text).not.toContain('KM/H');
   });
 });
