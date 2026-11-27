@@ -705,16 +705,16 @@ describe('RoadRenderer — Rendering Environments', () => {
         farN: number;
         nearN: number;
       }> = [
-        { kind: 'lamp', offset: 1.3, farN: Math.floor(drawDistance * 0.64), nearN: Math.floor(drawDistance * 0.4) },
-        { kind: 'jihanki', offset: 1.4, farN: Math.floor(drawDistance * 0.54), nearN: Math.floor(drawDistance * 0.35) },
-        { kind: 'building', offset: 7.0, farN: Math.floor(drawDistance * 0.46), nearN: Math.floor(drawDistance * 0.28) },
+        { kind: 'lamp', offset: 1.3, farN: 245, nearN: 120 },
+        { kind: 'jihanki', offset: 1.4, farN: 125, nearN: 75 },
+        { kind: 'building', offset: 7.0, farN: 285, nearN: 140 },
       ];
 
       for (const c of cases) {
         const renderer = new RoadRenderer();
 
         // Far edge just inside category cutoff -> drawn with alpha strictly in (0, 0.7)
-        const farTrack = createLargeTrack(220);
+        const farTrack = createLargeTrack(360);
         farTrack.segments[c.farN]!.sprites.push({ kind: c.kind, offset: c.offset, variant: 0 });
         const farPropTracker = createAlphaTrackingCtx();
         renderer.render(farPropTracker.ctx, farTrack, baseView, PALETTE_NIGHT_FUNK);
@@ -728,7 +728,7 @@ describe('RoadRenderer — Rendering Environments', () => {
         expect(farPropTracker.ctx.globalAlpha).toBe(1);
 
         // Mid-near inside full opacity range -> drawn at alpha === 1 (never dimmed)
-        const nearTrack = createLargeTrack(220);
+        const nearTrack = createLargeTrack(360);
         nearTrack.segments[c.nearN]!.sprites.push({ kind: c.kind, offset: c.offset, variant: 0 });
         const nearPropTracker = createAlphaTrackingCtx();
         renderer.render(nearPropTracker.ctx, nearTrack, baseView, PALETTE_NIGHT_FUNK);
@@ -1752,8 +1752,339 @@ describe('RoadRenderer — Rendering Environments', () => {
         { ...defaultView, position: 0, drawDistance: 200 },
         PALETTE_VAPORFUNK,
       );
-      // 16 fog bands produce far more distinct shades across the draw distance than the old 4-band LUT
+      // 24 fog bands produce far more distinct shades across the draw distance
       expect(uniqueFills.size).toBeGreaterThanOrEqual(15);
+    });
+  });
+
+  describe('P0.1 — Deep Horizon, Progressive Pylon Wires, Continuous Bridge Lights & Anchored Cables', () => {
+    it('draws tall skyline buildings beyond view.drawDistance (n = 260 on 360-seg track) as distant silhouettes', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 360; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: i === 260 ? [{ kind: 'building', offset: 6.5, variant: 0 }] : [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      const deepTrack: Track = { segments, segmentLength: segLen, length: 360 * segLen };
+      const mock = createMockCanvas();
+      renderer.render(mock.ctx, deepTrack, { ...defaultView, position: 0, drawDistance: 200 }, PALETTE_NIGHT_FUNK);
+      expect(renderer.stats.drawnProps).toBe(1);
+      expect(mock.rectCalls).toBeGreaterThan(10);
+    });
+
+    it('subdivides partially visible pylon catenary spans via de Casteljau when far pylon crosses wireMaxN', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 220; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites:
+            i === 168 || i === 190
+              ? [{ kind: 'pylon', offset: 3.5, variant: 0, chainId: 1 }]
+              : [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      const track: Track = { segments, segmentLength: segLen, length: 220 * segLen };
+      const curveEnds: Array<[number, number]> = [];
+      const moveStarts: Array<[number, number]> = [];
+      const noop = () => {};
+
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: (x: number, y: number) => {
+          moveStarts.push([x, y]);
+        },
+        lineTo: noop,
+        quadraticCurveTo: (_cpx: number, _cpy: number, x: number, y: number) => {
+          curveEnds.push([x, y]);
+        },
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: noop,
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(ctx, track, { ...defaultView, position: 0, drawDistance: 210 }, PALETTE_NIGHT_FUNK);
+      // Span connects 168 -> partial tGrow = (180 - 168) / (190 - 168) ~ 0.545 before vanishing point
+      expect(renderer.stats.drawnPylonSpans).toBe(1);
+      expect(curveEnds.length).toBeGreaterThanOrEqual(5);
+      expect(curveEnds[0]![0]).toBeLessThan(moveStarts[0]![0]);
+      // Subdivided endpoint stops noticeably nearer to xNear than the full 168 -> 190 distance
+      expect(curveEnds[0]![0] - 320).toBeGreaterThan(20);
+    });
+
+    it('keeps bridge parapet lights continuous past w1 < 44 without a mid-road cutoff', () => {
+      tuning.roadFogStrength = 0;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 120; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: 0,
+          sprites: [],
+          fog: 1,
+          env: 'bridge',
+        });
+      }
+      // Position camera at 8000 (segment 40), looking across segments 40..119; skip near w1 >= 44 via far bridge slice check
+      // Check segments 70..115 from position 0: w1 at n = 75 is 2560 / 75 = 34.1 < 44 -> still emits #00f5d4/#ff9e24
+      const farOnlyBridge: Track = {
+        segments: segments.map((s, idx) => ({
+          ...s,
+          env: idx >= 70 ? 'bridge' : 'standard',
+        })),
+        segmentLength: segLen,
+        length: 120 * segLen,
+      };
+      const mock = createMockCanvas();
+      renderer.render(mock.ctx, farOnlyBridge, { ...defaultView, position: 0, drawDistance: 120 }, PALETTE_NIGHT_FUNK);
+      expect(mock.fills).toContain('#00f5d4');
+      expect(mock.fills).toContain('#ff9e24');
+    });
+
+    it('anchors longitudinal 3D suspension bridge cables directly to bridge parapets between towers', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 120; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites:
+            i === 20 || i === 60
+              ? [{ kind: 'suspension-tower', offset: 0, variant: 0 }]
+              : [],
+          fog: 1,
+          env: 'bridge',
+        });
+      }
+      const bridgeTrack: Track = { segments, segmentLength: segLen, length: 120 * segLen };
+      let strokes = 0;
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: () => {
+          strokes++;
+        },
+        fillRect: noop,
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(ctx, bridgeTrack, { ...defaultView, position: 0, drawDistance: 120 }, PALETTE_NIGHT_FUNK);
+      // Both towers + longitudinal inter-tower span + forward & near parapet back-stays emit strokes
+      expect(strokes).toBeGreaterThanOrEqual(4);
+    });
+
+    it('fades distant bridge bay water into horizonMist without a sharp un-fogged cutoff', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 200; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: 'bridge',
+        });
+      }
+      const bridgeTrack: Track = { segments, segmentLength: segLen, length: 200 * segLen };
+      const mock = createMockCanvas();
+      renderer.render(mock.ctx, bridgeTrack, { ...defaultView, drawDistance: 200 }, PALETTE_NIGHT_FUNK);
+
+      const uniqueWaterFills = new Set(mock.fills);
+      // Distant bridge slices must generate multiple fogged water shades beyond the 2 base water colors
+      expect(uniqueWaterFills.size).toBeGreaterThan(8);
+    });
+
+    it('never emits negative or zero-width fillRect calls on sharp curves across palettes', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 120; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 6,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      const sharpTrack: Track = { segments, segmentLength: segLen, length: 120 * segLen };
+      const invalidRects: Array<[number, number, number, number]> = [];
+      const noop = () => {};
+
+      const spyCtx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: (x: number, y: number, w: number, h: number) => {
+          if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+            invalidRects.push([x, y, w, h]);
+          }
+        },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      for (const palette of [PALETTE_NIGHT_FUNK, PALETTE_OG_FUTURE_FUNK, PALETTE_AKIBA_NIGHT]) {
+        renderer.render(spyCtx, sharpTrack, { ...defaultView, drawDistance: 120 }, palette);
+      }
+      expect(invalidRects).toEqual([]);
+    });
+
+    it('renders fogged bridge water and parapets when approaching a bridge from standard road', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 140; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 30 ? 'bridge' : 'standard',
+        });
+      }
+      const approachTrack: Track = { segments, segmentLength: segLen, length: 140 * segLen };
+      const mock = createMockCanvas();
+      renderer.render(mock.ctx, approachTrack, { ...defaultView, position: 0, drawDistance: 140 }, PALETTE_NIGHT_FUNK);
+
+      // Even though camera stands on 'standard', distant bridge segments emit multiple fogged water/parapet shades
+      const uniqueFills = new Set(mock.fills);
+      expect(uniqueFills.size).toBeGreaterThan(12);
+      expect(mock.fills).toContain('#484160');
+    });
+
+    it('fades distant pylon catenary wires smoothly via progressive alpha rather than snapping to 1', () => {
+      tuning.roadFogStrength = 0.65;
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const segments: RoadSegment[] = [];
+      for (let i = 0; i < 220; i++) {
+        segments.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites:
+            i === 150 || i === 165 || i === 180 || i === 195
+              ? [{ kind: 'pylon', offset: 3.5, variant: 0, chainId: 1 }]
+              : [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      const pylonTrack: Track = { segments, segmentLength: segLen, length: 220 * segLen };
+      const strokeAlphas: number[] = [];
+      let currentAlpha = 1;
+      const noop = () => {};
+
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        get globalAlpha() {
+          return currentAlpha;
+        },
+        set globalAlpha(v: number) {
+          currentAlpha = v;
+        },
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: () => {
+          if (currentAlpha > 0 && currentAlpha < 1) {
+            strokeAlphas.push(currentAlpha);
+          }
+        },
+        fillRect: noop,
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(ctx, pylonTrack, { ...defaultView, position: 0, drawDistance: 210 }, PALETTE_NIGHT_FUNK);
+      expect(strokeAlphas.length).toBeGreaterThan(0);
+      expect(Math.min(...strokeAlphas)).toBeGreaterThan(0.03);
+      expect(Math.max(...strokeAlphas)).toBeLessThan(0.99);
     });
   });
 });

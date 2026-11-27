@@ -480,5 +480,49 @@ describe('Fase 4 — Elementi a Bordo Pista (RoadsideProps.ts)', () => {
       expect(farMock.fills).toContain('#224455');
       expect(farMock.ctx.globalAlpha).toBe(1);
     });
+
+    it('applies atmospheric fog to shrubs so distant hedges blend smoothly into the horizon', () => {
+      setPropAtmosphere('#0a102b', '#112233', '#224455');
+
+      const nearShrub = createMockCanvas();
+      drawProp(nearShrub.ctx, 'shrub', 200, 240, 0.02, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0);
+      expect(nearShrub.fills).toContain('#06d6a0');
+
+      const farShrub = createMockCanvas();
+      drawProp(farShrub.ctx, 'shrub', 200, 240, 0.008, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(farShrub.fills).toContain('#112233');
+      expect(farShrub.fills).toContain('#224455');
+      expect(farShrub.fills).not.toContain('#06d6a0');
+    });
+
+    it('applies atmospheric fog smoothly across overpass, suspension-tower, sign, and vms', () => {
+      setPropAtmosphere('#0a102b', '#112233', '#224455');
+
+      const fogOverpass = createMockCanvas();
+      drawProp(fogOverpass.ctx, 'overpass', 320, 240, 0.022, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(fogOverpass.fills).toContain('#112233');
+      expect(fogOverpass.fills).toContain('#224455');
+      expect(fogOverpass.fills).not.toContain('#005f3e');
+      expect(fogOverpass.fills).not.toContain('#ffffff');
+
+      const fogTower = createMockCanvas();
+      drawProp(fogTower.ctx, 'suspension-tower', 320, 240, 0.022, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(fogTower.fills).toContain('#112233');
+      expect(fogTower.fills).toContain('#224455');
+      expect(fogTower.fills).not.toContain('#ff4800');
+      expect(fogTower.fills).not.toContain('#f8f9fa');
+
+      const fogSign = createMockCanvas();
+      drawProp(fogSign.ctx, 'sign', 320, 240, 0.025, 1, 2, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(fogSign.fills).toContain('#224455');
+      expect(fogSign.fills).not.toContain('#ffcc00');
+      expect(fogSign.fills).not.toContain('#080414');
+
+      const fogVms = createMockCanvas();
+      drawProp(fogVms.ctx, 'vms', 320, 240, 0.03, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0.8);
+      expect(fogVms.fills).toContain('#112233');
+      expect(fogVms.fills).toContain('#224455');
+      expect(fogVms.fills).not.toContain('#ffb703');
+    });
   });
 });
