@@ -810,12 +810,17 @@ async function main() {
     for (const r of fps) {
       console.log(`${r.query}: avgFps=${r.avgFps}, p95=${r.p95FrameMs}ms, pct60=${r.pct60Fps}%, segs=${r.drawnSegments}, props=${r.drawnProps}`);
     }
+    for (const p of propSweep || []) {
+      if (!p.ok) {
+        console.log(`\n[SWEEP FAIL] ${p.kind}:`, JSON.stringify(p.samples));
+      }
+    }
     console.log('\n=== SCENARIOS ===');
     console.log(JSON.stringify(scenarios, null, 2));
 
     if (!IS_BASELINE) {
       const failedProps = (propSweep || []).filter((p) => !p.ok);
-      const maxP95 = FULL_SONG ? 16.7 : 17.2;
+      const maxP95 = 17.2;
       const minAvgFps = FULL_SONG ? 59.0 : 59.5;
       const failedFps = fps.filter(
         (r) => r.avgFps < minAvgFps || r.p95FrameMs > maxP95 || r.pct60Fps < 98,

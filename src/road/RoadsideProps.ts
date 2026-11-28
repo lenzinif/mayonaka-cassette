@@ -1921,7 +1921,7 @@ function drawVMS(
 
   const steelCol = fogColor(GANTRY_STEEL, fogFactor, false);
   const frameCol = fogColor(VMS_FRAME, fogFactor, false);
-  const darkScreen = fogColor('#1c0905', fogFactor, false);
+  const darkScreen = fogColor('#220b08', fogFactor, false);
   const amberFace = fogColor(VMS_LED_AMBER, fogFactor, true);
   const brightFace = fogColor(VMS_LED_BRIGHT, fogFactor, true);
 
