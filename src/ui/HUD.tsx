@@ -192,82 +192,86 @@ export function HUD({
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between overflow-hidden p-3 text-[var(--ff-cream)] select-none sm:p-4">
-      {!hideBezel && (
-        <RhythmBezel
-          beatPulse={beatPulse}
-          beatInBar={beatInBar}
-          grooveTier={grooveTier}
-          alwaysMount
-        />
-      )}
-
-      {/* TOP-RIGHT: Oversized Sun Visor + Cascading Clipped/Taped Photos */}
-      {visorVisible && (
-        <div className="pointer-events-none absolute top-0 right-2 z-2 sm:right-3">
-          <SunVisorPhoto photos={visorPhotos} />
-        </div>
-      )}
-
-      {/* TOP-LEFT: Cassette Window + Monochrome Theme Progress Bar + Adjacent Playlist */}
-      <div className="relative z-1 flex items-start justify-start">
-        {cassetteVisible && (
-          <CassetteTapeWidget
-            trackTitle={trackTitle}
-            barIndex={barIndex}
+    <>
+      <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between overflow-hidden p-3 text-[var(--ff-cream)] select-none sm:p-4">
+        {!hideBezel && (
+          <RhythmBezel
+            beatPulse={beatPulse}
             beatInBar={beatInBar}
             grooveTier={grooveTier}
-            roadBarIndex={roadBarIndex}
-            totalBars={totalBars}
-            playlistIndex={playlistIndex}
-            playlistItems={effectivePlaylistItems}
-            stageAccentColor={stageAccentColor}
-            isSlack={isTapeSlack}
-            visible={cockpitVisibility.showCassetteWidget}
+            alwaysMount
           />
         )}
-      </div>
 
-      {/* On-Demand Developer Performance Profiler Ribbon (F3) */}
-      {showPerfHud && (
-        <div
-          className={`wm-lcd ff-mono pointer-events-none absolute top-2 z-2 flex flex-wrap items-center justify-end gap-2.5 rounded-[2px] px-3 py-1 text-[10px] text-[var(--wm-silk)] ${
-            debugOpen ? 'right-[396px]' : 'right-3 sm:right-5'
-          }`}
-        >
-          <span className="font-bold tracking-widest text-[var(--wm-play)] uppercase">PERF</span>
-          <span className="font-bold text-[#2ee2be]">
-            {fps} FPS (MIN {snap?.minFps ?? fps})
-          </span>
-          <span className="text-[var(--wm-silk-dim)]">
-            FR: <strong className="text-[var(--wm-silk)]">{snap?.frameTimeMs ?? 16.7}ms</strong> (P95{' '}
-            {snap?.p95FrameMs ?? 16.7})
-          </span>
-          <span className="text-[var(--wm-play)]">
-            JS: <strong className="text-[var(--wm-silk)]">{snap?.renderTimeMs ?? 1.2}ms</strong>
-          </span>
-          <span className="text-[var(--wm-amber)]">
-            GAP: <strong className="text-[var(--wm-silk)]">{snap?.compositorGapMs ?? 0}ms</strong>
-          </span>
-          <span className="text-[var(--wm-play)]">
-            DRP: <strong className="text-[var(--wm-silk)]">{snap?.droppedFrames ?? 0}</strong>
-          </span>
+        {/* TOP-RIGHT: Oversized Sun Visor + Cascading Clipped/Taped Photos */}
+        {visorVisible && (
+          <div className="pointer-events-none absolute inset-0 z-2 overflow-hidden [container-type:size]">
+            <div className="pointer-events-none absolute top-0 right-[7.5cqw]">
+              <SunVisorPhoto photos={visorPhotos} />
+            </div>
+          </div>
+        )}
+
+        {/* TOP-LEFT: Cassette Window + Monochrome Theme Progress Bar + Adjacent Playlist */}
+        <div className="relative z-1 flex items-start justify-start">
+          {cassetteVisible && (
+            <CassetteTapeWidget
+              trackTitle={trackTitle}
+              barIndex={barIndex}
+              beatInBar={beatInBar}
+              grooveTier={grooveTier}
+              roadBarIndex={roadBarIndex}
+              totalBars={totalBars}
+              playlistIndex={playlistIndex}
+              playlistItems={effectivePlaylistItems}
+              stageAccentColor={stageAccentColor}
+              isSlack={isTapeSlack}
+              visible={cockpitVisibility.showCassetteWidget}
+            />
+          )}
         </div>
-      )}
 
-      {/* BOTTOM-LEFT: Speedometer & Tachometer */}
-      <div className="relative z-1 flex items-end justify-start">
-        {vfdVisible && (
-          <VfdDigidash
-            speedKmh={speedKmh}
-            gear={gear}
-            rpm={rpm}
-            groove={groove}
-            grooveTier={grooveTier}
-            isLugging={isLugging}
-            stageAccentColor={stageAccentColor}
-          />
+        {/* On-Demand Developer Performance Profiler Ribbon (F3) */}
+        {showPerfHud && (
+          <div
+            className={`wm-lcd ff-mono pointer-events-none absolute top-2 z-2 flex flex-wrap items-center justify-end gap-2.5 rounded-[2px] px-3 py-1 text-[10px] text-[var(--wm-silk)] ${
+              debugOpen ? 'right-[396px]' : 'right-3 sm:right-5'
+            }`}
+          >
+            <span className="font-bold tracking-widest text-[var(--wm-play)] uppercase">PERF</span>
+            <span className="font-bold text-[#2ee2be]">
+              {fps} FPS (MIN {snap?.minFps ?? fps})
+            </span>
+            <span className="text-[var(--wm-silk-dim)]">
+              FR: <strong className="text-[var(--wm-silk)]">{snap?.frameTimeMs ?? 16.7}ms</strong> (P95{' '}
+              {snap?.p95FrameMs ?? 16.7})
+            </span>
+            <span className="text-[var(--wm-play)]">
+              JS: <strong className="text-[var(--wm-silk)]">{snap?.renderTimeMs ?? 1.2}ms</strong>
+            </span>
+            <span className="text-[var(--wm-amber)]">
+              GAP: <strong className="text-[var(--wm-silk)]">{snap?.compositorGapMs ?? 0}ms</strong>
+            </span>
+            <span className="text-[var(--wm-play)]">
+              DRP: <strong className="text-[var(--wm-silk)]">{snap?.droppedFrames ?? 0}</strong>
+            </span>
+          </div>
         )}
+
+        {/* BOTTOM-LEFT: Speedometer & Tachometer */}
+        <div className="relative z-1 flex items-end justify-start">
+          {vfdVisible && (
+            <VfdDigidash
+              speedKmh={speedKmh}
+              gear={gear}
+              rpm={rpm}
+              groove={groove}
+              grooveTier={grooveTier}
+              isLugging={isLugging}
+              stageAccentColor={stageAccentColor}
+            />
+          )}
+        </div>
       </div>
 
       {/* Right-Edge Portable Cassette Player Pause Menu */}
@@ -306,6 +310,6 @@ export function HUD({
         onToggleCrt={onToggleCrt}
         onReturnToMainMenu={onReturnToMainMenu}
       />
-    </div>
+    </>
   );
 }

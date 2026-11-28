@@ -479,7 +479,7 @@ export function drawMelonSodaInset(
   const shelfWidth = 196;
   const shelfLeftX = canvasWidth - shelfWidth;
   const shelfTopY = canvasHeight - 36;
-  const cx = canvasWidth - 134;
+  const cx = canvasWidth - 66;
   const cupScale = 1.18;
   const cy = canvasHeight - 48;
 
