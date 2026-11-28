@@ -696,7 +696,7 @@ describe('RoadRenderer — Rendering Environments', () => {
     }
 
     it('fades lamp, jihanki, and Band D building smoothly inside their category thresholds and draws at alpha 1 closer up', () => {
-      const drawDistance = 200;
+      const drawDistance = 300;
       const baseView: RoadView = { ...defaultView, drawDistance };
 
       const cases: Array<{
@@ -706,8 +706,8 @@ describe('RoadRenderer — Rendering Environments', () => {
         nearN: number;
       }> = [
         { kind: 'lamp', offset: 1.3, farN: 245, nearN: 120 },
-        { kind: 'jihanki', offset: 1.4, farN: 125, nearN: 75 },
-        { kind: 'building', offset: 7.0, farN: 285, nearN: 140 },
+        { kind: 'jihanki', offset: 1.4, farN: 148, nearN: 75 },
+        { kind: 'building', offset: 7.0, farN: 280, nearN: 140 },
       ];
 
       for (const c of cases) {
@@ -842,7 +842,7 @@ describe('RoadRenderer — Rendering Environments', () => {
   });
 
   describe('Fork delimiter alignment & distant lane lines', () => {
-    it('aligns Phase 2 inner median curbs seamlessly with Phase 3 curbs at t = 0.65 for both right and left choices', () => {
+    it('renders attached dual-carriageway road slab and center dividers smoothly across [0.16, 0.84] for both choices', () => {
       const renderer = new RoadRenderer();
       const segLen = 200;
       const totalSegs = 200;
@@ -892,7 +892,7 @@ describe('RoadRenderer — Rendering Environments', () => {
         } as unknown as CanvasRenderingContext2D;
 
         const accentColor = forkChoice === 'right' ? '#ffd319' : '#05d9e8';
-        // Position camera so t = 0.65 (seg 64->65) sits comfortably in mid-screen (y ≈ 252, w ≈ 256)
+        // Render across attached dual-carriageway body into final taper without any central grass island
         renderer.render(
           ctx,
           track,
@@ -906,36 +906,24 @@ describe('RoadRenderer — Rendering Environments', () => {
           PALETTE_NIGHT_FUNK,
         );
 
-        // Find the last Phase 2 accent inner curb polygon (curb width r = w/6 >> lane width w/32)
-        const accentCurbs = polygons.filter(
-          (p) => p.fillStyle === accentColor && p.pts.length === 4 && Math.abs(p.pts[1]![0] - p.pts[0]![0]) > 25,
-        );
-        expect(accentCurbs.length).toBeGreaterThan(0);
-        // Back-to-front order means the FIRST matching accent curb in Phase 2 is the farthest one (closest to t = 0.65)
-        const phase2TopCurb = accentCurbs[0]!;
-        const topY = phase2TopCurb.pts[2]![1]; // y2 of that slice
-        const phase2TopRightX = Math.max(phase2TopCurb.pts[2]![0], phase2TopCurb.pts[3]![0]);
-        const phase2TopLeftX = Math.min(phase2TopCurb.pts[2]![0], phase2TopCurb.pts[3]![0]);
-
-        // Find the Phase 3 rumble pair polygon immediately adjacent above (whose near edge y1 === topY + 1)
-        const phase3Rumble = polygons.find(
+        // Flush double-line center divider emits active accent polygons around x ≈ 320 with zero central grass polygons
+        const activeDividers = polygons.filter(
           (p) =>
-            p.pts.length === 8 &&
-            Math.abs(p.pts[0]![1] - (topY + 1)) < 0.01,
+            p.fillStyle === accentColor &&
+            p.pts.length === 4 &&
+            Math.max(...p.pts.map((pt) => pt[0])) > 300 &&
+            Math.min(...p.pts.map((pt) => pt[0])) < 340,
         );
-        expect(phase3Rumble).toBeDefined();
+        expect(activeDividers.length).toBeGreaterThan(0);
 
-        // In drawRumblePairSplit: pts[0..3] is left curb [cLeft-r, cLeft], pts[4..7] is right curb [cRight, cRight+r]
-        if (forkChoice === 'right') {
-          const phase3LeftCurbOuter = phase3Rumble!.pts[0]![0];
-          const phase3LeftCurbInner = phase3Rumble!.pts[1]![0];
-          expect(phase2TopLeftX).toBeCloseTo(phase3LeftCurbOuter, 1);
-          expect(phase2TopRightX).toBeCloseTo(phase3LeftCurbInner, 1);
-        } else {
-          const phase3RightCurbInner = phase3Rumble!.pts[4]![0];
-          const phase3RightCurbOuter = phase3Rumble!.pts[5]![0];
-          expect(phase2TopLeftX).toBeCloseTo(phase3RightCurbInner, 1);
-          expect(phase2TopRightX).toBeCloseTo(phase3RightCurbOuter, 1);
+        // Attached single road slab spans [-outerW, +outerW] continuously (zero central grass gap)
+        const roadPolys = polygons.filter(
+          (p) => p.fillStyle === PALETTE_NIGHT_FUNK.road[0] || p.fillStyle === PALETTE_NIGHT_FUNK.road[1],
+        );
+        expect(roadPolys.length).toBeGreaterThanOrEqual(5);
+        for (const rp of roadPolys) {
+          expect(rp.pts[0]![0]).toBeLessThan(310);
+          expect(rp.pts[1]![0]).toBeGreaterThan(330);
         }
       }
     });
@@ -1071,7 +1059,7 @@ describe('RoadRenderer — Rendering Environments', () => {
       expect(fills).toContain('#161226'); // Tunnel upper chamfer wall
       expect(fills).toContain('#0c0918'); // Tunnel ceiling crown
       expect(fills).toContain('#2d2645'); // Entrance portal concrete arch
-      expect(fills).toContain('#ffd166'); // Portal hazard chevron bar
+      expect(fills).toContain('#ffaa00'); // Portal fogged hazard chevron bar
 
       // 2. Driving inside tunnel (position = 16 * segmentLength): masks surround without ctx.clip()
       fills.length = 0;
@@ -1585,7 +1573,7 @@ describe('RoadRenderer — Rendering Environments', () => {
         },
         lineTo: noop,
         quadraticCurveTo: (cpx: number, cpy: number, x1: number, y1: number) => {
-          if (ctx.strokeStyle === '#2d1c4a') {
+          if (typeof ctx.strokeStyle === 'string' && ctx.strokeStyle !== '#000') {
             curves.push({ x0: curX, y0: curY, cpx, cpy, x1, y1, color: ctx.strokeStyle });
           }
           curX = x1;
@@ -1758,7 +1746,7 @@ describe('RoadRenderer — Rendering Environments', () => {
   });
 
   describe('P0.1 — Deep Horizon, Progressive Pylon Wires, Continuous Bridge Lights & Anchored Cables', () => {
-    it('draws tall skyline buildings beyond view.drawDistance (n = 260 on 360-seg track) as distant silhouettes', () => {
+    it('draws tall skyline buildings across unified extended drawDistance (n = 260 on 360-seg track) as distant silhouettes', () => {
       tuning.roadFogStrength = 0.65;
       const renderer = new RoadRenderer();
       const segLen = 200;
@@ -1777,7 +1765,7 @@ describe('RoadRenderer — Rendering Environments', () => {
       }
       const deepTrack: Track = { segments, segmentLength: segLen, length: 360 * segLen };
       const mock = createMockCanvas();
-      renderer.render(mock.ctx, deepTrack, { ...defaultView, position: 0, drawDistance: 200 }, PALETTE_NIGHT_FUNK);
+      renderer.render(mock.ctx, deepTrack, { ...defaultView, position: 0, drawDistance: 300 }, PALETTE_NIGHT_FUNK);
       expect(renderer.stats.drawnProps).toBe(1);
       expect(mock.rectCalls).toBeGreaterThan(10);
     });
@@ -2085,6 +2073,148 @@ describe('RoadRenderer — Rendering Environments', () => {
       expect(strokeAlphas.length).toBeGreaterThan(0);
       expect(Math.min(...strokeAlphas)).toBeGreaterThan(0.03);
       expect(Math.max(...strokeAlphas)).toBeLessThan(0.99);
+    });
+
+    it('keeps exterior tunnel bore opening unobstructed when deeper interior slices exist, and caps only horizon-clipped deep bores', () => {
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+
+      // Case A: short visible tunnel (segs 15..22, exit at 23) approached from outside at seg 0
+      const shortSegs: RoadSegment[] = [];
+      for (let i = 0; i < 60; i++) {
+        shortSegs.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: Math.floor(i / 3) % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 15 && i <= 22 ? 'tunnel' : 'standard',
+        });
+      }
+      const shortTrack: Track = { segments: shortSegs, segmentLength: segLen, length: shortSegs.length * segLen };
+      const polygons: { fillStyle: string; pts: [number, number][] }[] = [];
+      let pts: [number, number][] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: () => { pts = []; },
+        closePath: noop,
+        moveTo: (x: number, y: number) => pts.push([x, y]),
+        lineTo: (x: number, y: number) => pts.push([x, y]),
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: () => { if (pts.length > 0) polygons.push({ fillStyle: ctx.fillStyle as string, pts: [...pts] }); },
+        stroke: noop,
+        fillRect: noop,
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(ctx, shortTrack, { ...defaultView, position: 0, drawDistance: 50 }, PALETTE_NIGHT_FUNK);
+      // Since exit is visible, NO #070510 octagonal bore cap should erase inner slices
+      const boreCaps = polygons.filter((p) => p.fillStyle === '#070510' && p.pts.length === 6);
+      expect(boreCaps.length).toBe(0);
+
+      // Case B: long tunnel starting at seg 15 extending past drawDistance=40 (horizon-clipped, no visible exit)
+      const longSegs: RoadSegment[] = [];
+      for (let i = 0; i < 80; i++) {
+        longSegs.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: Math.floor(i / 3) % 2 === 0 ? 0 : 1,
+          sprites: [],
+          fog: 1,
+          env: i >= 15 ? 'tunnel' : 'standard',
+        });
+      }
+      const longTrack: Track = { segments: longSegs, segmentLength: segLen, length: longSegs.length * segLen };
+      polygons.length = 0;
+      renderer.render(ctx, longTrack, { ...defaultView, position: 0, drawDistance: 40 }, PALETTE_NIGHT_FUNK);
+      // Exactly 1 backstop #070510 hexagon at the single farthest tunnel slice
+      const clippedCaps = polygons.filter((p) => p.fillStyle === '#070510' && p.pts.length === 6);
+      expect(clippedCaps.length).toBe(1);
+    });
+
+    it('renders viaduct abutments using viaduct wall shading and respects wireMaxN / cross-stage pylon chains', () => {
+      const renderer = new RoadRenderer();
+      const segLen = 200;
+      const stage1Segs: RoadSegment[] = [];
+      const stage2Segs: RoadSegment[] = [];
+      for (let i = 0; i < 120; i++) {
+        stage1Segs.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: i === 100 ? [{ kind: 'pylon', offset: 3.5, variant: 1, chainId: 1 }] : [],
+          fog: 1,
+          env: i >= 10 && i <= 25 ? 'viaduct' : 'standard',
+        });
+        stage2Segs.push({
+          index: i,
+          p1: createPoint(0, i * segLen),
+          p2: createPoint(0, (i + 1) * segLen),
+          curve: 0,
+          stripe: i % 2 === 0 ? 0 : 1,
+          sprites: i === 12 ? [{ kind: 'pylon', offset: 3.5, variant: 1, chainId: 1 }] : [],
+          fog: 1,
+          env: 'standard',
+        });
+      }
+      const s1Track: Track = { segments: stage1Segs, segmentLength: segLen, length: stage1Segs.length * segLen };
+      const s2Track: Track = { segments: stage2Segs, segmentLength: segLen, length: stage2Segs.length * segLen };
+
+      const rects: string[] = [];
+      const noop = () => {};
+      const ctx = {
+        canvas: { width: 640, height: 360 },
+        fillStyle: '#000',
+        strokeStyle: '#000',
+        lineWidth: 1,
+        globalAlpha: 1,
+        save: noop,
+        restore: noop,
+        beginPath: noop,
+        closePath: noop,
+        moveTo: noop,
+        lineTo: noop,
+        quadraticCurveTo: noop,
+        arc: noop,
+        fill: noop,
+        stroke: noop,
+        fillRect: () => { rects.push(ctx.fillStyle as string); },
+        createLinearGradient: () => ({ addColorStop: noop }),
+      } as unknown as CanvasRenderingContext2D;
+
+      renderer.render(
+        ctx,
+        s1Track,
+        {
+          ...defaultView,
+          position: 90 * segLen,
+          drawDistance: 50,
+          nextTrack: s2Track,
+          forkChoice: 'right',
+        },
+        PALETTE_AKIBA_NIGHT,
+      );
+      // Separate stage terminal pylons sharing chainId=1 must NOT connect across stage seam
+      expect(renderer.stats.drawnPylonSpans).toBe(0);
+
+      // Viaduct abutment draws using viaduct wall tint (not bridge steel wall)
+      rects.length = 0;
+      renderer.render(ctx, s1Track, { ...defaultView, position: 0, drawDistance: 40 }, PALETTE_AKIBA_NIGHT);
+      expect(rects.length).toBeGreaterThan(0);
     });
   });
 });

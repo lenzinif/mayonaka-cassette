@@ -10,6 +10,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 4. **Your Music Is the Level (Core Feature):** Players load their own local tracks or playlists. Each song is analysed once and **generates its own deterministic road** (same file → same road), so a song can be learned and mastered. A bundled default soundtrack (synth fallback + royalty-free tracks) must always exist for players who load nothing.
 
 > Full mechanic specs (song-driven road, beat-shift gearbox, dashboard melon soda & Tofu Mode, analysis validation): see `docs/DESIGN.md`.
+> Immutable UI, menu, HUD, diegetic hardware, animation, and copywriting specs: see `docs/UI.md`.
 
 ---
 
@@ -44,6 +45,7 @@ This is a **driving game** (emotional fantasy and flow state), not a hardcore ra
 /
 ├── docs/
 │   ├── DESIGN.md              # Mechanic specs & design decisions (source of truth for gameplay)
+│   ├── UI.md                  # Immutable UI, menus, HUD, animations & copywriting spec
 │   ├── ROADMAP.md             # Development roadmap and task checklists
 │   └── MECHANICS_POLISH_AUDIT.md # Gameplay & mechanics polish audit work packages
 ├── public/

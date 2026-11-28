@@ -8,3 +8,4 @@ Thumbs.db
 
 # Local audio analysis corpus — copyrighted audio must never be committed
 test-tracks/
+audit-out/

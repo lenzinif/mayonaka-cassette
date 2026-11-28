@@ -48,12 +48,17 @@ import { HorizonAssembler, isStreamingTrack } from '@src/road/HorizonAssembler';
 import {
   blendStagePalette,
   createMutablePaletteClone,
+  getStageMonochromeAccent,
   getStagePalette,
   PALETTE_NIGHT_FUNK,
   type StagePalette,
 } from '@src/road/palette';
 import { cameraDepthFromFov, interpolate } from '@src/road/RoadProjection';
-import { RoadRenderer, type RoadView } from '@src/road/RoadRenderer';
+import {
+  isCameraDeepInTunnel,
+  RoadRenderer,
+  type RoadView,
+} from '@src/road/RoadRenderer';
 import { findSegment, getChosenForkCenter, type Track } from '@src/road/RoadSegment';
 import { compileSongBlueprint, type SongBlueprint } from '@src/road/SongBlueprint';
 import {
@@ -124,7 +129,9 @@ export interface TelemetrySnapshot {
   activeParticles: number;
   // M6 Playlist Run, Stage Fork & Scoring telemetry
   stageNumber: number;
+  stagePaletteId: StagePalette['id'];
   stagePaletteName: string;
+  stageAccentColor: string;
   playlistIndex: number;
   playlistLength: number;
   stageScore: number;
@@ -573,7 +580,7 @@ export class Game {
       : isSongTrack(this.track)
         ? Math.max(1, this.track.totalBars)
         : Math.max(1, this.activeRoadBeatMap.barEnergy.length);
-    const clampedBar = Math.max(0, Math.min(maxBars - 1, Math.floor(barIndex)));
+    const clampedBar = Math.max(0, Math.min(maxBars - 0.05, barIndex));
     if (this.horizonAssembler && isStreamingTrack(this.track)) {
       this.horizonAssembler.track.stageStartAbsSeg = 0;
       this.traffic.resetForStreaming(this.horizonAssembler.track, this.activeRoadBeatMap.contentHash);
@@ -624,7 +631,8 @@ export class Game {
    */
   triggerNextSongTest(): void {
     this.hasStartedDriving = true;
-    this.forkChoice = 'right';
+    this.car.bumpVx = 0;
+    this.car.steer = 0;
     this.car.x = 0.5;
     this.car.prevX = 0.5;
     if (this.horizonAssembler && isStreamingTrack(this.track)) {
@@ -645,6 +653,8 @@ export class Game {
       this.prevPosition = this.position;
       this.lastInternalPosition = this.position;
     }
+    this.setForkManualChoice('right');
+    this.car.bumpVx = 0;
     this.car.speed = tuning.maxSpeed * 0.85;
     this.car.gearbox.update(this.car.speed, tuning.maxSpeed);
     this.updateRoadProgressTelemetry();
@@ -920,6 +930,7 @@ export class Game {
     const next = !this.melonSoda.active;
     this.melonSoda.setActive(next);
     if (next) this.runManager.stageTofuUsed = true;
+    this.renderDirty = true;
     this.bridge.emit({ type: 'tofuModeToggled', active: next });
     this.bridge.publish(this.buildSnapshot);
     return next;
@@ -927,6 +938,7 @@ export class Game {
 
   cycleSodaSkin(): SodaSkin {
     const nextSkin = this.melonSoda.cycleSkin();
+    this.renderDirty = true;
     this.bridge.emit({ type: 'sodaSkinChanged', skin: nextSkin });
     this.bridge.publish(this.buildSnapshot);
     return nextSkin;
@@ -1251,16 +1263,8 @@ export class Game {
           continue;
         }
 
-        // When paused, pressing primary action buttons unpauses the game seamlessly
+        // While paused, only explicit pause/resume actions apply (no driving-key auto-unpause per docs/UI.md §1.2)
         if (this.isPaused) {
-          if (
-            p.action === 'accelerate' ||
-            p.action === 'drift' ||
-            p.action === 'shiftUp' ||
-            p.action === 'brake'
-          ) {
-            this.setPaused(false);
-          }
           continue;
         }
 
@@ -1281,12 +1285,6 @@ export class Game {
               this.fovBoostPulse = 1.0;
             }
           }
-        } else if (p.action === 'tofuMode') {
-          this.toggleTofuMode();
-        } else if (p.action === 'cycleSodaSkin') {
-          this.cycleSodaSkin();
-        } else if (p.action === 'autoShift') {
-          this.toggleAutoShift();
         } else if (p.action === 'forkLeft' && this.forkActive) {
           this.selectForkBranch('left');
         } else if (p.action === 'forkRight' && this.forkActive) {
@@ -1823,29 +1821,12 @@ export class Game {
     this.view.nextTrack =
       this.forkChoice === 'right' ? this.activeNextTrackLookahead : undefined;
 
-    const cameraSegForWeather = findSegment(this.track, renderPos);
-    const inTunnel = cameraSegForWeather?.env === 'tunnel';
-    let isDeepInTunnel = false;
-    if (inTunnel && this.renderRoad && !this.view.nextTrack) {
-      const segs = this.track.segments;
-      const segCount = segs.length;
-      const streamingTrack = isStreamingTrack(this.track) ? this.track : null;
-      const ringMask = streamingTrack ? streamingTrack.ringMask : 0;
-      if (segCount > 0) {
-        const baseIdx = cameraSegForWeather.index;
-        const lookaheadCount = Math.max(1, Math.min(this.view.drawDistance, segCount));
-        isDeepInTunnel = true;
-        for (let i = 1; i < lookaheadCount; i++) {
-          const checkSeg = streamingTrack
-            ? segs[(baseIdx + i) & ringMask]!
-            : segs[(baseIdx + i) % segCount]!;
-          if (checkSeg.env !== 'tunnel') {
-            isDeepInTunnel = false;
-            break;
-          }
-        }
-      }
-    }
+    const inTunnel = findSegment(this.track, renderPos)?.env === 'tunnel';
+    const isDeepInTunnel =
+      inTunnel &&
+      this.renderRoad &&
+      !this.view.nextTrack &&
+      isCameraDeepInTunnel(this.track, renderPos, this.view.drawDistance);
 
     const tBg0 = performance.now();
     if (!isDeepInTunnel) {
@@ -1896,7 +1877,7 @@ export class Game {
       this.particles.render(ctx, alpha);
     }
     if (this.renderCar) {
-      drawMelonSodaInset(ctx, this.melonSoda, height, alpha);
+      drawMelonSodaInset(ctx, this.melonSoda, width, height, alpha);
     }
 
     if (this.syncGpuProbe) flushCanvasGpu(ctx);
@@ -2344,7 +2325,9 @@ export class Game {
       sodaSpills: this.melonSoda.spillCount,
       activeParticles: this.particles.activeCount,
       stageNumber: this.runManager.stageNumber,
+      stagePaletteId: this.palette.id,
       stagePaletteName: this.palette.name,
+      stageAccentColor: getStageMonochromeAccent(this.palette.id),
       playlistIndex: this.library.currentIndex,
       playlistLength: this.library.items.length,
       stageScore: Math.round(this.runManager.stageScore),

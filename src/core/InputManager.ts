@@ -42,9 +42,6 @@ const KEY_BINDINGS: Readonly<Record<string, Action>> = {
   ShiftRight: 'shiftDown',
 
   ControlLeft: 'drift',
-  KeyT: 'tofuMode',
-  KeyV: 'cycleSodaSkin',
-  KeyG: 'autoShift',
   Digit1: 'forkLeft',
   Numpad1: 'forkLeft',
   Digit2: 'forkRight',
@@ -56,16 +53,15 @@ const KEY_BINDINGS: Readonly<Record<string, Action>> = {
 };
 
 /**
- * Standard Gamepad button mappings (W3C standard layout, docs/DESIGN.md §6 & AGENTS.md §5 M8).
+ * Standard Gamepad button mappings (W3C standard layout, docs/DESIGN.md §6 & docs/UI.md §1.2).
+ * Configuration toggles (auto-shift, tofu mode, cup skin) are locked during driving and
+ * accessible only via Title Screen or Pause Menu.
  * - Button 0 (A / Cross): Drift
- * - Button 1 (B / Circle): Cycle Soda Skin
  * - Button 2 (X / Square): Drift (alt)
- * - Button 3 (Y / Triangle): Tofu Mode
  * - Button 4 (LB / Left Bumper): Shift Down
  * - Button 5 (RB / Right Bumper): Shift Up
  * - Button 6 (LT / Left Trigger): Brake
  * - Button 7 (RT / Right Trigger): Accelerate
- * - Button 8 (Select / Back / Share): Auto-Shift assist
  * - Button 9 (Start / Options): Pause
  * - Button 12 (D-Pad Up): Accelerate
  * - Button 13 (D-Pad Down): Brake
@@ -74,12 +70,9 @@ const KEY_BINDINGS: Readonly<Record<string, Action>> = {
  */
 const GAMEPAD_BUTTON_ACTIONS: Readonly<Record<number, Action>> = {
   0: 'drift',
-  1: 'cycleSodaSkin',
   2: 'drift',
-  3: 'tofuMode',
   4: 'shiftDown',
   5: 'shiftUp',
-  8: 'autoShift',
   9: 'pause',
   14: 'forkLeft',
   15: 'forkRight',
@@ -269,16 +262,13 @@ export class InputManager implements InputSource {
 
       this.prevGamepadButtons[i] = isPressed;
 
-      // Continuous button states
+      // Continuous button states (config toggles locked during driving per docs/UI.md §1.2)
       if (isPressed) {
         if (i === 0 || i === 2) this.gamepadActions.drift = true;
-        if (i === 1) this.gamepadActions.cycleSodaSkin = true;
-        if (i === 3) this.gamepadActions.tofuMode = true;
         if (i === 4) this.gamepadActions.shiftDown = true;
         if (i === 5) this.gamepadActions.shiftUp = true;
         if (i === 6) this.gamepadActions.brake = true;
         if (i === 7) this.gamepadActions.accelerate = true;
-        if (i === 8) this.gamepadActions.autoShift = true;
         if (i === 9) this.gamepadActions.pause = true;
         if (i === 12) this.gamepadActions.accelerate = true;
         if (i === 13) this.gamepadActions.brake = true;

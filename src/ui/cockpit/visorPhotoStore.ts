@@ -2,10 +2,18 @@ const VISOR_DB_NAME = 'mayonaka-cassette-cockpit';
 const VISOR_DB_VERSION = 1;
 const VISOR_STORE_NAME = 'visor-photo';
 const VISOR_PRIMARY_KEY = 'primary';
+const VISOR_STACK_KEY = 'stack';
+
+export const MAX_VISOR_PHOTOS = 5;
 
 const MAX_VISOR_WIDTH = 512;
 const MAX_VISOR_HEIGHT = 384;
 const IMAGE_EXT_REGEX = /\.(png|jpe?g|webp|gif|bmp|avif)$/i;
+
+export interface VisorPhotoItem {
+  id: string;
+  dataUrl: string;
+}
 
 export function isSupportedVisorImageFile(file: File): boolean {
   if (file.type.startsWith('image/')) return true;
@@ -39,14 +47,33 @@ function openVisorDb(): Promise<IDBDatabase | null> {
   });
 }
 
-async function putVisorDataUrl(dataUrl: string): Promise<void> {
+function sanitizeVisorPhotoStack(raw: unknown): VisorPhotoItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: VisorPhotoItem[] = [];
+  for (let i = 0; i < raw.length && items.length < MAX_VISOR_PHOTOS; i++) {
+    const entry = raw[i] as Partial<VisorPhotoItem> | null;
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      typeof entry.id === 'string' &&
+      entry.id.length > 0 &&
+      typeof entry.dataUrl === 'string' &&
+      entry.dataUrl.length > 0
+    ) {
+      items.push({ id: entry.id, dataUrl: entry.dataUrl });
+    }
+  }
+  return items;
+}
+
+async function putVisorPhotoStack(items: readonly VisorPhotoItem[]): Promise<void> {
   const db = await openVisorDb();
   if (!db) return;
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(VISOR_STORE_NAME, 'readwrite');
       const store = tx.objectStore(VISOR_STORE_NAME);
-      const req = store.put(dataUrl, VISOR_PRIMARY_KEY);
+      const req = store.put(items.slice(0, MAX_VISOR_PHOTOS), VISOR_STACK_KEY);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error ?? req.error ?? new Error('IndexedDB write failed'));
       tx.onabort = () => reject(tx.error ?? new Error('IndexedDB write aborted'));
@@ -56,34 +83,52 @@ async function putVisorDataUrl(dataUrl: string): Promise<void> {
   }
 }
 
-export async function loadVisorPhotoDataUrl(): Promise<string | null> {
+/**
+ * Loads the ordered Sun Visor photo stack (up to `MAX_VISOR_PHOTOS = 5`),
+ * automatically migrating any legacy single `'primary'` photo to index `0`.
+ */
+export async function loadVisorPhotos(): Promise<VisorPhotoItem[]> {
   const db = await openVisorDb();
-  if (!db) return null;
+  if (!db) return [];
   try {
-    return await new Promise<string | null>((resolve) => {
+    return await new Promise<VisorPhotoItem[]>((resolve) => {
       const tx = db.transaction(VISOR_STORE_NAME, 'readonly');
       const store = tx.objectStore(VISOR_STORE_NAME);
-      const req = store.get(VISOR_PRIMARY_KEY);
-      req.onsuccess = () => {
-        resolve(typeof req.result === 'string' ? req.result : null);
+      const stackReq = store.get(VISOR_STACK_KEY);
+      stackReq.onsuccess = () => {
+        const parsed = sanitizeVisorPhotoStack(stackReq.result);
+        if (parsed.length > 0 || Array.isArray(stackReq.result)) {
+          resolve(parsed);
+          return;
+        }
+        const legacyReq = store.get(VISOR_PRIMARY_KEY);
+        legacyReq.onsuccess = () => {
+          if (typeof legacyReq.result === 'string' && legacyReq.result.length > 0) {
+            resolve([{ id: 'legacy-1', dataUrl: legacyReq.result }]);
+          } else {
+            resolve([]);
+          }
+        };
+        legacyReq.onerror = () => resolve([]);
       };
-      req.onerror = () => resolve(null);
-      tx.onabort = () => resolve(null);
+      stackReq.onerror = () => resolve([]);
+      tx.onabort = () => resolve([]);
     });
   } catch {
-    return null;
+    return [];
   } finally {
     db.close();
   }
 }
 
-export async function clearVisorPhoto(): Promise<void> {
+export async function clearVisorPhotos(): Promise<void> {
   const db = await openVisorDb();
   if (!db) return;
   try {
     await new Promise<void>((resolve) => {
       const tx = db.transaction(VISOR_STORE_NAME, 'readwrite');
       const store = tx.objectStore(VISOR_STORE_NAME);
+      store.delete(VISOR_STACK_KEY);
       store.delete(VISOR_PRIMARY_KEY);
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
@@ -116,7 +161,6 @@ function encodeResizedImage(img: HTMLImageElement): string {
   if (webp.startsWith('data:image/webp')) {
     return webp;
   }
-  // Fill dark backdrop before JPEG encoding so transparent PNGs do not composite onto black
   ctx.fillStyle = '#110c19';
   ctx.fillRect(0, 0, dstW, dstH);
   ctx.drawImage(img, 0, 0, dstW, dstH);
@@ -147,34 +191,98 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   });
 }
 
-/**
- * Validates, resizes client-side (`<= 512x384`), and persists a local photo
- * into IndexedDB (`mayonaka-cassette-cockpit`) for the Sun Visor slot.
- */
-export async function saveVisorPhotoFile(file: File): Promise<string> {
+async function decodeAndResizeVisorFile(file: File): Promise<string> {
   if (!isSupportedVisorImageFile(file)) {
     throw new Error('Selected file is not a supported image');
   }
 
-  let dataUrl: string;
   if (typeof document !== 'undefined' && typeof Image !== 'undefined') {
     if (typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
       const objectUrl = URL.createObjectURL(file);
       try {
         const img = await loadImageElement(objectUrl);
-        dataUrl = encodeResizedImage(img);
+        return encodeResizedImage(img);
       } finally {
         URL.revokeObjectURL(objectUrl);
       }
-    } else {
-      const rawUrl = await readFileAsDataUrl(file);
-      const img = await loadImageElement(rawUrl);
-      dataUrl = encodeResizedImage(img);
     }
-  } else {
-    dataUrl = await readFileAsDataUrl(file);
+    const rawUrl = await readFileAsDataUrl(file);
+    const img = await loadImageElement(rawUrl);
+    return encodeResizedImage(img);
   }
+  return readFileAsDataUrl(file);
+}
 
-  await putVisorDataUrl(dataUrl);
-  return dataUrl;
+export async function addVisorPhotoFiles(
+  files: readonly File[],
+  current?: readonly VisorPhotoItem[],
+): Promise<VisorPhotoItem[]> {
+  const next = current ? [...current] : await loadVisorPhotos();
+  if (next.length >= MAX_VISOR_PHOTOS || files.length === 0) {
+    return next.slice(0, MAX_VISOR_PHOTOS);
+  }
+  let changed = false;
+  for (let i = 0; i < files.length && next.length < MAX_VISOR_PHOTOS; i++) {
+    const file = files[i];
+    if (!file) continue;
+    try {
+      const dataUrl = await decodeAndResizeVisorFile(file);
+      const id = `visor-${Date.now().toString(36)}-${i}-${Math.random().toString(36).slice(2, 7)}`;
+      next.push({ id, dataUrl });
+      changed = true;
+    } catch {
+      // Skip individual unreadable or unsupported files in multi-selection
+    }
+  }
+  if (changed) {
+    await putVisorPhotoStack(next);
+  }
+  return next.slice(0, MAX_VISOR_PHOTOS);
+}
+
+/**
+ * Validates, resizes (`<= 512x384`), and appends a photo to the persisted Sun Visor stack
+ * (capped at `MAX_VISOR_PHOTOS = 5`).
+ */
+export async function addVisorPhotoFile(
+  file: File,
+  current?: readonly VisorPhotoItem[],
+): Promise<VisorPhotoItem[]> {
+  const dataUrl = await decodeAndResizeVisorFile(file);
+  const existing = current ? [...current] : await loadVisorPhotos();
+  if (existing.length >= MAX_VISOR_PHOTOS) {
+    return existing.slice(0, MAX_VISOR_PHOTOS);
+  }
+  const id = `visor-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+  const next = [...existing, { id, dataUrl }];
+  await putVisorPhotoStack(next);
+  return next;
+}
+
+/**
+ * Removes a single Sun Visor photo by ID and persists the updated stack.
+ */
+export async function removeVisorPhoto(
+  id: string,
+  current?: readonly VisorPhotoItem[],
+): Promise<VisorPhotoItem[]> {
+  const existing = current ? [...current] : await loadVisorPhotos();
+  const next = existing.filter((item) => item.id !== id);
+  await putVisorPhotoStack(next);
+  return next;
+}
+
+/** Legacy compatibility helpers */
+export async function loadVisorPhotoDataUrl(): Promise<string | null> {
+  const items = await loadVisorPhotos();
+  return items[0]?.dataUrl ?? null;
+}
+
+export async function saveVisorPhotoFile(file: File): Promise<string> {
+  const next = await addVisorPhotoFile(file, []);
+  return next[0]?.dataUrl ?? '';
+}
+
+export async function clearVisorPhoto(): Promise<void> {
+  await clearVisorPhotos();
 }

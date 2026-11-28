@@ -855,11 +855,18 @@ export class FunkAudioEngine {
    * Seeks Cassette Deck preview playback to `timeSec` (clamped inside `[0, durationSec)`).
    */
   seekPreview(timeSec: number): void {
+    if (!this.previewMode) {
+      this.previewMode = true;
+      this.savedGameplayState = {
+        contentHash: this.beatClock.map.contentHash,
+        trackSec: this.virtualTrackSec,
+      };
+    }
     const dur = Math.max(0.1, this.beatClock.map.durationSec);
     const clamped = Math.max(0, Math.min(dur - 0.02, timeSec));
     this.virtualTrackSec = clamped;
     this.beatClock.resetCrossingState();
-    if (this.previewMode && this.previewPlaying && this.ctx && this.ctx.state === 'running') {
+    if (this.previewPlaying && this.ctx && this.ctx.state === 'running') {
       this.startSourceNode(clamped, 0.015);
     }
   }
@@ -1220,6 +1227,7 @@ export class FunkAudioEngine {
   updateBeatMap(beatMap: BeatMap): void {
     const prevBpm = this.beatClock.map.bpm;
     this.beatClock.setBeatMap(beatMap);
+    this.beatClock.resetCrossingState();
     this.updateDubDelayTime();
     if (this.isSynthLoopBuffer && this.ctx && Math.abs(beatMap.bpm - prevBpm) > 0.01) {
       this.currentBuffer = this.buildSynthFallbackBuffer(this.ctx, beatMap.bpm);

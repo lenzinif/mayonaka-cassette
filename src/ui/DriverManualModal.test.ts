@@ -3,26 +3,28 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { DriverManualModal } from './DriverManualModal';
 
-describe('DriverManualModal (UI Layer)', () => {
+describe('DriverManualModal / BackGuideSheet (docs/UI.md §3.5)', () => {
   it('renders null when open is false', () => {
     const html = renderToString(createElement(DriverManualModal, { open: false, onClose: vi.fn() }));
     expect(html).toBe('');
   });
 
-  it('renders J-Card guide header with single BACK [ESC] button and player-facing copy', () => {
+  it('renders handwritten zine guide with 4 visual callouts, anime doodles, and zero real-world brands', () => {
     const rawHtml = renderToString(createElement(DriverManualModal, { open: true, onClose: vi.fn() }));
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
+    const text = rawHtml.replace(/<!--.*?-->/g, '').replace(/&#x27;/g, "'");
 
+    expect(text).toContain("DRIVER'S");
     expect(text).toContain('GUIDE');
-    expect(text).toContain('BACK [ESC]');
     expect(text).toContain('BEAT-SHIFT');
     expect(text).toContain('DRIFT');
-    expect(text).toContain('MELON SODA');
+    expect(text).toContain('TOFU CUP');
+    expect(text).toContain('NO SPILL!');
     expect(text).toContain('CONTROLS');
-    expect(text).not.toContain('Web Audio low-pass filter');
-    expect(text).not.toContain('[ESC] CLOSE');
-    expect(text).not.toContain('[ESC · BACK]');
-    const matches = text.match(/BACK/g);
-    expect(matches).toHaveLength(1);
+    expect(text).toContain('BACK [ESC]');
+    expect(rawHtml).toContain('<svg');
+
+    expect(text).not.toContain('WM-86');
+    expect(text).not.toContain('AE86');
+    expect(text).not.toContain('SONY');
   });
 });

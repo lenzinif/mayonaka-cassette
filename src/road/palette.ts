@@ -243,6 +243,25 @@ export const STAGE_PALETTES: readonly StagePalette[] = [
   PALETTE_AKIBA_NIGHT,
 ];
 
+/**
+ * Monochrome HUD accent colors per stage palette (docs/UI.md §2.3).
+ * Replaces legacy tri-color rainbow progress bars with theme-locked monochrome accents.
+ */
+export const STAGE_MONOCHROME_ACCENTS: Readonly<Record<StagePalette['id'], string>> = {
+  night: '#00f0b5',
+  og_future_funk: '#ff7b25',
+  akiba_night: '#ff007f',
+  vaporfunk: '#c77dff',
+  akiba_noon: '#ffda6b',
+  weeb_funk: '#ff007f',
+  vaporwave: '#c77dff',
+  coastal: '#00f0b5',
+};
+
+export function getStageMonochromeAccent(id: StagePalette['id']): string {
+  return STAGE_MONOCHROME_ACCENTS[id] ?? '#00f0b5';
+}
+
 export function getStagePalette(stageIndex: number): StagePalette {
   const len = STAGE_PALETTES.length;
   const idx = ((Math.floor(stageIndex) % len) + len) % len;

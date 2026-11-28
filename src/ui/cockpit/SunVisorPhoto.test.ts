@@ -1,41 +1,33 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { SunVisorPhoto } from './SunVisorPhoto';
 
-function renderClean(element: React.ReactElement): string {
-  return renderToString(element).replace(/<!--.*?-->/g, '');
-}
+describe('SunVisorPhoto (Top-Right Cascading Clutter — docs/UI.md §5.2.4)', () => {
+  it('renders default retro Tokyo postcard with zero HUD text or interactive buttons when empty', () => {
+    const html = renderToString(createElement(SunVisorPhoto, { photos: [] }));
+    const text = html.replace(/<!--.*?-->/g, '');
 
-describe('SunVisorPhoto (Cockpit Module)', () => {
-  it('renders default retro manga Tokyo postcard when photoUrl is null', () => {
-    const text = renderClean(
-      createElement(SunVisorPhoto, {
-        photoUrl: null,
-        onUploadPhoto: vi.fn(),
-        onClearPhoto: vi.fn(),
-      }),
-    );
-
-    expect(text).toContain('SUN VISOR');
-    expect(text).toContain('TOKYO 86');
-    expect(text).toContain('PIN PHOTO');
-    expect(text).toContain('Default retro manga Tokyo night postcard');
-    expect(text).not.toContain('CUSTOM CLIP');
+    expect(html).toContain('Default retro manga Tokyo night postcard');
+    expect(html).toContain('origin-top-right');
+    expect(html).not.toContain('<button');
+    expect(text).not.toContain('SUN VISOR');
+    expect(text).not.toContain('TOKYO 86');
+    expect(text).not.toContain('PIN PHOTO');
   });
 
-  it('renders custom pinned photo and reset button when photoUrl is provided', () => {
-    const text = renderClean(
-      createElement(SunVisorPhoto, {
-        photoUrl: 'data:image/webp;base64,AAAA',
-        onUploadPhoto: vi.fn(),
-        onClearPhoto: vi.fn(),
-      }),
-    );
+  it('renders up to 5 cascading clipped/taped Polaroid photos capped at MAX_VISOR_PHOTOS', () => {
+    const photos = Array.from({ length: 7 }, (_, i) => ({
+      id: `p-${i}`,
+      dataUrl: `data:image/webp;base64,IMG${i}`,
+    }));
+    const html = renderToString(createElement(SunVisorPhoto, { photos }));
 
-    expect(text).toContain('CUSTOM CLIP');
-    expect(text).toContain('data:image/webp;base64,AAAA');
-    expect(text).toContain('Pinned sun visor photo');
-    expect(text).toContain('✕');
+    expect(html).toContain('Pinned visor photo 1');
+    expect(html).toContain('Pinned visor photo 5');
+    expect(html).not.toContain('Pinned visor photo 6');
+    expect(html).toContain('-mt-2.5');
+    expect(html).toContain('translateX(-4px) rotate(-3.5deg)');
+    expect(html).not.toContain('<button');
   });
 });

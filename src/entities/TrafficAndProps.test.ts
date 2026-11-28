@@ -478,7 +478,7 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
       // Right lane truck -> Right branch
       expect(getTruckForkBranch(1, 0.58)).toBe(1);
 
-      // Throughout Phase 2 (t in [0.18, 0.65]), verify neither truck ever touches the central median
+      // Throughout Phase 2 attached body (t in [0.16, 0.84]), verify trucks remain cleanly on their assigned side and within bounds
       for (let t = 0.18; t <= 0.65; t += 0.05) {
         const z = forkStartZ + span * t;
         const xLeft = getEffectiveTruckLaneOffset(0, 1, z, trackLen, forkStartZ, 'right', -1, 0);
@@ -497,35 +497,34 @@ describe('TrafficManager & Dynamic Flow-Preserving Collisions (M5)', () => {
       }
     });
 
-    it('diverges center-lane trucks early in Phase 1 so they are safely on their chosen branch by t = 0.18', () => {
-      const zSplit = forkStartZ + span * 0.18;
+    it('diverges center-lane trucks early in Phase 1 so they are safely on their chosen branch by t = 0.16', () => {
+      const zSplit = forkStartZ + span * 0.16;
       const xLeftAtSplit = getEffectiveTruckLaneOffset(0, 1, zSplit, trackLen, forkStartZ, 'right', -1, 0);
       const xRightAtSplit = getEffectiveTruckLaneOffset(0, 2, zSplit, trackLen, forkStartZ, 'right', 1, 0);
 
-      // At the exact moment of split, both trucks must be centered on their respective branches (±0.60)
-      expect(xLeftAtSplit).toBeCloseTo(-0.6, 2);
-      expect(xRightAtSplit).toBeCloseTo(0.6, 2);
+      // At the peak split width (outerLimit = 1.5), both branches center at ±0.75
+      expect(xLeftAtSplit).toBeCloseTo(-0.75, 2);
+      expect(xRightAtSplit).toBeCloseTo(0.75, 2);
       // Neither is near 0 (the middle)
       expect(Math.abs(xLeftAtSplit)).toBeGreaterThan(0.5);
       expect(Math.abs(xRightAtSplit)).toBeGreaterThan(0.5);
     });
 
-    it('smoothly converges chosen branch trucks to center (0.0) in Phase 3 and curves unchosen trucks outward', () => {
-      // Player chooses 'right' branch
-      const zPhase3Start = forkStartZ + span * 0.65;
+    it('smoothly converges both attached branches back toward standard lanes in Phase 3', () => {
+      const zPhase3Start = forkStartZ + span * 0.84;
       const zPhase3End = trackLen;
 
-      // Chosen truck (Right, branch = 1): converges from 1.10 to 0.00
+      // Right branch truck (branch = 1): converges from +0.75 to +0.58
       const xRightStart = getEffectiveTruckLaneOffset(0, 2, zPhase3Start, trackLen, forkStartZ, 'right', 1, 0);
       const xRightEnd = getEffectiveTruckLaneOffset(0, 2, zPhase3End, trackLen, forkStartZ, 'right', 1, 0);
-      expect(xRightStart).toBeCloseTo(1.1, 2);
-      expect(xRightEnd).toBeCloseTo(0.0, 2);
+      expect(xRightStart).toBeCloseTo(0.75, 2);
+      expect(xRightEnd).toBeCloseTo(0.58, 2);
 
-      // Unchosen truck (Left, branch = -1): curves outward away from road center
+      // Left branch truck (branch = -1): converges symmetrically back into standard left lane (-0.58)
       const xLeftStart = getEffectiveTruckLaneOffset(0, 1, zPhase3Start, trackLen, forkStartZ, 'right', -1, 0);
       const xLeftEnd = getEffectiveTruckLaneOffset(0, 1, zPhase3End, trackLen, forkStartZ, 'right', -1, 0);
-      expect(xLeftStart).toBeCloseTo(-1.1, 2);
-      expect(xLeftEnd).toBeLessThan(-1.5);
+      expect(xLeftStart).toBeCloseTo(-0.75, 2);
+      expect(xLeftEnd).toBeCloseTo(-0.58, 2);
     });
 
     it('keeps trucks on their chosen carriageway during evasive steering in a fork without crossing the median', () => {

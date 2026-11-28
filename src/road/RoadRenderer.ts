@@ -4,20 +4,17 @@ import { tuning } from '@src/config/tuning';
 const EMPTY_SPRITES: readonly RoadSprite[] = [];
 import { drawKeiTruck, type TrafficManager } from '@src/entities/TrafficAndProps';
 import { lerpHexColor, type StagePalette } from './palette';
+import { PROP_REGISTRY } from './PropRegistry';
 import { clamp01, interpolate, percentRemaining, project, smoothstep } from './RoadProjection';
 import {
+  createPoint,
   findSegment,
   FORK_CONVERGE_SPAN_T,
-  FORK_PEAK_BRANCH_CENTER,
-  FORK_PEAK_INNER_GAP,
-  FORK_SPLIT_END_T,
-  FORK_SPLIT_SPAN_T,
-  FORK_WIDEN_END_T,
-  getChosenForkCenter,
-  getChosenForkHalfWidth,
+  FORK_PEAK_OUTER_LIMIT,
+  FORK_TAPER_START_T,
   getEffectivePropOffset,
   getEffectiveTruckLaneOffset,
-  getTruckForkBranch,
+  getForkOuterLimit,
   type RoadSegment,
   type RoadSprite,
   type Track,
@@ -29,6 +26,39 @@ import {
   setPropAtmosphere,
   setPropTheme,
 } from './RoadsideProps';
+
+/**
+ * Shared horizon-clamped check for whether the camera is completely enclosed inside a tunnel bore
+ * without any visible exit aperture within `drawDistance`.
+ */
+export function isCameraDeepInTunnel(
+  track: Track,
+  position: number,
+  drawDistance: number,
+): boolean {
+  const cameraSeg = findSegment(track, position);
+  if (!cameraSeg || cameraSeg.env !== 'tunnel') return false;
+  const segs = track.segments;
+  const segCount = segs.length;
+  if (segCount <= 0) return false;
+  const isStreaming = Boolean(track.isStreaming && track.ringMask !== undefined);
+  const ringMask = track.ringMask ?? 0;
+  const baseAbsIdx = Math.floor(position / track.segmentLength);
+  const maxMat =
+    isStreaming && track.headAbsSeg !== undefined
+      ? Math.max(1, Math.min(segCount - 4, track.headAbsSeg - baseAbsIdx))
+      : segCount;
+  const lookaheadCount = Math.max(1, Math.min(Math.floor(drawDistance), maxMat));
+  for (let i = 1; i < lookaheadCount; i++) {
+    const checkSeg = isStreaming
+      ? segs[(baseAbsIdx + i) & ringMask]!
+      : segs[(cameraSeg.index + i) % segCount]!;
+    if (checkSeg.env !== 'tunnel') {
+      return false;
+    }
+  }
+  return true;
+}
 
 /** Per-frame camera/view parameters. The caller owns and reuses this object. */
 export interface RoadView {
@@ -105,6 +135,8 @@ export class RoadRenderer {
   private readonly chainSlotPos = new Float32Array(RoadRenderer.MAX_CHAIN_SLOTS * 2);
   /** Scratch attachment points for current pylon = 10 floats */
   private readonly currentPylonPoints = new Float32Array(10);
+  /** Scratch projected point for lookahead pylons beyond `renderDepth` (zero GC). */
+  private readonly lookaheadPt = createPoint(0, 0);
 
   // Longitudinal suspension bridge tower tracking (Zero GC)
   private bridgeTowerActive = false;
@@ -115,6 +147,7 @@ export class RoadRenderer {
   private bridgeTowerVariant = 0;
   private bridgeTowerBeatPulse = 0;
   private bridgeTowerFogBand = 0;
+  private bridgeTowerLineW = 1;
 
   // Cached bridge bay water gradient to maintain zero per-frame GC allocations
   private cachedBridgeWaterCtx: CanvasRenderingContext2D | null = null;
@@ -126,6 +159,7 @@ export class RoadRenderer {
 
   // Zero-GC state for minimal single-frame tunnel aperture surround masking & bore bounds
   private tunnelMaskEmitted = false;
+  private extTunnelActive = false;
   private boreBoundsInit = false;
   private boreMinX = 0;
   private boreMaxX = 0;
@@ -149,6 +183,8 @@ export class RoadRenderer {
   private readonly fogRumble1 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly fogRumbleMid = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly fogLane = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogLaneCoalesced = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogPylonWire = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly fogBridgeWall0 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly fogBridgeWall1 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly fogBridgeRail = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
@@ -162,6 +198,15 @@ export class RoadRenderer {
   private readonly fogSuspCableOrange = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly fogSuspCableCyan = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly fogSuspCablePink = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogTunnelOuter0 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogTunnelOuter1 = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogTunnelPortal = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogTunnelWing = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogTunnelHazard = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogForkCyan = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogForkCyanDim = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogForkAmber = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
+  private readonly fogForkAmberDim = new Array<string>(RoadRenderer.FOG_BANDS).fill('');
   private readonly tunnelFogRoad0 = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
   private readonly tunnelFogRoad1 = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
   private readonly tunnelFogRumble0 = new Array<string>(RoadRenderer.TUNNEL_FOG_BANDS).fill('');
@@ -226,26 +271,22 @@ export class RoadRenderer {
     const ringMask = track.ringMask ?? 0;
     const { position, playerX, cameraDepth, roadWidth, width, height } = view;
     const alpha = view.alpha ?? 1;
-    const drawDistance = Math.min(
+    const requestedDepth = Math.min(
       Math.floor(view.drawDistance),
       MAX_DRAW_DISTANCE,
       segments.length,
     );
-    // Extend distant skyline/landmark horizon depth using already pre-allocated ring buffers (zero extra GC)
-    const horizonDepth =
-      !legacy && drawDistance >= 150
-        ? Math.min(
-            MAX_DRAW_DISTANCE,
-            Math.floor(drawDistance * 1.65),
-            isStreaming ? Math.max(1, segments.length - 4) : segments.length,
-          )
-        : drawDistance;
-    const wireMaxN = legacy ? horizonDepth : Math.floor(horizonDepth * 0.82);
     const playerZ = view.cameraHeight * cameraDepth;
 
     const base = findSegment(track, position);
     const baseAbsIdx = Math.floor(position / segmentLength);
     const basePercent = percentRemaining(position, segmentLength);
+    const maxMaterializedN =
+      isStreaming && track.headAbsSeg !== undefined
+        ? Math.max(1, Math.min(segments.length - 4, track.headAbsSeg - baseAbsIdx))
+        : segments.length;
+    const renderDepth = Math.max(1, Math.min(requestedDepth, maxMaterializedN));
+    const wireMaxN = legacy ? renderDepth : Math.floor(renderDepth * 0.86);
     const playerSeg = findSegment(track, position + playerZ);
     const playerPercent = percentRemaining(position + playerZ, segmentLength);
     const cameraY =
@@ -256,7 +297,7 @@ export class RoadRenderer {
       !isStreaming &&
       view.nextTrack !== undefined &&
       view.forkChoice === 'right' &&
-      base.index + horizonDepth > segments.length &&
+      base.index + renderDepth > segments.length &&
       view.nextTrack.segments.length > 0;
     const nextTrackStartPassIdx = segments.length - base.index;
 
@@ -356,6 +397,13 @@ export class RoadRenderer {
 
         this.fogLane[b] =
           tMistRoad <= 0 ? baseLane : lerpHexColor(baseLane, horizonMist, tMistRoad);
+        this.fogLaneCoalesced[b] = lerpHexColor(
+          this.fogRoadMid[b]!,
+          this.fogLane[b]!,
+          b >= maxBand - 2 ? 0.35 : 0.72,
+        );
+        this.fogPylonWire[b] =
+          tMistTerrain <= 0 ? '#2d1c4a' : lerpHexColor('#2d1c4a', horizonMist, tMistTerrain);
 
         this.fogBridgeWall0[b] =
           tMistTerrain <= 0 ? '#484160' : lerpHexColor('#484160', horizonMist, tMistTerrain);
@@ -383,6 +431,24 @@ export class RoadRenderer {
           tMistTerrain <= 0 ? '#00f5d4' : lerpHexColor('#00f5d4', horizonMist, tMistTerrain);
         this.fogSuspCablePink[b] =
           tMistTerrain <= 0 ? '#ff9eec' : lerpHexColor('#ff9eec', horizonMist, tMistTerrain);
+        this.fogTunnelOuter0[b] =
+          tMistTerrain <= 0 ? '#1b162e' : lerpHexColor('#1b162e', horizonMist, tMistTerrain);
+        this.fogTunnelOuter1[b] =
+          tMistTerrain <= 0 ? '#151126' : lerpHexColor('#151126', horizonMist, tMistTerrain);
+        this.fogTunnelPortal[b] =
+          tMistTerrain <= 0 ? '#2d2645' : lerpHexColor('#2d2645', horizonMist, tMistTerrain);
+        this.fogTunnelWing[b] =
+          tMistTerrain <= 0 ? '#1f1a36' : lerpHexColor('#1f1a36', horizonMist, tMistTerrain);
+        this.fogTunnelHazard[b] =
+          tMistTerrain <= 0 ? '#ffaa00' : lerpHexColor('#ffaa00', horizonMist, tMistTerrain);
+        this.fogForkCyan[b] =
+          tMistRoad <= 0 ? '#05d9e8' : lerpHexColor('#05d9e8', horizonMist, tMistRoad);
+        this.fogForkCyanDim[b] =
+          tMistRoad <= 0 ? '#096a78' : lerpHexColor('#096a78', horizonMist, tMistRoad);
+        this.fogForkAmber[b] =
+          tMistRoad <= 0 ? '#ffd319' : lerpHexColor('#ffd319', horizonMist, tMistRoad);
+        this.fogForkAmberDim[b] =
+          tMistRoad <= 0 ? '#8c7214' : lerpHexColor('#8c7214', horizonMist, tMistRoad);
       }
 
       for (let b = 0; b < RoadRenderer.TUNNEL_FOG_BANDS; b++) {
@@ -426,7 +492,7 @@ export class RoadRenderer {
     let crestIsBridge = isCameraOnBridge;
     let cameraTunnelEndN = -1;
     let leftCameraTunnel = false;
-    for (let n = 0; n < horizonDepth; n++) {
+    for (let n = 0; n < renderDepth; n++) {
       const isNextSeg = hasNextTrackLookahead && n >= nextTrackStartPassIdx;
       const seg = isStreaming
         ? segments[(baseAbsIdx + n) & ringMask]!
@@ -438,7 +504,7 @@ export class RoadRenderer {
         : isNextSeg
           ? position - trackLength
           : position - (seg.index < base.index ? trackLength : 0);
-      const nRatio = horizonDepth > 0 ? n / horizonDepth : 0;
+      const nRatio = renderDepth > 0 ? n / renderDepth : 0;
       seg.fog = legacy || fogStrength <= 0 ? 1 : clamp01(1 - nRatio * fogStrength);
       project(seg.p1, cameraXBase - x, cameraY, cameraZ, cameraDepth, width, height, roadWidth);
       project(
@@ -475,6 +541,75 @@ export class RoadRenderer {
       }
     }
 
+    // Pre-scan materialized lookahead beyond renderDepth for pylons so catenary wires emerge
+    // progressively pixel-by-pixel via de Casteljau without waiting for far pylon to enter drawDistance.
+    if (!legacy && !view.skipPylonWires && !view.skipProps && !isCameraInTunnel && !hasNextTrackLookahead) {
+      const lookaheadMaxN = isStreaming
+        ? Math.min(renderDepth + 64, maxMaterializedN)
+        : Math.min(renderDepth + 64, segments.length);
+      for (let n = renderDepth; n < lookaheadMaxN; n++) {
+        const seg = isStreaming
+          ? segments[(baseAbsIdx + n) & ringMask]!
+          : segments[(base.index + n) % segments.length]!;
+        const spList = seg.sprites;
+        for (let i = 0; i < spList.length; i++) {
+          const sp = spList[i]!;
+          if (sp.kind !== 'pylon' || sp.chainId === undefined) continue;
+          const chainId = sp.chainId;
+          let existingSlot = -1;
+          let freeSlot = -1;
+          for (let s = 0; s < RoadRenderer.MAX_CHAIN_SLOTS; s++) {
+            if (this.chainSlotMeta[s * 6 + 1] === 1) {
+              if (this.chainSlotMeta[s * 6] === chainId) {
+                existingSlot = s;
+                break;
+              }
+            } else if (freeSlot === -1) {
+              freeSlot = s;
+            }
+          }
+          if (existingSlot === -1 && freeSlot !== -1) {
+            const pt = this.lookaheadPt;
+            pt.worldX = seg.p1.worldX;
+            pt.worldY = seg.p1.worldY;
+            pt.worldZ = seg.p1.worldZ;
+            const cameraZ = isStreaming
+              ? position
+              : position - (seg.index < base.index ? trackLength : 0);
+            project(pt, cameraXBase - x, cameraY, cameraZ, cameraDepth, width, height, roadWidth);
+            if (pt.cameraZ > cameraDepth) {
+              const effOff = getEffectivePropOffset(
+                sp.offset,
+                pt.worldZ,
+                trackLength,
+                view.forkZoneStartZ,
+                view.forkChoice,
+              );
+              const sx = pt.screenX + pt.screenW * effOff;
+              const scaledPpu = ((pt.scale * width) / 2) * (roadWidth / 2000);
+              const propPpu = scaledPpu * (sp.scale ?? 1);
+              getPylonAttachmentPoints(sx, pt.screenY, propPpu, this.currentPylonPoints, 0, sp.variant);
+              const pOffset = freeSlot * 10;
+              this.chainSlotMeta[freeSlot * 6] = chainId;
+              this.chainSlotMeta[freeSlot * 6 + 1] = 1;
+              this.chainSlotMeta[freeSlot * 6 + 2] = sp.variant;
+              this.chainSlotMeta[freeSlot * 6 + 3] = seg.index;
+              this.chainSlotMeta[freeSlot * 6 + 4] = 0;
+              this.chainSlotMeta[freeSlot * 6 + 5] = n;
+              this.chainSlotPos[freeSlot * 2] = sx;
+              this.chainSlotPos[freeSlot * 2 + 1] = pt.screenY;
+              for (let k = 0; k < 10; k++) {
+                this.chainSlotPoints[pOffset + k] = this.currentPylonPoints[k]!;
+                this.chainSlotPointVec[pOffset + k] = 0;
+              }
+            }
+          }
+        }
+        x += dx;
+        dx += seg.curve;
+      }
+    }
+
     let isTunnelExitVisible = false;
     if (isCameraInTunnel && leftCameraTunnel && cameraTunnelEndN >= 0) {
       const endSeg = this.visible[cameraTunnelEndN]!;
@@ -487,6 +622,7 @@ export class RoadRenderer {
     }
 
     this.tunnelMaskEmitted = false;
+    this.extTunnelActive = false;
     this.boreBoundsInit = false;
     this.boreMinX = 0;
     this.boreMaxX = width;
@@ -496,13 +632,13 @@ export class RoadRenderer {
     this.bridgeTowerActive = false;
 
     // Pass 2: painter's algorithm (back-to-front).
-    let pass2StartN = horizonDepth - 1;
+    let pass2StartN = renderDepth - 1;
     if (isCameraInTunnel && !isTunnelExitVisible) {
       ctx.fillStyle = '#070510';
       ctx.fillRect(0, 0, width, height);
       this.tunnelMaskEmitted = true;
       if (cameraTunnelEndN >= 0) {
-        pass2StartN = Math.min(horizonDepth - 1, cameraTunnelEndN);
+        pass2StartN = Math.min(renderDepth - 1, cameraTunnelEndN);
       }
     } else if (isCameraOnBridge) {
       // Pre-fill palette-harmonized bay water surface once below the horizon (avoids ~180 full-width overdraws on bridge climbs)
@@ -560,10 +696,10 @@ export class RoadRenderer {
       const isTunnelSeg = seg.env === 'tunnel';
       const truckSegKey = isStreaming ? (seg.index & ringMask) : seg.index;
       const firstTruckIdx =
-        !isNextSeg && n < drawDistance && traffic ? traffic.getFirstTruckOnSegment(truckSegKey) : -1;
+        !isNextSeg && n < renderDepth && traffic ? traffic.getFirstTruckOnSegment(truckSegKey) : -1;
       const segClipY = this.clipY[n]!;
       const segForkZoneStartZ = isNextSeg ? undefined : view.forkZoneStartZ;
-      const nRatio = horizonDepth > 0 ? n / horizonDepth : 0;
+      const nRatio = renderDepth > 0 ? n / renderDepth : 0;
       const fogBand =
         legacy || fogStrength <= 0 || nRatio < 0.25
           ? 0
@@ -574,6 +710,9 @@ export class RoadRenderer {
       const roadVisible = p2.screenY < p1.screenY && p2.screenY < segClipY;
       const tunnelWallVisible =
         isTunnelSeg && !roadVisible && p2.screenY - Math.max(3, p2.screenW * 1.16) < segClipY;
+      const ppu = (p1.scale * width) / 2;
+      const scaledPpu = (ppu * roadWidth) / 2000;
+      const refPpu = scaledPpu * (640 / Math.max(1, width));
 
       // Skip segments occluded behind a hill crest (tunnel walls/ceiling remain visible above crest/sag)
       if (roadVisible || tunnelWallVisible) {
@@ -585,17 +724,21 @@ export class RoadRenderer {
         const effectiveTopY = Math.min(p2.screenY, coalesceTopY);
         const clampedBottomY = Math.min(p1.screenY, segClipY);
         const combinedDy = clampedBottomY - effectiveTopY;
-        const maxCoalesceDy = n >= drawDistance ? 1.25 : 0.75;
+        const maxCoalesceDy = nRatio >= 0.8 ? 1.25 : 0.75;
 
         const segArr = isNextSeg ? view.nextTrack!.segments : segments;
         const segArrLen = segArr.length;
         const prevEnv = isStreaming
-          ? (segments[(seg.index - 1) & ringMask]?.env ?? 'standard')
+          ? track.tailAbsSeg !== undefined && seg.index <= track.tailAbsSeg
+            ? (seg.env ?? 'standard')
+            : (segments[(seg.index - 1) & ringMask]?.env ?? 'standard')
           : segArrLen > 0
             ? (segArr[(seg.index - 1 + segArrLen) % segArrLen]?.env ?? 'standard')
             : 'standard';
         const nextEnv = isStreaming
-          ? (segments[(seg.index + 1) & ringMask]?.env ?? 'standard')
+          ? track.headAbsSeg !== undefined && seg.index + 1 >= track.headAbsSeg
+            ? (seg.env ?? 'standard')
+            : (segments[(seg.index + 1) & ringMask]?.env ?? 'standard')
           : segArrLen > 0
             ? (segArr[(seg.index + 1) % segArrLen]?.env ?? 'standard')
             : 'standard';
@@ -606,11 +749,15 @@ export class RoadRenderer {
           shouldDeferSlice = !(dy >= 0.15 || p1.screenW >= 8 || seg.sprites.length > 0 || firstTruckIdx !== -1);
         } else if (
           ((seg.env ?? 'standard') === 'standard' ||
-            ((seg.env === 'bridge' || seg.env === 'viaduct') && p1.screenW < 24)) &&
+            seg.env === 'bridge' ||
+            seg.env === 'viaduct') &&
+          p1.screenW < 10 &&
           n > 60 &&
           combinedDy < maxCoalesceDy &&
-          (n >= drawDistance || seg.sprites.length === 0) &&
+          !this.hasRenderableSpriteAtDist(seg.sprites, nRatio, refPpu, palette) &&
           firstTruckIdx === -1 &&
+          prevEnv === seg.env &&
+          nextEnv === seg.env &&
           !(segForkZoneStartZ !== undefined && p2.worldZ > segForkZoneStartZ && trackLength > segForkZoneStartZ)
         ) {
           const nextSeg = this.visible[n - 1];
@@ -638,7 +785,12 @@ export class RoadRenderer {
           ) &&
           firstTruckIdx === -1 &&
           prevEnv === 'tunnel' &&
-          nextEnv === 'tunnel'
+          nextEnv === 'tunnel' &&
+          (!isStreaming ||
+            ((track.tailAbsSeg === undefined || seg.index - 3 >= track.tailAbsSeg) &&
+              (track.headAbsSeg === undefined || seg.index + 3 < track.headAbsSeg) &&
+              (segments[(seg.index - 2) & ringMask]?.env ?? 'standard') === 'tunnel' &&
+              (segments[(seg.index + 2) & ringMask]?.env ?? 'standard') === 'tunnel'))
         ) {
           const nextSeg = this.visible[n - 1];
           const nextClipY = this.clipY[n - 1]!;
@@ -650,9 +802,9 @@ export class RoadRenderer {
             nextSeg.p2.screenY < nextSeg.p1.screenY &&
             nextSeg.p2.screenY < nextClipY &&
             Math.abs(nextSeg.p2.screenY - p1.screenY) <= 1.0 &&
-            Math.abs(nextSeg.curve - seg.curve) <= 0.45 &&
-            Math.abs(farAnchor.p2.screenX - nextSeg.p1.screenX) <= 14.0 &&
-            Math.abs(farAnchor.p2.screenW - nextSeg.p1.screenW) <= 8.0
+            Math.abs(nextSeg.curve - seg.curve) <= 0.25 &&
+            Math.abs(farAnchor.p2.screenX - nextSeg.p1.screenX) <= 12.0 &&
+            Math.abs(farAnchor.p2.screenW - nextSeg.p1.screenW) <= 6.0
           ) {
             shouldDeferSlice = true;
           }
@@ -660,7 +812,7 @@ export class RoadRenderer {
 
         if (shouldDeferSlice) {
           if (!legacy) {
-            if (isTunnelSeg && coalesceFarSeg === null) {
+            if (coalesceFarSeg === null) {
               coalesceFarSeg = seg;
             }
             coalesceTopY = effectiveTopY;
@@ -670,7 +822,7 @@ export class RoadRenderer {
         } else {
           this.stats.drawnSegments++;
           const tSeg0 = sampleSubsystems ? performance.now() : 0;
-          const farP2 = coalesceCount > 0 && isTunnelSeg && coalesceFarSeg ? coalesceFarSeg.p2 : undefined;
+          const farP2 = coalesceCount > 0 && coalesceFarSeg ? coalesceFarSeg.p2 : undefined;
           this.renderSegment(
             ctx,
             width,
@@ -710,9 +862,6 @@ export class RoadRenderer {
         coalesceFarSeg = null;
       }
 
-      const ppu = (p1.scale * width) / 2;
-      const scaledPpu = (ppu * roadWidth) / 2000;
-      const refPpu = scaledPpu * (640 / Math.max(1, width));
       if (refPpu < (legacy ? 0.001 : 0.0022)) continue;
 
       const sprites = view.skipProps || isInCurrentTunnel ? EMPTY_SPRITES : seg.sprites;
@@ -721,9 +870,9 @@ export class RoadRenderer {
       // Skip segment sprites/traffic if occluded behind a hill crest
       if (p1.screenY - 12000 * scaledPpu >= segClipY) continue;
 
-      // Smooth distant alpha fade-in over far ~18% of horizonDepth + low refPpu horizon band
+      // Smooth distant alpha fade-in over far ~18% of renderDepth + low refPpu horizon band
       const distAlpha =
-        !legacy && horizonDepth > 0 && n > horizonDepth * 0.82
+        !legacy && renderDepth > 0 && n > renderDepth * 0.82
           ? Math.max(0.05, Math.min(1, (1 - nRatio) / 0.18))
           : 1;
       const ppuAlpha = Math.min(1, Math.max(0, (refPpu - 0.001) / 0.0035));
@@ -766,57 +915,17 @@ export class RoadRenderer {
         const resolvedKind = s.kind === 'tree' ? palette.scenery.tree : s.kind;
         if (palette.scenery.hideKinds?.has(resolvedKind)) continue;
 
-        const isLandmarkKind =
-          resolvedKind === 'building' ||
-          resolvedKind === 'suspension-tower' ||
-          resolvedKind === 'overpass' ||
-          resolvedKind === 'gantry' ||
-          resolvedKind === 'pylon';
-        if (!legacy && n >= drawDistance && !isLandmarkKind && resolvedKind !== 'lamp') continue;
-
         const spriteScale = s.scale ?? 1;
         const propPpu = scaledPpu * spriteScale;
         const propRefPpu = propPpu * (640 / Math.max(1, width));
 
-        // Phase 1: Per-category local distance & PPU fade-in (deep skyline + no mid-road lamp cutoff)
+        // Unified per-category distance & PPU fade driven by PROP_REGISTRY horizon profiles
         let propFogFactor = 0;
         let targetAlpha = propAlpha;
         let preCulledProp = false;
         if (!legacy) {
-          let maxRatio: number;
-          let fadeRatioSpan: number;
-          let minRefPpu: number;
-          let fadePpuSpan: number;
-
-          if (isLandmarkKind) {
-            maxRatio = 1.0;
-            fadeRatioSpan = 0.24;
-            minRefPpu = 0.0024;
-            fadePpuSpan = 0.003;
-          } else if (resolvedKind === 'lamp') {
-            maxRatio = 0.85;
-            fadeRatioSpan = 0.25;
-            minRefPpu = 0.0038;
-            fadePpuSpan = 0.004;
-          } else if (
-            resolvedKind === 'shrub' ||
-            resolvedKind === 'bench' ||
-            resolvedKind === 'chevron' ||
-            resolvedKind === 'jihanki' ||
-            resolvedKind === 'phonebooth' ||
-            resolvedKind === 'bus-stop' ||
-            resolvedKind === 'toro'
-          ) {
-            maxRatio = 0.45;
-            fadeRatioSpan = 0.2;
-            minRefPpu = 0.0075;
-            fadePpuSpan = 0.006;
-          } else {
-            maxRatio = 0.92;
-            fadeRatioSpan = 0.25;
-            minRefPpu = 0.004;
-            fadePpuSpan = 0.005;
-          }
+          const { maxRatio, fadeRatioSpan, minRefPpu, fadePpuSpan } =
+            PROP_REGISTRY[resolvedKind].horizonProfile;
 
           if (nRatio >= maxRatio || propRefPpu <= minRefPpu) {
             preCulledProp = true;
@@ -855,7 +964,7 @@ export class RoadRenderer {
         );
         const sx = p1.screenX + p1.screenW * effectiveOffset;
 
-        // Phase 3: Always register visible pylons up to horizonDepth so wires grow continuously via de Casteljau
+        // Always register visible/lookahead pylons so wires grow continuously via de Casteljau
         if (resolvedKind === 'pylon' && s.chainId !== undefined && !view.skipPylonWires) {
           activeAlpha = this.handlePylonChainWires(
             ctx,
@@ -867,11 +976,13 @@ export class RoadRenderer {
             isStreaming ? 0 : isNextSeg ? view.nextTrack!.segments.length : segments.length,
             n,
             wireMaxN,
-            horizonDepth,
+            renderDepth,
             width,
             height,
             legacy,
+            this.fogPylonWire[fogBand]!,
             activeAlpha,
+            isNextSeg,
           );
         }
 
@@ -893,7 +1004,7 @@ export class RoadRenderer {
             fogBand,
             n,
             wireMaxN,
-            horizonDepth,
+            renderDepth,
             cameraDepth,
             width,
             height,
@@ -1023,26 +1134,7 @@ export class RoadRenderer {
               interpolate(p1.screenX, p2.screenX, pct) +
               interpolate(p1.screenW, p2.screenW, pct) * effectiveLaneOffset;
             if (truckScreenX >= -width * 0.25 && truckScreenX <= width * 1.25) {
-              // Fade out trucks on the unchosen branch in Phase 3 of the stage fork
-              let forkBranchAlpha = 1;
-              if (
-                view.forkZoneStartZ !== undefined &&
-                renderTruckZ > view.forkZoneStartZ &&
-                trackLength > view.forkZoneStartZ
-              ) {
-                const forkSpan = Math.max(1, trackLength - view.forkZoneStartZ);
-                const forkT = (renderTruckZ - view.forkZoneStartZ) / forkSpan;
-                if (forkT > FORK_SPLIT_END_T) {
-                  const branch = getTruckForkBranch(truck.id, truck.baseLaneOffset, truck.forkBranch);
-                  const chosenSign = (view.forkChoice ?? 'right') === 'left' ? -1 : 1;
-                  if (branch !== chosenSign) {
-                    const u = (forkT - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
-                    forkBranchAlpha = Math.max(0, 1 - u * 1.4);
-                  }
-                }
-              }
-
-              const truckAlpha = Math.min(propAlpha, forkBranchAlpha);
+              const truckAlpha = propAlpha;
               if (truckAlpha > 0.02) {
                 if (
                   !truckClipActive &&
@@ -1098,7 +1190,15 @@ export class RoadRenderer {
     // Anchor near suspension bridge back-stay onto the bridge parapet and extrapolate nearest pylon wires
     const tWires0 = sampleSubsystems ? performance.now() : 0;
     if (!view.skipProps && !isCameraInTunnel && this.bridgeTowerActive) {
-      this.finishNearestBridgeTowerCables(ctx, cameraDepth, width, height, legacy);
+      this.finishNearestBridgeTowerCables(
+        ctx,
+        cameraDepth,
+        width,
+        height,
+        wireMaxN,
+        renderDepth,
+        legacy,
+      );
     }
     if (!view.skipPylonWires && !view.skipProps && !isCameraInTunnel) {
       this.extrapolateNearestPylonWires(ctx, width, height, horizonY, legacy);
@@ -1109,6 +1209,27 @@ export class RoadRenderer {
       this.stats.propsMs = this.stats.propsMs * 0.75 + samplePropsMs * 0.25;
       this.stats.trafficMs = this.stats.trafficMs * 0.75 + sampleTrafficMs * 0.25;
     }
+  }
+
+  private hasRenderableSpriteAtDist(
+    sprites: readonly RoadSprite[],
+    nRatio: number,
+    refPpu: number,
+    palette: StagePalette,
+  ): boolean {
+    if (sprites.length === 0) return false;
+    const hideKinds = palette.scenery.hideKinds;
+    for (let i = 0; i < sprites.length; i++) {
+      const s = sprites[i]!;
+      if (hideKinds?.has(s.kind)) continue;
+      const resolvedKind = s.kind === 'tree' ? palette.scenery.tree : s.kind;
+      if (hideKinds?.has(resolvedKind)) continue;
+      const hp = PROP_REGISTRY[resolvedKind].horizonProfile;
+      if (nRatio < hp.maxRatio && refPpu * (s.scale ?? 1) > hp.minRefPpu) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private handlePylonChainWires(
@@ -1125,9 +1246,12 @@ export class RoadRenderer {
     width: number,
     height: number,
     legacy: boolean,
+    wireColor: string,
     activeAlpha: number,
+    isNextSeg = false,
   ): number {
-    const chainId = sprite.chainId!;
+    const rawChainId = sprite.chainId!;
+    const chainId = isNextSeg ? rawChainId + 100000 : rawChainId;
     const variant = sprite.variant;
 
     // 1. Compute 5 attachment points into pre-allocated scratch array (zero GC)
@@ -1151,8 +1275,10 @@ export class RoadRenderer {
       // Previous (farther) tower exists in this chain!
       const farVariant = this.chainSlotMeta[slot * 6 + 2]!;
       const farSegIndex = this.chainSlotMeta[slot * 6 + 3]!;
+      const farWireCount = this.chainSlotMeta[slot * 6 + 4]!;
       const farPassN = this.chainSlotMeta[slot * 6 + 5]!;
       const isCrossing = variant === 2 && farVariant === 2;
+      const farIsClosedTerminal = farVariant === 1 && variant === 1 && farWireCount > 0;
       const rawDelta = Math.abs(farSegIndex - segIndex);
       const segDelta =
         trackSegCount > 0 ? Math.min(rawDelta, trackSegCount - rawDelta) : rawDelta;
@@ -1170,7 +1296,12 @@ export class RoadRenderer {
           ? 1
           : clamp01((wireMaxN - passN) / Math.max(1, farPassN - passN));
 
-      if ((isCrossing || segDelta <= 200) && canDrawInRange && (legacy || tGrow > 0.02)) {
+      if (
+        !farIsClosedTerminal &&
+        (isCrossing || segDelta <= 200) &&
+        canDrawInRange &&
+        (legacy || tGrow > 0.02)
+      ) {
         const spanAlpha = legacy
           ? 1
           : smoothstep(clamp01((wireMaxN - passN) / Math.max(1, horizonDepth * 0.22))) *
@@ -1180,7 +1311,7 @@ export class RoadRenderer {
             ctx.globalAlpha = spanAlpha;
             activeAlpha = spanAlpha;
           }
-          ctx.strokeStyle = '#2d1c4a';
+          ctx.strokeStyle = legacy ? '#2d1c4a' : wireColor;
           ctx.lineWidth = 1;
 
           const pOffset = slot * 10;
@@ -1317,6 +1448,10 @@ export class RoadRenderer {
         return activeAlpha;
       }
 
+      if (farIsClosedTerminal) {
+        this.chainSlotMeta[slot * 6 + 4] = 0;
+      }
+
       // Record per-wire normalized screen direction (near - far) from attachment points, then update slot
       const pOffset = slot * 10;
       for (let k = 0; k < 5; k++) {
@@ -1341,7 +1476,18 @@ export class RoadRenderer {
       this.chainSlotMeta[slot * 6 + 5] = passN;
     } else {
       // First visible tower for this chain (farthest visible tower in Pass 2).
-      const targetSlot = emptySlot !== -1 ? emptySlot : 0;
+      let targetSlot = emptySlot;
+      if (targetSlot === -1) {
+        let maxFarN = -1;
+        targetSlot = 0;
+        for (let s = 0; s < RoadRenderer.MAX_CHAIN_SLOTS; s++) {
+          const sFarN = this.chainSlotMeta[s * 6 + 5]!;
+          if (sFarN > maxFarN) {
+            maxFarN = sFarN;
+            targetSlot = s;
+          }
+        }
+      }
       const pOffset = targetSlot * 10;
 
       // Store current tower into target slot
@@ -1582,6 +1728,7 @@ export class RoadRenderer {
     this.bridgeTowerVariant = variant;
     this.bridgeTowerBeatPulse = beatPulse;
     this.bridgeTowerFogBand = fogBand;
+    this.bridgeTowerLineW = lineW;
     return activeAlpha;
   }
 
@@ -1590,18 +1737,29 @@ export class RoadRenderer {
     cameraDepth: number,
     _width: number,
     height: number,
+    wireMaxN: number,
+    horizonDepth: number,
     legacy: boolean,
   ): void {
-    if (!this.bridgeTowerActive || legacy || this.bridgeTowerFarN < 3) return;
+    if (!this.bridgeTowerActive || legacy || this.bridgeTowerFarN < 3 || this.bridgeTowerFarN >= wireMaxN) {
+      return;
+    }
     if (typeof ctx.quadraticCurveTo !== 'function') return;
+    const spanAlpha = smoothstep(
+      clamp01((wireMaxN - this.bridgeTowerFarN) / Math.max(1, horizonDepth * 0.2)),
+    );
+    if (spanAlpha <= 0.04) return;
     const cableColor = this.getBridgeCableColor(
       this.bridgeTowerVariant,
       this.bridgeTowerBeatPulse,
       this.bridgeTowerFogBand,
     );
+    if (spanAlpha < 0.98) {
+      ctx.globalAlpha = spanAlpha;
+    }
     ctx.strokeStyle = cableColor;
     ctx.fillStyle = cableColor;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = this.bridgeTowerLineW;
     this.drawBridgeParapetBackstay(
       ctx,
       this.bridgeTowerLeftPeakX,
@@ -1613,6 +1771,9 @@ export class RoadRenderer {
       cameraDepth,
       height,
     );
+    if (spanAlpha < 0.98) {
+      ctx.globalAlpha = 1;
+    }
   }
 
   private extrapolateNearestPylonWires(
@@ -1786,6 +1947,7 @@ export class RoadRenderer {
         height,
         seg,
         palette,
+        fogBand,
         grassColor,
         tunRoadColor,
         tunRumbleColor,
@@ -1809,6 +1971,8 @@ export class RoadRenderer {
       return;
     }
 
+    this.extTunnelActive = false;
+
     // Bridge bay water surface vs viaduct/terrain ground fill.
     // Bridge segments always paint fog-blended water beneath them so approaching/leaving bridges never flashes;
     // viaducts NEVER draw bay water; standard terrain fills [y2, y1] for natural hill-crest occlusion.
@@ -1830,13 +1994,20 @@ export class RoadRenderer {
 
     const isForkSeg =
       forkZoneStartZ !== undefined && p2.worldZ > forkZoneStartZ && trackLength > forkZoneStartZ;
+
+    // Horizontal frustum cull for curved road slices completely outside [0, width]
+    const cullMult = isForkSeg ? FORK_PEAK_OUTER_LIMIT : 1;
+    const minRoadX = Math.min(x1 - w1 * cullMult - r1, x2 - w2 * cullMult - r2);
+    const maxRoadX = Math.max(x1 + w1 * cullMult + r1, x2 + w2 * cullMult + r2);
+    if (maxRoadX < -2 || minRoadX > width + 2) return;
+
     const sliceH = y1 - y2;
     const rawDy = p1.screenY - p2.screenY;
     const useFastSliceRect = legacy
       ? !isBridge && !isViaduct && w1 < 20 && rawDy < 2.2
       : isCoalesced || (rawDy <= 1.6 && Math.abs(w1 - w2) <= 4.5 && Math.abs(x1 - x2) <= 5.5);
 
-    // OutRun physical Y-fork geometry in the final outro segments when forkZoneStartZ is active
+    // OutRun attached dual-carriageway fork geometry in the final outro segments when forkZoneStartZ is active
     if (isForkSeg) {
       this.renderForkSegment(
         ctx,
@@ -1844,6 +2015,7 @@ export class RoadRenderer {
         rumbleColor,
         roadColor,
         laneColor,
+        fogBand,
         x1,
         y1,
         w1,
@@ -1860,11 +2032,6 @@ export class RoadRenderer {
       );
       return;
     }
-
-    // Horizontal frustum cull for curved road slices completely outside [0, width]
-    const minRoadX = Math.min(x1 - w1 - r1, x2 - w2 - r2);
-    const maxRoadX = Math.max(x1 + w1 + r1, x2 + w2 + r2);
-    if (maxRoadX < -2 || minRoadX > width + 2) return;
 
     if (useFastSliceRect) {
       // Distant thin-slice fast path: separate non-overlapping curb & asphalt fillRects avoid both
@@ -1884,8 +2051,8 @@ export class RoadRenderer {
       ctx.fillStyle = isCoalesced ? this.fogRoadMid[fogBand]! : roadColor;
       ctx.fillRect(roadLeft, y2, roadSpan, sliceH);
 
-      if (!isCoalesced && stripe === 0 && w1 >= 6) {
-        ctx.fillStyle = laneColor;
+      if (mw >= 2.2 && (isCoalesced || stripe === 0)) {
+        ctx.fillStyle = isCoalesced ? this.fogLaneCoalesced[fogBand]! : laneColor;
         const lw = Math.max(1, mw / Math.max(32, 8 * LANES));
         const laneStep = roadSpan / LANES;
         let lx = roadLeft + laneStep;
@@ -1901,7 +2068,7 @@ export class RoadRenderer {
       ctx.fillStyle = roadColor;
       polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
 
-      if (stripe === 0 && w1 >= 6) {
+      if (stripe === 0 && w1 >= 2.2) {
         ctx.fillStyle = laneColor;
         drawLanes(ctx, x1, y1, x2, y2, w1, w2);
       }
@@ -1917,10 +2084,42 @@ export class RoadRenderer {
       }
     }
 
-    if (isBridge && (legacy ? w1 >= 18 : !isCoalesced && w1 >= 8)) {
+    if (isBridge && (legacy ? w1 >= 18 : true)) {
       this.renderBridgeParapets(ctx, seg, fogBand, useFastSliceRect, x1, y1, w1, r1, x2, y2, w2, r2);
-    } else if (isViaduct && (legacy ? w1 >= 18 : !isCoalesced && w1 >= 8)) {
+      if (!legacy && w1 >= 4 && (prevEnv !== 'bridge' || nextEnv !== 'bridge')) {
+        this.renderBridgeAbutment(
+          ctx,
+          palette,
+          fogBand,
+          x1,
+          y1,
+          w1,
+          r1,
+          horizonY,
+          height,
+          segClipY,
+          0.16,
+          false,
+        );
+      }
+    } else if (isViaduct && (legacy ? w1 >= 18 : true)) {
       this.renderViaductParapets(ctx, seg, palette, fogBand, useFastSliceRect, x1, y1, w1, r1, x2, y2, w2, r2);
+      if (!legacy && w1 >= 4 && (prevEnv !== 'viaduct' || nextEnv !== 'viaduct')) {
+        this.renderBridgeAbutment(
+          ctx,
+          palette,
+          fogBand,
+          x1,
+          y1,
+          w1,
+          r1,
+          horizonY,
+          height,
+          segClipY,
+          0.22,
+          true,
+        );
+      }
     }
   }
 
@@ -1930,6 +2129,7 @@ export class RoadRenderer {
     rumbleColor: string,
     roadColor: string,
     laneColor: string,
+    fogBand: number,
     x1: number,
     y1: number,
     w1: number,
@@ -1955,375 +2155,208 @@ export class RoadRenderer {
     const sliceH = y1 - y2;
     const baseLaneStep = Math.max(32, 8 * LANES);
 
-    if (t2 <= FORK_WIDEN_END_T) {
-      // Phase 1: Pre-split widening zone with center chevron warning gore
-      const p1Norm = t1 / FORK_WIDEN_END_T;
-      const p2Norm = t2 / FORK_WIDEN_END_T;
-      const pEase1 = smoothstep(p1Norm);
-      const pEase2 = smoothstep(p2Norm);
+    // Attached dual-carriageway width profile (zero central grass divider — always crossable at x = 0)
+    const outLim1 = getForkOuterLimit(t1);
+    const outLim2 = getForkOuterLimit(t2);
+    const outerW1 = w1 * outLim1;
+    const outerW2 = w2 * outLim2;
 
-      const outerW1 = w1 * (1 + pEase1 * 0.2);
-      const outerW2 = w2 * (1 + pEase2 * 0.2);
-      const ir1 = r1 * 0.7;
-      const ir2 = r2 * 0.7;
-      const c1 = ir1 * pEase1;
-      const c2 = ir2 * pEase2;
+    // Guide lane offset smoothly transitions 1/3 -> 0.5*FORK_PEAK_OUTER_LIMIT (0.75) -> 1/3
+    const wideSpanFrac1 = clamp01((outLim1 - 1) / Math.max(0.01, FORK_PEAK_OUTER_LIMIT - 1));
+    const wideSpanFrac2 = clamp01((outLim2 - 1) / Math.max(0.01, FORK_PEAK_OUTER_LIMIT - 1));
+    const guideOff1 = 1 / 3 + (outLim1 * 0.5 - 1 / 3) * wideSpanFrac1;
+    const guideOff2 = 1 / 3 + (outLim2 * 0.5 - 1 / 3) * wideSpanFrac2;
+    const leftGuide1 = x1 - guideOff1 * w1;
+    const leftGuide2 = x2 - guideOff2 * w2;
+    const rightGuide1 = x1 + guideOff1 * w1;
+    const rightGuide2 = x2 + guideOff2 * w2;
 
-      const leftLine1 = x1 - (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
-      const leftLine2 = x2 - (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
-      const rightLine1 = x1 + (1 / 3 + (0.6 - 1 / 3) * pEase1) * w1;
-      const rightLine2 = x2 + (1 / 3 + (0.6 - 1 / 3) * pEase2) * w2;
+    // Flush painted double-line divider along x = 0 (fades in smoothly over t < 0.08, fades out over taper)
+    const entryEase = smoothstep(clamp01(t1 / 0.08));
+    const taperFade =
+      t2 > FORK_TAPER_START_T
+        ? Math.max(0, 1 - clamp01((t2 - FORK_TAPER_START_T) / FORK_CONVERGE_SPAN_T))
+        : 1;
+    const showCenterDivider = w1 >= 4 && entryEase > 0.05 && taperFade > 0.05;
+    const cyanCol = choice === 'left' ? this.fogForkCyan[fogBand]! : this.fogForkCyanDim[fogBand]!;
+    const amberCol =
+      choice === 'right' ? this.fogForkAmber[fogBand]! : this.fogForkAmberDim[fogBand]!;
 
-      if (useFastForkRect) {
-        const mx = (x1 + x2) * 0.5;
-        const ow = (outerW1 + outerW2) * 0.5;
-        const mr = (r1 + r2) * 0.5;
-        const roadLeft = Math.round(mx - ow);
-        const roadRight = Math.round(mx + ow);
-        const curbW = Math.max(1, Math.round(mr));
-        ctx.fillStyle = rumbleColor;
-        ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
-        ctx.fillRect(roadRight, y2, curbW, sliceH);
-        ctx.fillStyle = roadColor;
-        ctx.fillRect(roadLeft, y2, Math.max(1, roadRight - roadLeft), sliceH);
-        if (c2 > 0.5) {
-          const mc = (c1 + c2) * 0.5;
-          ctx.fillStyle =
-            stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : rumbleColor;
-          ctx.fillRect(mx - mc, y2, mc * 2, sliceH);
-        }
-        if (stripe === 0 && w1 >= 6) {
-          const mw = (w1 + w2) * 0.5;
-          const pEaseMid = (pEase1 + pEase2) * 0.5;
-          const baseLw = Math.max(1, mw / baseLaneStep);
-          const chosenLw = baseLw * (1 + pEaseMid);
-          const leftMid = (leftLine1 + leftLine2) * 0.5;
-          const rightMid = (rightLine1 + rightLine2) * 0.5;
-          ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
-          const lW = choice === 'left' ? chosenLw : baseLw;
-          ctx.fillRect(leftMid - lW * 0.5, y2, lW, sliceH);
-          ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
-          const rW = choice === 'right' ? chosenLw : baseLw;
-          ctx.fillRect(rightMid - rW * 0.5, y2, rW, sliceH);
-        }
-        return;
-      }
+    if (useFastForkRect) {
+      const mx = (x1 + x2) * 0.5;
+      const ow = (outerW1 + outerW2) * 0.5;
+      const mr = (r1 + r2) * 0.5;
+      const roadLeft = Math.round(mx - ow);
+      const roadRight = Math.round(mx + ow);
+      const roadSpan = Math.max(1, roadRight - roadLeft);
+      const curbW = Math.max(1, Math.round(mr));
 
-      // Outer rumble strips (batched pair)
       ctx.fillStyle = rumbleColor;
-      drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
+      ctx.fillRect(roadLeft - curbW, y2, curbW, sliceH);
+      ctx.fillRect(roadRight, y2, curbW, sliceH);
 
-      // Asphalt road surface
       ctx.fillStyle = roadColor;
-      polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
+      ctx.fillRect(roadLeft, y2, roadSpan, sliceH);
 
-      // Central median gore chevron / triangle (widens smoothly from width 0 at t=0 to ir at t=0.18)
-      if (c2 > 0.5) {
-        ctx.fillStyle = stripe === 0 ? (choice === 'right' ? '#ffd319' : '#05d9e8') : rumbleColor;
-        polygon(ctx, x1 - c1, y1, x1 + c1, y1, x2 + c2, y2, x2 - c2, y2);
-      }
-
-      // Continuous lane lines (seamlessly diverging from ±1/3 normal road into ±0.60 branch centers)
-      if (stripe === 0 && w1 >= 6) {
-        const baseHalf1 = Math.max(0.5, w1 / (baseLaneStep * 2));
-        const baseHalf2 = Math.max(0.5, w2 / (baseLaneStep * 2));
-        const chosenHalf1 = baseHalf1 * (1 + pEase1);
-        const chosenHalf2 = baseHalf2 * (1 + pEase2);
-
-        const lHalf1 = choice === 'left' ? chosenHalf1 : baseHalf1;
-        const lHalf2 = choice === 'left' ? chosenHalf2 : baseHalf2;
-        ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
-        polygon(ctx, leftLine1 - lHalf1, y1, leftLine1 + lHalf1, y1, leftLine2 + lHalf2, y2, leftLine2 - lHalf2, y2);
-
-        const rHalf1 = choice === 'right' ? chosenHalf1 : baseHalf1;
-        const rHalf2 = choice === 'right' ? chosenHalf2 : baseHalf2;
-        ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
-        polygon(ctx, rightLine1 - rHalf1, y1, rightLine1 + rHalf1, y1, rightLine2 + rHalf2, y2, rightLine2 - rHalf2, y2);
-      }
-    } else if (t2 <= FORK_SPLIT_END_T) {
-      // Phase 2: Diverging Left & Right asphalt branches with a central V-chevron median island
-      const split1 = Math.max(0, (t1 - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
-      const split2 = Math.max(0, (t2 - FORK_WIDEN_END_T) / FORK_SPLIT_SPAN_T);
-      const splitEase1 = smoothstep(split1);
-      const splitEase2 = smoothstep(split2);
-
-      const outerW1 = w1 * (1.2 + splitEase1 * 0.48);
-      const outerW2 = w2 * (1.2 + splitEase2 * 0.48);
-      const gap1 = w1 * splitEase1 * FORK_PEAK_INNER_GAP;
-      const gap2 = w2 * splitEase2 * FORK_PEAK_INNER_GAP;
-      const ir1 = r1 * 0.7;
-      const ir2 = r2 * 0.7;
-
-      // Inner curbs transition smoothly from [-ir, 0] / [0, +ir] at t=0.18
-      // to median-side [-gap, -gap + r] / [+gap - r, +gap] at t=0.65 so Phase 2->3 is flush.
-      const leftInnerL1 = x1 - gap1 - ir1 * (1 - splitEase1);
-      const leftInnerR1 = x1 - gap1 + r1 * splitEase1;
-      const leftInnerL2 = x2 - gap2 - ir2 * (1 - splitEase2);
-      const leftInnerR2 = x2 - gap2 + r2 * splitEase2;
-
-      const rightInnerL1 = x1 + gap1 - r1 * splitEase1;
-      const rightInnerR1 = x1 + gap1 + ir1 * (1 - splitEase1);
-      const rightInnerL2 = x2 + gap2 - r2 * splitEase2;
-      const rightInnerR2 = x2 + gap2 + ir2 * (1 - splitEase2);
-
-      const leftMid1 = x1 - (outerW1 + gap1) * 0.5;
-      const leftMid2 = x2 - (outerW2 + gap2) * 0.5;
-      const rightMid1 = x1 + (outerW1 + gap1) * 0.5;
-      const rightMid2 = x2 + (outerW2 + gap2) * 0.5;
-
-      if (useFastForkRect) {
-        const mx = (x1 + x2) * 0.5;
-        const ow = (outerW1 + outerW2) * 0.5;
-        const gap = (gap1 + gap2) * 0.5;
-        const mr = (r1 + r2) * 0.5;
-        const leftOuter = Math.round(mx - ow);
-        const leftAsphaltInner = Math.round(mx - gap);
-        const rightAsphaltInner = Math.round(mx + gap);
-        const rightOuter = Math.round(mx + ow);
-        const curbW = Math.max(1, Math.round(mr));
-
-        const lInL = Math.round((leftInnerL1 + leftInnerL2) * 0.5);
-        const lInR = Math.round((leftInnerR1 + leftInnerR2) * 0.5);
-        const rInL = Math.round((rightInnerL1 + rightInnerL2) * 0.5);
-        const rInR = Math.round((rightInnerR1 + rightInnerR2) * 0.5);
-
-        ctx.fillStyle = rumbleColor;
-        ctx.fillRect(leftOuter - curbW, y2, curbW, sliceH);
-        ctx.fillRect(rightOuter, y2, curbW, sliceH);
-        ctx.fillStyle = roadColor;
-        ctx.fillRect(leftOuter, y2, Math.max(1, leftAsphaltInner - leftOuter), sliceH);
-        ctx.fillRect(rightAsphaltInner, y2, Math.max(1, rightOuter - rightAsphaltInner), sliceH);
-        ctx.fillStyle = choice === 'left' ? '#05d9e8' : rumbleColor;
-        ctx.fillRect(lInL, y2, Math.max(1, lInR - lInL), sliceH);
-        ctx.fillStyle = choice === 'right' ? '#ffd319' : rumbleColor;
-        ctx.fillRect(rInL, y2, Math.max(1, rInR - rInL), sliceH);
-
-        if (stripe === 0 && w1 >= 6) {
-          const mw = (w1 + w2) * 0.5;
-          const baseLw = Math.max(1, mw / baseLaneStep);
-          const chosenLw = baseLw * 2;
-          const leftMid = (leftMid1 + leftMid2) * 0.5;
-          const rightMid = (rightMid1 + rightMid2) * 0.5;
-          ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
-          const lW = choice === 'left' ? chosenLw : baseLw;
-          ctx.fillRect(leftMid - lW * 0.5, y2, lW, sliceH);
-          ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
-          const rW = choice === 'right' ? chosenLw : baseLw;
-          ctx.fillRect(rightMid - rW * 0.5, y2, rW, sliceH);
+      if (showCenterDivider) {
+        const mw = (w1 + w2) * 0.5;
+        const divGap = Math.max(1, mw * 0.014 * entryEase * taperFade);
+        const divBase = Math.max(1, mw / baseLaneStep);
+        const lW = divBase * (choice === 'left' ? 1.55 : 0.95) * taperFade;
+        const rW = divBase * (choice === 'right' ? 1.55 : 0.95) * taperFade;
+        if (lW >= 0.4) {
+          ctx.fillStyle = cyanCol;
+          ctx.fillRect(mx - divGap - lW, y2, Math.max(1, lW), sliceH);
         }
-        return;
-      }
-
-      // Outer rumble strips (batched pair)
-      ctx.fillStyle = rumbleColor;
-      drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
-
-      // Left branch asphalt
-      ctx.fillStyle = roadColor;
-      polygon(ctx, x1 - outerW1, y1, x1 - gap1, y1, x2 - gap2, y2, x2 - outerW2, y2);
-
-      // Right branch asphalt
-      ctx.fillStyle = roadColor;
-      polygon(ctx, x1 + gap1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 + gap2, y2);
-
-      // Inner median V-curbs
-      ctx.fillStyle = choice === 'left' ? '#05d9e8' : rumbleColor;
-      polygon(ctx, leftInnerL1, y1, leftInnerR1, y1, leftInnerR2, y2, leftInnerL2, y2);
-
-      ctx.fillStyle = choice === 'right' ? '#ffd319' : rumbleColor;
-      polygon(ctx, rightInnerL1, y1, rightInnerR1, y1, rightInnerR2, y2, rightInnerL2, y2);
-
-      // Center guide lines down each branch (from ±0.60 at t=0.18 to ±1.10 at t=0.65)
-      if (stripe === 0 && w1 >= 6) {
-        const baseHalf1 = Math.max(0.5, w1 / (baseLaneStep * 2));
-        const baseHalf2 = Math.max(0.5, w2 / (baseLaneStep * 2));
-        const chosenHalf1 = baseHalf1 * 2;
-        const chosenHalf2 = baseHalf2 * 2;
-
-        const lHalf1 = choice === 'left' ? chosenHalf1 : baseHalf1;
-        const lHalf2 = choice === 'left' ? chosenHalf2 : baseHalf2;
-        ctx.fillStyle = choice === 'left' ? '#05d9e8' : laneColor;
-        polygon(ctx, leftMid1 - lHalf1, y1, leftMid1 + lHalf1, y1, leftMid2 + lHalf2, y2, leftMid2 - lHalf2, y2);
-
-        const rHalf1 = choice === 'right' ? chosenHalf1 : baseHalf1;
-        const rHalf2 = choice === 'right' ? chosenHalf2 : baseHalf2;
-        ctx.fillStyle = choice === 'right' ? '#ffd319' : laneColor;
-        polygon(ctx, rightMid1 - rHalf1, y1, rightMid1 + rHalf1, y1, rightMid2 + rHalf2, y2, rightMid2 - rHalf2, y2);
-      }
-    } else {
-      // Phase 3: Seamless convergence of the chosen branch back to the center road!
-      const cCenter1 = getChosenForkCenter(t1, choice) * w1;
-      const cCenter2 = getChosenForkCenter(t2, choice) * w2;
-      const cHalfW1 = getChosenForkHalfWidth(t1) * w1;
-      const cHalfW2 = getChosenForkHalfWidth(t2) * w2;
-
-      const cLeft1 = x1 + cCenter1 - cHalfW1;
-      const cRight1 = x1 + cCenter1 + cHalfW1;
-      const cLeft2 = x2 + cCenter2 - cHalfW2;
-      const cRight2 = x2 + cCenter2 + cHalfW2;
-
-      const u1 = clamp01((t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
-      const u2 = clamp01((t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
-      const ease1 = smoothstep(u1);
-      const ease2 = smoothstep(u2);
-
-      const branchStart1 = t1 <= FORK_SPLIT_END_T ? Math.abs(getChosenForkCenter(t1, choice)) : FORK_PEAK_BRANCH_CENTER;
-      const branchStart2 = FORK_PEAK_BRANCH_CENTER;
-
-      if (useFastForkRect) {
-        const cLeft = Math.round((cLeft1 + cLeft2) * 0.5);
-        const cRight = Math.round((cRight1 + cRight2) * 0.5);
-        const curbW = Math.max(1, Math.round((r1 + r2) * 0.5));
-        ctx.fillStyle = rumbleColor;
-        ctx.fillRect(cLeft - curbW, y2, curbW, sliceH);
-        ctx.fillRect(cRight, y2, curbW, sliceH);
-        ctx.fillStyle = roadColor;
-        ctx.fillRect(cLeft, y2, Math.max(1, cRight - cLeft), sliceH);
-
-        if (stripe === 0 && w1 >= 6) {
-          const mw = (w1 + w2) * 0.5;
-          const easeMid = (ease1 + ease2) * 0.5;
-          const baseLw = Math.max(1, mw / baseLaneStep);
-          const convLw = baseLw * (2 - easeMid);
-          if (choice === 'right') {
-            const rightLine1 = x1 + (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
-            const rightLine2 = x2 + (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
-            ctx.fillStyle = easeMid < 0.85 ? '#ffd319' : laneColor;
-            ctx.fillRect((rightLine1 + rightLine2) * 0.5 - convLw * 0.5, y2, convLw, sliceH);
-
-            const leftLineMid = (x1 + x2) * 0.5 - (1 / 3) * mw;
-            if (leftLineMid > cLeft + baseLw) {
-              const alpha = Math.min(1, (leftLineMid - cLeft) / (mw * 0.25));
-              const prevAlpha = ctx.globalAlpha;
-              ctx.globalAlpha = prevAlpha * alpha;
-              ctx.fillStyle = laneColor;
-              ctx.fillRect(leftLineMid - baseLw * 0.5, y2, baseLw, sliceH);
-              ctx.globalAlpha = prevAlpha;
-            }
-          } else {
-            const leftLine1 = x1 - (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
-            const leftLine2 = x2 - (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
-            ctx.fillStyle = easeMid < 0.85 ? '#05d9e8' : laneColor;
-            ctx.fillRect((leftLine1 + leftLine2) * 0.5 - convLw * 0.5, y2, convLw, sliceH);
-
-            const rightLineMid = (x1 + x2) * 0.5 + (1 / 3) * mw;
-            if (rightLineMid < cRight - baseLw) {
-              const alpha = Math.min(1, (cRight - rightLineMid) / (mw * 0.25));
-              const prevAlpha = ctx.globalAlpha;
-              ctx.globalAlpha = prevAlpha * alpha;
-              ctx.fillStyle = laneColor;
-              ctx.fillRect(rightLineMid - baseLw * 0.5, y2, baseLw, sliceH);
-              ctx.globalAlpha = prevAlpha;
-            }
-          }
-        }
-
-        const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
-        const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
-        if (unchosenAlpha > 0.08) {
-          const prevAlpha = ctx.globalAlpha;
-          ctx.globalAlpha = prevAlpha * unchosenAlpha;
-          const uSign = choice === 'left' ? 1 : -1;
-          const u1Unchosen = Math.max(0, (t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
-          const eMid = smoothstep((u1Unchosen + Math.max(0, u2Unchosen)) * 0.5);
-          const uCenter = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * eMid) * ((w1 + w2) * 0.5);
-          const uHalfW = 0.58 * (1 - 0.2 * eMid) * ((w1 + w2) * 0.5);
-          const uLeft = Math.round((x1 + x2) * 0.5 + uCenter - uHalfW);
-          const uRight = Math.round((x1 + x2) * 0.5 + uCenter + uHalfW);
-          ctx.fillStyle = rumbleColor;
-          ctx.fillRect(uLeft - curbW, y2, curbW, sliceH);
-          ctx.fillRect(uRight, y2, curbW, sliceH);
-          ctx.fillStyle = roadColor;
-          ctx.fillRect(uLeft, y2, Math.max(1, uRight - uLeft), sliceH);
-          ctx.globalAlpha = prevAlpha;
-        }
-        return;
-      }
-
-      // Chosen branch outer rumble strips (batched pair)
-      ctx.fillStyle = rumbleColor;
-      drawRumblePairSplit(ctx, cLeft1, cRight1, y1, cLeft2, cRight2, y2, r1, r2);
-
-      // Chosen branch asphalt
-      ctx.fillStyle = roadColor;
-      polygon(ctx, cLeft1, y1, cRight1, y1, cRight2, y2, cLeft2, y2);
-
-      // Seamless lane lines converging into standard 3-lane highway dividers (±1/3)
-      if (stripe === 0 && w1 >= 6) {
-        const baseHalf1 = Math.max(0.5, w1 / (baseLaneStep * 2));
-        const baseHalf2 = Math.max(0.5, w2 / (baseLaneStep * 2));
-        const convHalf1 = baseHalf1 * (2 - ease1);
-        const convHalf2 = baseHalf2 * (2 - ease2);
-
-        if (choice === 'right') {
-          // Right branch lane line: smoothly converges from +1.10 to +1/3 (the right lane divider of normal road!)
-          const rightLine1 = x1 + (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
-          const rightLine2 = x2 + (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
-          ctx.fillStyle = ease1 < 0.85 ? '#ffd319' : laneColor;
-          polygon(ctx, rightLine1 - convHalf1, y1, rightLine1 + convHalf1, y1, rightLine2 + convHalf2, y2, rightLine2 - convHalf2, y2);
-
-          // Left highway divider (-1/3) smoothly emerges as road widens past the median
-          const leftLine1 = x1 - (1 / 3) * w1;
-          const leftLine2 = x2 - (1 / 3) * w2;
-          if (leftLine1 > cLeft1 + baseHalf1 * 2) {
-            const alpha = Math.min(1, (leftLine1 - cLeft1) / (w1 * 0.25));
-            const prevAlpha = ctx.globalAlpha;
-            ctx.globalAlpha = prevAlpha * alpha;
-            ctx.fillStyle = laneColor;
-            polygon(ctx, leftLine1 - baseHalf1, y1, leftLine1 + baseHalf1, y1, leftLine2 + baseHalf2, y2, leftLine2 - baseHalf2, y2);
-            ctx.globalAlpha = prevAlpha;
-          }
-        } else {
-          // Left branch lane line: smoothly converges from -1.10 to -1/3 (the left lane divider of normal road!)
-          const leftLine1 = x1 - (branchStart1 * (1 - ease1) + (1 / 3) * ease1) * w1;
-          const leftLine2 = x2 - (branchStart2 * (1 - ease2) + (1 / 3) * ease2) * w2;
-          ctx.fillStyle = ease1 < 0.85 ? '#05d9e8' : laneColor;
-          polygon(ctx, leftLine1 - convHalf1, y1, leftLine1 + convHalf1, y1, leftLine2 + convHalf2, y2, leftLine2 - convHalf2, y2);
-
-          // Right highway divider (+1/3) smoothly emerges as road widens past the median
-          const rightLine1 = x1 + (1 / 3) * w1;
-          const rightLine2 = x2 + (1 / 3) * w2;
-          if (rightLine1 < cRight1 - baseHalf1 * 2) {
-            const alpha = Math.min(1, (cRight1 - rightLine1) / (w1 * 0.25));
-            const prevAlpha = ctx.globalAlpha;
-            ctx.globalAlpha = prevAlpha * alpha;
-            ctx.fillStyle = laneColor;
-            polygon(ctx, rightLine1 - baseHalf1, y1, rightLine1 + baseHalf1, y1, rightLine2 + baseHalf2, y2, rightLine2 - baseHalf2, y2);
-            ctx.globalAlpha = prevAlpha;
-          }
+        if (rW >= 0.4) {
+          ctx.fillStyle = amberCol;
+          ctx.fillRect(mx + divGap, y2, Math.max(1, rW), sliceH);
         }
       }
 
-      // Unchosen branch curves outward and fades away into distance
-      const u2Unchosen = (t2 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T;
-      const unchosenAlpha = Math.max(0, 1 - u2Unchosen * 1.4);
-      if (unchosenAlpha > 0.02) {
-        const prevAlpha = ctx.globalAlpha;
-        ctx.globalAlpha = prevAlpha * unchosenAlpha;
-        const uSign = choice === 'left' ? 1 : -1;
-        const u1Unchosen = Math.max(0, (t1 - FORK_SPLIT_END_T) / FORK_CONVERGE_SPAN_T);
-        const e1 = smoothstep(u1Unchosen);
-        const e2 = smoothstep(u2Unchosen);
+      if (stripe === 0 && w1 >= 2.2) {
+        const mw = (w1 + w2) * 0.5;
+        const baseLw = Math.max(1, mw / baseLaneStep);
+        const activeLw = baseLw * (1 + 0.65 * wideSpanFrac1);
+        const leftMid = (leftGuide1 + leftGuide2) * 0.5;
+        const rightMid = (rightGuide1 + rightGuide2) * 0.5;
+        ctx.fillStyle = choice === 'left' ? this.fogForkCyan[fogBand]! : laneColor;
+        const lW = choice === 'left' ? activeLw : baseLw;
+        ctx.fillRect(leftMid - lW * 0.5, y2, lW, sliceH);
+        ctx.fillStyle = choice === 'right' ? this.fogForkAmber[fogBand]! : laneColor;
+        const rW = choice === 'right' ? activeLw : baseLw;
+        ctx.fillRect(rightMid - rW * 0.5, y2, rW, sliceH);
+      }
+      return;
+    }
 
-        const uCenter1 = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * e1) * w1;
-        const uCenter2 = uSign * (FORK_PEAK_BRANCH_CENTER + 0.35 * e2) * w2;
-        const uHalfW1 = 0.58 * (1 - 0.2 * e1) * w1;
-        const uHalfW2 = 0.58 * (1 - 0.2 * e2) * w2;
+    // Continuous outer rumble strips enclosing both attached carriageways
+    ctx.fillStyle = rumbleColor;
+    drawRumblePair(ctx, x1, y1, x2, y2, outerW1, outerW2, r1, r2);
 
-        const uLeft1 = x1 + uCenter1 - uHalfW1;
-        const uRight1 = x1 + uCenter1 + uHalfW1;
-        const uLeft2 = x2 + uCenter2 - uHalfW2;
-        const uRight2 = x2 + uCenter2 + uHalfW2;
+    // Unified contiguous asphalt surface across both left & right branches
+    ctx.fillStyle = roadColor;
+    polygon(ctx, x1 - outerW1, y1, x1 + outerW1, y1, x2 + outerW2, y2, x2 - outerW2, y2);
 
-        ctx.fillStyle = rumbleColor;
-        polygon(ctx, uLeft1 - r1, y1, uLeft1, y1, uLeft2, y2, uLeft2 - r2, y2);
-        polygon(ctx, uRight1, y1, uRight1 + r1, y1, uRight2 + r2, y2, uRight2, y2);
+    // Flush painted double-line center seam at x = 0 (zero physical median — drive across anytime)
+    if (showCenterDivider) {
+      const gap1 = Math.max(1, w1 * 0.014 * entryEase * taperFade);
+      const gap2 = Math.max(1, w2 * 0.014 * entryEase * taperFade);
+      const base1 = Math.max(0.8, w1 / baseLaneStep);
+      const base2 = Math.max(0.8, w2 / baseLaneStep);
+      const lw1 = base1 * (choice === 'left' ? 1.55 : 0.95) * taperFade;
+      const lw2 = base2 * (choice === 'left' ? 1.55 : 0.95) * taperFade;
+      const rw1 = base1 * (choice === 'right' ? 1.55 : 0.95) * taperFade;
+      const rw2 = base2 * (choice === 'right' ? 1.55 : 0.95) * taperFade;
 
-        ctx.fillStyle = roadColor;
-        polygon(ctx, uLeft1, y1, uRight1, y1, uRight2, y2, uLeft2, y2);
-        ctx.globalAlpha = prevAlpha;
+      if (lw1 >= 0.4) {
+        ctx.fillStyle = cyanCol;
+        polygon(
+          ctx,
+          x1 - gap1 - lw1,
+          y1,
+          x1 - gap1,
+          y1,
+          x2 - gap2,
+          y2,
+          x2 - gap2 - lw2,
+          y2,
+        );
+      }
+      if (rw1 >= 0.4) {
+        ctx.fillStyle = amberCol;
+        polygon(
+          ctx,
+          x1 + gap1,
+          y1,
+          x1 + gap1 + rw1,
+          y1,
+          x2 + gap2 + rw2,
+          y2,
+          x2 + gap2,
+          y2,
+        );
       }
     }
+
+    // Dashed lane guide down each carriageway branch
+    if (stripe === 0 && w1 >= 2.2) {
+      const baseHalf1 = Math.max(0.5, w1 / (baseLaneStep * 2));
+      const baseHalf2 = Math.max(0.5, w2 / (baseLaneStep * 2));
+      const activeHalf1 = baseHalf1 * (1 + 0.65 * wideSpanFrac1);
+      const activeHalf2 = baseHalf2 * (1 + 0.65 * wideSpanFrac2);
+
+      const lHalf1 = choice === 'left' ? activeHalf1 : baseHalf1;
+      const lHalf2 = choice === 'left' ? activeHalf2 : baseHalf2;
+      ctx.fillStyle = choice === 'left' ? this.fogForkCyan[fogBand]! : laneColor;
+      polygon(
+        ctx,
+        leftGuide1 - lHalf1,
+        y1,
+        leftGuide1 + lHalf1,
+        y1,
+        leftGuide2 + lHalf2,
+        y2,
+        leftGuide2 - lHalf2,
+        y2,
+      );
+
+      const rHalf1 = choice === 'right' ? activeHalf1 : baseHalf1;
+      const rHalf2 = choice === 'right' ? activeHalf2 : baseHalf2;
+      ctx.fillStyle = choice === 'right' ? this.fogForkAmber[fogBand]! : laneColor;
+      polygon(
+        ctx,
+        rightGuide1 - rHalf1,
+        y1,
+        rightGuide1 + rHalf1,
+        y1,
+        rightGuide2 + rHalf2,
+        y2,
+        rightGuide2 - rHalf2,
+        y2,
+      );
+    }
+  }
+
+  private renderBridgeAbutment(
+    ctx: CanvasRenderingContext2D,
+    palette: StagePalette,
+    fogBand: number,
+    x1: number,
+    y1: number,
+    w1: number,
+    r1: number,
+    horizonY: number,
+    height: number,
+    segClipY: number,
+    parapetRatio: number,
+    isViaduct = false,
+  ): void {
+    const parH = Math.max(1, Math.round(w1 * parapetRatio));
+    const pierW = Math.max(2, Math.round(r1 * 1.15));
+    const topY = Math.round(y1 - parH * 1.35);
+    const botY = Math.min(
+      height,
+      segClipY,
+      Math.max(Math.round(y1 + Math.max(8, w1 * 0.65)), horizonY + Math.max(6, Math.round(w1 * 0.25))),
+    );
+    if (botY <= topY) return;
+    const pierH = Math.max(2, botY - topY);
+    const lx = Math.round(x1 - w1 - r1 - pierW * 0.65);
+    const rx = Math.round(x1 + w1 + r1 - pierW * 0.35);
+
+    ctx.fillStyle = isViaduct ? this.fogViaductWall0[fogBand]! : this.fogBridgeWall0[fogBand]!;
+    ctx.fillRect(lx, topY, pierW, pierH);
+    ctx.fillRect(rx, topY, pierW, pierH);
+
+    // Concrete cap stone & beveled inner shoulder grounding abutment flush to curb
+    ctx.fillStyle = isViaduct
+      ? fogBand === 0
+        ? palette.mountainRim
+        : this.fogLane[fogBand]!
+      : this.fogBridgeRail[fogBand]!;
+    ctx.fillRect(lx - 1, topY, pierW + 2, Math.max(1, Math.round(parH * 0.25)));
+    ctx.fillRect(rx - 1, topY, pierW + 2, Math.max(1, Math.round(parH * 0.25)));
   }
 
   private renderBridgeParapets(
@@ -2344,12 +2377,12 @@ export class RoadRenderer {
     const parH1 = Math.max(1, Math.round(w1 * 0.16));
     const parH2 = Math.max(1, Math.round(w2 * 0.16));
     const wallCol = stripe === 0 ? this.fogBridgeWall0[fogBand]! : this.fogBridgeWall1[fogBand]!;
+    const useRectWalls = useFastSliceRect || w1 < 24;
+    const mx = (x1 + x2) * 0.5;
+    const mw = (w1 + w2) * 0.5;
+    const mr = (r1 + r2) * 0.5;
 
-    // Distant/mid bridge parapet LOD: preserve chrome rail & fogged side lights all the way to horizon (no w1=44 cutoff)
-    if (w1 < 44 || useFastSliceRect) {
-      const mx = (x1 + x2) * 0.5;
-      const mw = (w1 + w2) * 0.5;
-      const mr = (r1 + r2) * 0.5;
+    if (useRectWalls) {
       const parW = Math.max(1, Math.round(mr * 0.65));
       const leftParX = Math.round(mx - mw - mr);
       const rightParX = Math.round(mx + mw + mr - parW);
@@ -2359,72 +2392,61 @@ export class RoadRenderer {
       ctx.fillStyle = wallCol;
       ctx.fillRect(leftParX, topY, parW, wallH);
       ctx.fillRect(rightParX, topY, parW, wallH);
-
-      if (stripe === 0) {
-        if (w1 >= 14) {
-          const railW = Math.max(1, Math.round(mr * 0.28));
-          ctx.fillStyle = this.fogBridgeRail[fogBand]!;
-          ctx.fillRect(leftParX, topY, railW, 1);
-          ctx.fillRect(rightParX + parW - railW, topY, railW, 1);
-        }
-        if (w1 >= 10) {
-          const reflSize = Math.max(1, Math.min(2, Math.round(parH1 * 0.35)));
-          const reflY = Math.round(botY - parH1 * 0.7);
-          ctx.fillStyle =
-            seg.index % 4 === 0 ? this.fogBridgeLightCyan[fogBand]! : this.fogBridgeLightAmber[fogBand]!;
-          ctx.fillRect(leftParX + Math.min(1, parW - 1), reflY, reflSize, reflSize);
-          ctx.fillRect(Math.max(rightParX, rightParX + parW - reflSize - 1), reflY, reflSize, reflSize);
-        }
-        if (w1 >= 16 && seg.index % 8 === 0) {
-          ctx.fillStyle = this.fogBridgeJoint[fogBand]!;
-          ctx.fillRect(Math.round(mx - mw), Math.round(y2), Math.max(1, Math.round(mw * 2)), 1);
-        }
-      }
-      return;
+    } else {
+      // Continuous steel bridge parapets (Left & Right batched cleanly in 1 path)
+      ctx.fillStyle = wallCol;
+      ctx.beginPath();
+      ctx.moveTo(x1 - w1 - r1, y1);
+      ctx.lineTo(x1 - w1 - r1, y1 - parH1);
+      ctx.lineTo(x2 - w2 - r2, y2 - parH2);
+      ctx.lineTo(x2 - w2 - r2, y2);
+      ctx.closePath();
+      ctx.moveTo(x1 + w1 + r1, y1);
+      ctx.lineTo(x1 + w1 + r1, y1 - parH1);
+      ctx.lineTo(x2 + w2 + r2, y2 - parH2);
+      ctx.lineTo(x2 + w2 + r2, y2);
+      ctx.closePath();
+      ctx.fill();
     }
 
-    // Continuous steel bridge parapets (Left & Right batched in 1 path)
-    ctx.fillStyle = wallCol;
-    ctx.beginPath();
-    ctx.moveTo(x1 - w1 - r1, y1);
-    ctx.lineTo(x1 - w1 - r1, y1 - parH1);
-    ctx.lineTo(x2 - w2 - r2, y2 - parH2);
-    ctx.lineTo(x2 - w2 - r2, y2);
-    ctx.closePath();
-    ctx.moveTo(x1 + w1 + r1, y1);
-    ctx.lineTo(x1 + w1 + r1, y1 - parH1);
-    ctx.lineTo(x2 + w2 - r2, y2 - parH2);
-    ctx.lineTo(x2 + w2 + r2, y2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Top chrome rails & catadioptres (LOD: closer segments w1 >= 44 using fast axis-aligned fillRects)
+    // Unified mirrored chrome rails, reflector lights, and joints across ALL distances (no w1=44 seam)
     if (stripe === 0) {
-      const leftRailX = Math.round(x1 - w1 - r1);
-      const rightRailX = Math.round(x1 + w1 + r1);
-      const railY = Math.round(y1 - parH1);
-      const railW = Math.max(1, Math.round(r1 * 0.25));
-      ctx.fillStyle = this.fogBridgeRail[fogBand]!;
-      ctx.fillRect(leftRailX, railY, railW, 1);
-      ctx.fillRect(rightRailX - railW, railY, railW, 1);
+      const refX = useRectWalls ? mx : x1;
+      const refW = useRectWalls ? mw : w1;
+      const refR = useRectWalls ? mr : r1;
+      const parHRef = Math.max(1, Math.round(refW * 0.16));
+      const parW = Math.max(1, Math.round(refR * 0.65));
+      const leftOuter = Math.round(refX - refW - refR);
+      const rightOuter = Math.round(refX + refW + refR);
+      const topAnchorY = useRectWalls ? y2 - parH2 : y1 - parH1;
+      const baseAnchorY = useRectWalls ? (y1 + y2) * 0.5 : y1;
+      const railY = Math.round(topAnchorY);
 
-      ctx.fillStyle =
-        seg.index % 4 === 0 ? this.fogBridgeLightCyan[fogBand]! : this.fogBridgeLightAmber[fogBand]!;
-      const reflSize = Math.max(1, Math.round(parH1 * 0.35));
-      ctx.fillRect(leftRailX + 1, Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
-      ctx.fillRect(rightRailX - reflSize - 1, Math.round(y1 - parH1 * 0.7), reflSize, reflSize);
-    }
+      if (refW >= 10) {
+        const railW = Math.max(1, Math.round(refR * 0.25));
+        ctx.fillStyle = this.fogBridgeRail[fogBand]!;
+        ctx.fillRect(leftOuter, railY, railW, 1);
+        ctx.fillRect(rightOuter - railW, railY, railW, 1);
+      }
 
-    // Expansion Joint across the asphalt every 8 segments on stripe 0
-    if (stripe === 0 && seg.index % 8 === 0) {
-      ctx.fillStyle = this.fogBridgeJoint[fogBand]!;
-      const dy = y1 - y2;
-      if (dy <= 2.5 && Math.abs(x1 - x2) <= 3.5) {
-        const mx = (x1 + x2) * 0.5;
-        const mw = (w1 + w2) * 0.5;
-        ctx.fillRect(Math.round(mx - mw), y2, Math.max(1, Math.round(mw * 2)), Math.max(1, dy));
-      } else {
-        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      if (refW >= 6) {
+        const reflSize = Math.max(1, Math.min(4, Math.round(parHRef * 0.34)));
+        const reflY = Math.round(baseAnchorY - parHRef * 0.68);
+        const inset = Math.min(1, Math.max(0, parW - reflSize));
+        ctx.fillStyle =
+          seg.index % 4 === 0 ? this.fogBridgeLightCyan[fogBand]! : this.fogBridgeLightAmber[fogBand]!;
+        ctx.fillRect(leftOuter + inset, reflY, reflSize, reflSize);
+        ctx.fillRect(rightOuter - inset - reflSize, reflY, reflSize, reflSize);
+      }
+
+      if (w1 >= 14 && seg.index % 8 === 0) {
+        ctx.fillStyle = this.fogBridgeJoint[fogBand]!;
+        const dy = y1 - y2;
+        if (useRectWalls || (dy <= 2.5 && Math.abs(x1 - x2) <= 3.5)) {
+          ctx.fillRect(Math.round(mx - mw), y2, Math.max(1, Math.round(mw * 2)), Math.max(1, dy));
+        } else {
+          polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+        }
       }
     }
   }
@@ -2448,12 +2470,12 @@ export class RoadRenderer {
     const parH1 = Math.max(1, Math.round(w1 * 0.22));
     const parH2 = Math.max(1, Math.round(w2 * 0.22));
     const wallCol = stripe === 0 ? this.fogViaductWall0[fogBand]! : this.fogViaductWall1[fogBand]!;
+    const useRectWalls = useFastSliceRect || w1 < 24;
+    const mx = (x1 + x2) * 0.5;
+    const mw = (w1 + w2) * 0.5;
+    const mr = (r1 + r2) * 0.5;
 
-    // Distant/mid viaduct wall LOD: keep fogged guide rail & reflectors past w1 < 44 so lights don't snap off mid-road
-    if (w1 < 44 || useFastSliceRect) {
-      const mx = (x1 + x2) * 0.5;
-      const mw = (w1 + w2) * 0.5;
-      const mr = (r1 + r2) * 0.5;
+    if (useRectWalls) {
       const wallW = Math.max(1, Math.round(mr * 0.75));
       const leftWallX = Math.round(mx - mw - mr);
       const rightWallX = Math.round(mx + mw + mr - wallW);
@@ -2463,73 +2485,60 @@ export class RoadRenderer {
       ctx.fillStyle = wallCol;
       ctx.fillRect(leftWallX, topY, wallW, wallH);
       ctx.fillRect(rightWallX, topY, wallW, wallH);
-
-      if (stripe === 0) {
-        if (w1 >= 14) {
-          const railW = Math.max(1, Math.round(mr * 0.3));
-          ctx.fillStyle = fogBand === 0 ? palette.mountainRim : this.fogLane[fogBand]!;
-          ctx.fillRect(leftWallX, topY, railW, 1);
-          ctx.fillRect(rightWallX + wallW - railW, topY, railW, 1);
-        }
-        if (w1 >= 10) {
-          const reflSize = Math.max(1, Math.min(2, Math.round(parH1 * 0.28)));
-          const reflY = Math.round(botY - parH1 * 0.58);
-          ctx.fillStyle =
-            seg.index % 4 === 0 ? this.fogViaductLightAmber[fogBand]! : this.fogRumble1[fogBand]!;
-          ctx.fillRect(leftWallX + Math.min(1, wallW - 1), reflY, reflSize, reflSize);
-          ctx.fillRect(Math.max(rightWallX, rightWallX + wallW - reflSize - 1), reflY, reflSize, reflSize);
-        }
-        if (w1 >= 16 && seg.index % 8 === 0) {
-          ctx.fillStyle = this.fogViaductJoint[fogBand]!;
-          ctx.fillRect(Math.round(mx - mw), Math.round(y2), Math.max(1, Math.round(mw * 2)), 1);
-        }
-      }
-      return;
+    } else {
+      // Shuto C1 elevated expressway concrete sound-barrier walls (Left & Right batched in 1 path)
+      ctx.fillStyle = wallCol;
+      ctx.beginPath();
+      ctx.moveTo(x1 - w1 - r1, y1);
+      ctx.lineTo(x1 - w1 - r1, y1 - parH1);
+      ctx.lineTo(x2 - w2 - r2, y2 - parH2);
+      ctx.lineTo(x2 - w2 - r2, y2);
+      ctx.closePath();
+      ctx.moveTo(x1 + w1 + r1, y1);
+      ctx.lineTo(x1 + w1 + r1, y1 - parH1);
+      ctx.lineTo(x2 + w2 + r2, y2 - parH2);
+      ctx.lineTo(x2 + w2 + r2, y2);
+      ctx.closePath();
+      ctx.fill();
     }
 
-    // Shuto C1 elevated expressway concrete sound-barrier walls (Left & Right batched in 1 path)
-    ctx.fillStyle = wallCol;
-    ctx.beginPath();
-    ctx.moveTo(x1 - w1 - r1, y1);
-    ctx.lineTo(x1 - w1 - r1, y1 - parH1);
-    ctx.lineTo(x2 - w2 - r2, y2 - parH2);
-    ctx.lineTo(x2 - w2 - r2, y2);
-    ctx.closePath();
-    ctx.moveTo(x1 + w1 + r1, y1);
-    ctx.lineTo(x1 + w1 + r1, y1 - parH1);
-    ctx.lineTo(x2 + w2 + r2, y2 - parH2);
-    ctx.lineTo(x2 + w2 + r2, y2);
-    ctx.closePath();
-    ctx.fill();
-
-    // Neon accent guide rail & amber reflectors (closer segments)
     if (stripe === 0) {
-      const leftWallX = Math.round(x1 - w1 - r1);
-      const rightWallX = Math.round(x1 + w1 + r1);
-      const railY = Math.round(y1 - parH1);
-      const railW = Math.max(2, Math.round(r1 * 0.3));
+      const refX = useRectWalls ? mx : x1;
+      const refW = useRectWalls ? mw : w1;
+      const refR = useRectWalls ? mr : r1;
+      const parHRef = Math.max(1, Math.round(refW * 0.22));
+      const wallW = Math.max(1, Math.round(refR * 0.75));
+      const leftOuter = Math.round(refX - refW - refR);
+      const rightOuter = Math.round(refX + refW + refR);
+      const topAnchorY = useRectWalls ? y2 - parH2 : y1 - parH1;
+      const baseAnchorY = useRectWalls ? (y1 + y2) * 0.5 : y1;
+      const railY = Math.round(topAnchorY);
 
-      ctx.fillStyle = fogBand === 0 ? palette.mountainRim : this.fogLane[fogBand]!;
-      ctx.fillRect(leftWallX, railY, railW, 1);
-      ctx.fillRect(rightWallX - railW, railY, railW, 1);
+      if (refW >= 10) {
+        const railW = Math.max(1, Math.round(refR * 0.3));
+        ctx.fillStyle = fogBand === 0 ? palette.mountainRim : this.fogLane[fogBand]!;
+        ctx.fillRect(leftOuter, railY, railW, 1);
+        ctx.fillRect(rightOuter - railW, railY, railW, 1);
+      }
 
-      ctx.fillStyle =
-        seg.index % 4 === 0 ? this.fogViaductLightAmber[fogBand]! : this.fogRumble1[fogBand]!;
-      const reflSize = Math.max(1, Math.round(parH1 * 0.28));
-      ctx.fillRect(leftWallX + 1, Math.round(y1 - parH1 * 0.58), reflSize, reflSize);
-      ctx.fillRect(rightWallX - reflSize - 1, Math.round(y1 - parH1 * 0.58), reflSize, reflSize);
-    }
+      if (refW >= 6) {
+        const reflSize = Math.max(1, Math.min(4, Math.round(parHRef * 0.28)));
+        const reflY = Math.round(baseAnchorY - parHRef * 0.58);
+        const inset = Math.min(1, Math.max(0, wallW - reflSize));
+        ctx.fillStyle =
+          seg.index % 4 === 0 ? this.fogViaductLightAmber[fogBand]! : this.fogRumble1[fogBand]!;
+        ctx.fillRect(leftOuter + inset, reflY, reflSize, reflSize);
+        ctx.fillRect(rightOuter - inset - reflSize, reflY, reflSize, reflSize);
+      }
 
-    // Concrete viaduct expansion joint every 8 segments
-    if (stripe === 0 && seg.index % 8 === 0) {
-      ctx.fillStyle = this.fogViaductJoint[fogBand]!;
-      const dy = y1 - y2;
-      if (dy <= 2.5 && Math.abs(x1 - x2) <= 3.5) {
-        const mx = (x1 + x2) * 0.5;
-        const mw = (w1 + w2) * 0.5;
-        ctx.fillRect(Math.round(mx - mw), y2, Math.max(1, Math.round(mw * 2)), Math.max(1, dy));
-      } else {
-        polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+      if (w1 >= 14 && seg.index % 8 === 0) {
+        ctx.fillStyle = this.fogViaductJoint[fogBand]!;
+        const dy = y1 - y2;
+        if (useRectWalls || (dy <= 2.5 && Math.abs(x1 - x2) <= 3.5)) {
+          ctx.fillRect(Math.round(mx - mw), y2, Math.max(1, Math.round(mw * 2)), Math.max(1, dy));
+        } else {
+          polygon(ctx, x1 - w1, y1, x1 + w1, y1, x2 + w2, y2, x2 - w2, y2);
+        }
       }
     }
   }
@@ -2540,6 +2549,7 @@ export class RoadRenderer {
     height: number,
     seg: RoadSegment,
     palette: StagePalette,
+    fogBand: number,
     grassColor: string,
     roadColor: string,
     rumbleColor: string,
@@ -2800,7 +2810,7 @@ export class RoadRenderer {
         }
       }
 
-      ctx.fillStyle = stripe === 0 ? '#1b162e' : '#151126';
+      ctx.fillStyle = stripe === 0 ? this.fogTunnelOuter0[fogBand]! : this.fogTunnelOuter1[fogBand]!;
       ctx.beginPath();
       // Left outer casing flank (reaches inner wall at p2 so curves never leak sky)
       ctx.moveTo(outerL1, wallBot1);
@@ -2820,13 +2830,35 @@ export class RoadRenderer {
       ctx.lineTo(wallR2, wallBot2);
       if (hasFloorClip) ctx.lineTo(roadWallR1, wallBot1);
       ctx.closePath();
-      // Top outer roof slab
+      // Top outer roof slab + far brow fascia (strictly above ceilY2 — never occludes bore opening)
       ctx.moveTo(outerL1, outerCeilY1);
       ctx.lineTo(outerR1, outerCeilY1);
       ctx.lineTo(outerR2, outerCeilY2);
       ctx.lineTo(outerL2, outerCeilY2);
       ctx.closePath();
+      if (ceilY2 > outerCeilY2) {
+        ctx.moveTo(outerL2, outerCeilY2);
+        ctx.lineTo(outerR2, outerCeilY2);
+        ctx.lineTo(crownR2, ceilY2);
+        ctx.lineTo(crownL2, ceilY2);
+        ctx.closePath();
+      }
       ctx.fill();
+
+      // Cap only the farthest visible slice of a horizon-clipped tunnel with no exit behind it
+      if (!this.extTunnelActive && !isTunnelExit) {
+        ctx.fillStyle = '#070510';
+        ctx.beginPath();
+        ctx.moveTo(wallL2, wallBot2);
+        ctx.lineTo(wallL2, haunchY2);
+        ctx.lineTo(crownL2, ceilY2);
+        ctx.lineTo(crownR2, ceilY2);
+        ctx.lineTo(wallR2, haunchY2);
+        ctx.lineTo(wallR2, wallBot2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      this.extTunnelActive = true;
     }
 
     // 2. Interior octagonal vaulted surfaces (full-height & full-depth LOD-tiered for 60 FPS)
@@ -3225,21 +3257,21 @@ export class RoadRenderer {
       }
     }
 
-    // 7. Monumental Entrance Portal & Chamfered Exit Rim
+    // 7. Monumental Entrance Portal & Chamfered Exit Rim (gradual distance LOD down to w1 >= 3)
     if (
       isTunnelEntry &&
       !isCameraInTunnel &&
-      w1 >= 8 &&
+      w1 >= 3 &&
       rawCeilY1 - outerPad1 * 0.85 < wallBot1
     ) {
       const portalTop = outerCeilY1;
       const portalBot = wallBot1;
-      const lintelH = Math.max(2, ceilY1 - outerCeilY1);
+      const lintelH = Math.max(1.5, ceilY1 - outerCeilY1);
 
       // Sloped concrete wing-walls grounding entrance into roadside terrain
-      if (w1 >= 14 && rawDadoY1 < wallBot1) {
+      if (w1 >= 6 && rawDadoY1 < wallBot1) {
         const wingPad = outerPad1 * 0.9;
-        ctx.fillStyle = '#1f1a36';
+        ctx.fillStyle = this.fogTunnelWing[fogBand]!;
         ctx.beginPath();
         ctx.moveTo(outerL1 - wingPad, portalBot);
         ctx.lineTo(outerL1, dadoY1);
@@ -3253,7 +3285,7 @@ export class RoadRenderer {
       }
 
       // Chamfered concrete portal fascia around octagonal bore
-      ctx.fillStyle = '#2d2645';
+      ctx.fillStyle = this.fogTunnelPortal[fogBand]!;
       ctx.beginPath();
       ctx.moveTo(outerL1, portalBot);
       ctx.lineTo(outerL1, portalTop);
@@ -3268,26 +3300,28 @@ export class RoadRenderer {
       ctx.closePath();
       ctx.fill();
 
-      // Hazard warning stripe & illuminated green lane status beacons above bore
-      if (w1 >= 18 && rawCeilY1 < wallBot1) {
+      // Hazard warning stripe & illuminated lane status beacons above bore (gradual mist blend, no pop at w1=18)
+      if (w1 >= 10 && rawCeilY1 < wallBot1) {
         const stripeH = Math.max(1, Math.round(lintelH * 0.16));
-        const stripeY = Math.round(ceilY1 - Math.max(2, lintelH * 0.25));
+        const stripeY = Math.round(ceilY1 - Math.max(1.5, lintelH * 0.25));
         if (stripeY + stripeH <= wallBot1) {
-          ctx.fillStyle = '#ffd166';
+          ctx.fillStyle = this.fogTunnelHazard[fogBand]!;
           ctx.fillRect(
             Math.round(crownL1),
             stripeY,
-            Math.round(crownR1 - crownL1),
+            Math.max(1, Math.round(crownR1 - crownL1)),
             stripeH,
           );
         }
 
-        const beaconSize = Math.max(2, Math.round(lintelH * 0.26));
-        const beaconY = Math.round(portalTop + lintelH * 0.32);
-        if (beaconY + beaconSize <= wallBot1) {
-          ctx.fillStyle = '#00f5d4';
-          ctx.fillRect(Math.round(x1 - w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
-          ctx.fillRect(Math.round(x1 + w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+        if (w1 >= 14) {
+          const beaconSize = Math.max(1, Math.round(lintelH * 0.24));
+          const beaconY = Math.round(portalTop + lintelH * 0.32);
+          if (beaconY + beaconSize <= wallBot1) {
+            ctx.fillStyle = this.fogBridgeLightCyan[fogBand]!;
+            ctx.fillRect(Math.round(x1 - w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+            ctx.fillRect(Math.round(x1 + w1 * 0.45 - beaconSize * 0.5), beaconY, beaconSize, beaconSize);
+          }
         }
       }
     }
@@ -3412,31 +3446,6 @@ function drawRumblePair(
   ctx.lineTo(x1 + w1, y1);
   ctx.lineTo(x2 + w2, y2);
   ctx.lineTo(x2 + w2 + r2, y2);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawRumblePairSplit(
-  ctx: CanvasRenderingContext2D,
-  left1: number,
-  right1: number,
-  y1: number,
-  left2: number,
-  right2: number,
-  y2: number,
-  r1: number,
-  r2: number,
-): void {
-  ctx.beginPath();
-  ctx.moveTo(left1 - r1, y1);
-  ctx.lineTo(left1, y1);
-  ctx.lineTo(left2, y2);
-  ctx.lineTo(left2 - r2, y2);
-  ctx.closePath();
-  ctx.moveTo(right1, y1);
-  ctx.lineTo(right1 + r1, y1);
-  ctx.lineTo(right2 + r2, y2);
-  ctx.lineTo(right2, y2);
   ctx.closePath();
   ctx.fill();
 }

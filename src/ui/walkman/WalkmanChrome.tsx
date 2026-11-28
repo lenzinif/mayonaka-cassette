@@ -42,7 +42,7 @@ export interface CassetteReelProps {
 }
 
 /**
- * 6-tooth notched Walkman cassette hub inside a dynamically scaled magnetic tape pack ring.
+ * 6-tooth notched cassette hub inside a dynamically scaled magnetic tape pack ring.
  */
 export function CassetteReel({
   size = 40,
@@ -98,6 +98,7 @@ export interface WalkmanModalFrameProps {
   subtitle?: string;
   jpSubtitle?: string;
   modelTag?: string;
+  accentColor?: string;
   titleId?: string;
   headerRight?: ReactNode;
   maxWidthClass?: string;
@@ -106,13 +107,15 @@ export interface WalkmanModalFrameProps {
 }
 
 /**
- * Shared flat matte anodized Sony Walkman chassis for all secondary screens & modals.
+ * Shared flat matte anodized hardware chassis for secondary screens & modals.
+ * Strictly zero real-world brands (`docs/UI.md §2.1`) and monochrome stage-accent bar (`§2.3`).
  */
 export function WalkmanModalFrame({
   title,
   subtitle,
   jpSubtitle,
-  modelTag = 'WM-86 AUTO REVERSE',
+  modelTag,
+  accentColor = '#00f0b5',
   titleId,
   headerRight,
   maxWidthClass = 'max-w-md',
@@ -126,15 +129,17 @@ export function WalkmanModalFrame({
     >
       {/* Top Anodized Faceplate Header */}
       <div className="border-b border-[var(--wm-line)] bg-[#171b2a] px-4 py-2.5">
-        <div className="mb-1.5 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        {modelTag && (
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <WalkmanScrew />
+              <span className="ff-mono text-[9px] font-bold tracking-[0.22em] text-[var(--wm-silk-dim)] uppercase">
+                {modelTag}
+              </span>
+            </div>
             <WalkmanScrew />
-            <span className="ff-mono text-[9px] font-bold tracking-[0.22em] text-[var(--wm-silk-dim)] uppercase">
-              {modelTag}
-            </span>
           </div>
-          <WalkmanScrew />
-        </div>
+        )}
 
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
@@ -162,7 +167,7 @@ export function WalkmanModalFrame({
         </div>
       </div>
 
-      <div className="wm-accent-strip shrink-0" />
+      <div className="h-[2px] w-full shrink-0" style={{ backgroundColor: accentColor }} />
 
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
 
@@ -170,81 +175,10 @@ export function WalkmanModalFrame({
       <div className="flex items-center justify-between border-t border-[var(--wm-line)] bg-[#0e111b] px-3 py-1">
         <WalkmanScrew />
         <span className="ff-mono text-[8px] font-bold tracking-[0.26em] text-[var(--wm-silk-dim)]/75 uppercase">
-          STEREO CASSETTE PLAYER · 88.4 FM
+          真夜中 · MAYONAKA
         </span>
         <WalkmanScrew />
       </div>
     </div>
-  );
-}
-
-export interface WalkmanSwitchRowProps {
-  label: string;
-  valueLabel: string;
-  active: boolean;
-  accent?: 'mint' | 'amber' | 'play';
-  variant?: 'toggle' | 'cycle';
-  onClick: () => void;
-}
-
-/**
- * Flat matte Walkman DIP-switch or stepped selector row for options menus.
- */
-export function WalkmanSwitchRow({
-  label,
-  valueLabel,
-  active,
-  accent = 'mint',
-  variant = 'toggle',
-  onClick,
-}: WalkmanSwitchRowProps) {
-  const valueTextClass = !active
-    ? 'text-[var(--wm-silk-dim)]'
-    : accent === 'amber'
-      ? 'text-[var(--wm-amber)]'
-      : accent === 'play'
-        ? 'text-[var(--wm-play)]'
-        : 'text-[var(--wm-mint)]';
-
-  return (
-    <button
-      type="button"
-      aria-pressed={variant === 'toggle' ? active : undefined}
-      onClick={onClick}
-      className="wm-btn-well flex w-full cursor-pointer items-center justify-between gap-3 px-3.5 py-2.5 text-left"
-    >
-      <div className="flex min-w-0 items-center gap-2.5">
-        <WalkmanLed lit={active} color={accent} />
-        <span className="truncate text-[11px] font-bold tracking-[0.12em] text-[var(--wm-silk)] uppercase">
-          {label}
-        </span>
-      </div>
-
-      <div className="flex shrink-0 items-center gap-2.5">
-        <span
-          className={`wm-lcd ff-mono rounded-[1px] px-2 py-0.5 text-[10px] font-black tracking-wider ${valueTextClass}`}
-        >
-          {valueLabel}
-        </span>
-
-        {variant === 'toggle' ? (
-          <span
-            aria-hidden="true"
-            className="wm-switch-track"
-            data-on={active ? 'true' : 'false'}
-            data-accent={accent}
-          >
-            <span className="wm-switch-thumb" />
-          </span>
-        ) : (
-          <span
-            aria-hidden="true"
-            className="wm-lcd ff-mono inline-flex h-[14px] items-center rounded-[1px] px-1.5 text-[9px] font-black text-[var(--wm-amber)]"
-          >
-            ↻
-          </span>
-        )}
-      </div>
-    </button>
   );
 }

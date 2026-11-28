@@ -20,11 +20,14 @@ import {
   saveCockpitVisibility,
   type CockpitVisibility,
 } from './ui/cockpit/cockpitSettings';
-import type { RadioPlaylistEntry } from './ui/cockpit/RadioConsole';
+import type { RadioPlaylistEntry } from './ui/hud/CassetteTapeWidget';
 import {
-  clearVisorPhoto,
-  loadVisorPhotoDataUrl,
-  saveVisorPhotoFile,
+  addVisorPhotoFile,
+  addVisorPhotoFiles,
+  clearVisorPhotos,
+  loadVisorPhotos,
+  removeVisorPhoto,
+  type VisorPhotoItem,
 } from './ui/cockpit/visorPhotoStore';
 import { CRTOverlay } from './ui/CRTOverlay';
 import { DebugPanel, loadSavedTuning } from './ui/DebugPanel';
@@ -85,7 +88,8 @@ export function App() {
   const wasPausedBeforeModalRef = useRef(false);
   const wasModalOpenRef = useRef(false);
   const trackLoaderOpeningRef = useRef(false);
-  const visorPhotoReqIdRef = useRef(0);
+  const visorPhotosRef = useRef<VisorPhotoItem[]>([]);
+  const visorQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // Quick settings state
   const [crtEnabled, setCrtEnabled] = useState(() => {
@@ -99,11 +103,14 @@ export function App() {
   const [autoShift, setAutoShift] = useState(false);
   const [tofuMode, setTofuMode] = useState(false);
   const [sodaSkin, setSodaSkin] = useState<SodaSkin>('melon-soda');
-  const [cleanHud, setCleanHud] = useState(false);
+  const [isPaused, setIsPaused] = useState(
+    () => !new URLSearchParams(window.location.search).has('autostart'),
+  );
+  const [runSummaryOpen, setRunSummaryOpen] = useState(false);
   const [cockpitVisibility, setCockpitVisibility] = useState<CockpitVisibility>(() =>
     loadCockpitVisibility(),
   );
-  const [visorPhotoUrl, setVisorPhotoUrl] = useState<string | null>(null);
+  const [visorPhotos, setVisorPhotos] = useState<VisorPhotoItem[]>([]);
   const [playlistItems, setPlaylistItems] = useState<readonly RadioPlaylistEntry[]>(() =>
     library.items.map((it) => ({
       id: it.id,
@@ -139,6 +146,8 @@ export function App() {
         setTofuMode(event.active);
       } else if (event.type === 'sodaSkinChanged') {
         setSodaSkin(event.skin);
+      } else if (event.type === 'pauseChanged') {
+        setIsPaused(event.paused);
       }
     });
   }, [bridge]);
@@ -159,19 +168,14 @@ export function App() {
     };
   }, [audio, audioUnlocked]);
 
-  const openTrackLoader = useCallback(
-    (initialSelect: boolean) => {
-      wasPausedBeforeModalRef.current = gameRef.current?.paused ?? false;
-      trackLoaderOpeningRef.current = true;
-      gameRef.current?.setPaused(true);
-      setIsInitialSelect(initialSelect);
-      setTrackLoaderOpen(true);
-      void audio.startPreview(initialSelect ? 0 : undefined).then(() => {
-        if (audio.unlocked) setAudioUnlocked(true);
-      });
-    },
-    [audio],
-  );
+  const openTrackLoader = useCallback((initialSelect: boolean) => {
+    wasPausedBeforeModalRef.current = gameRef.current?.paused ?? false;
+    trackLoaderOpeningRef.current = true;
+    gameRef.current?.setPaused(true);
+    setIsPaused(true);
+    setIsInitialSelect(initialSelect);
+    setTrackLoaderOpen(true);
+  }, []);
 
   const closeTrackLoader = useCallback(() => {
     audio.stopPreview(gameStarted);
@@ -188,6 +192,7 @@ export function App() {
     audio.restartFromBeginning();
     gameRef.current?.resetPerfBenchmark();
     gameRef.current?.setPaused(false);
+    setIsPaused(false);
     void audio.unlock().then(() => {
       setAudioUnlocked(true);
     });
@@ -202,6 +207,7 @@ export function App() {
     void audio.pause();
     gameRef.current?.restartPlaylistRun();
     gameRef.current?.setPaused(true);
+    setIsPaused(true);
   };
 
   const handleResumeFromTrackLoader = () => {
@@ -211,6 +217,7 @@ export function App() {
     if (gameStarted) {
       wasPausedBeforeModalRef.current = false;
       gameRef.current?.setPaused(false);
+      setIsPaused(false);
     }
   };
 
@@ -292,12 +299,12 @@ export function App() {
   }, [preloader, library, loadTestTrack]);
 
   useEffect(() => {
-    const reqId = ++visorPhotoReqIdRef.current;
-    void loadVisorPhotoDataUrl().then((url) => {
-      if (reqId === visorPhotoReqIdRef.current && url) {
-        setVisorPhotoUrl(url);
-      }
+    const task = visorQueueRef.current.then(async () => {
+      const items = await loadVisorPhotos();
+      visorPhotosRef.current = items;
+      setVisorPhotos(items);
     });
+    visorQueueRef.current = task.catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -318,10 +325,10 @@ export function App() {
   const handleToggleCockpitModule = useCallback((key: keyof CockpitVisibility) => {
     setCockpitVisibility((prev) => {
       const nextVal = !prev[key];
-      if (nextVal) {
-        setCleanHud(false);
-      }
-      const next = { ...prev, [key]: nextVal };
+      const next: CockpitVisibility =
+        key === 'showCassetteWidget'
+          ? { ...prev, showCassetteWidget: nextVal, showRadioConsole: nextVal }
+          : { ...prev, [key]: nextVal };
       saveCockpitVisibility(next);
       return next;
     });
@@ -329,29 +336,56 @@ export function App() {
 
   const handleApplyCockpitPreset = useCallback((preset: CockpitVisibility) => {
     const next = { ...preset };
-    setCleanHud(false);
     saveCockpitVisibility(next);
     setCockpitVisibility(next);
   }, []);
 
-  const handleUploadVisorPhoto = useCallback(async (file: File) => {
-    const reqId = ++visorPhotoReqIdRef.current;
-    try {
-      const url = await saveVisorPhotoFile(file);
-      if (reqId === visorPhotoReqIdRef.current) {
-        setVisorPhotoUrl(url);
+  const handleAddVisorPhoto = useCallback(async (file: File) => {
+    const task = visorQueueRef.current.then(async () => {
+      try {
+        const next = await addVisorPhotoFile(file, visorPhotosRef.current);
+        visorPhotosRef.current = next;
+        setVisorPhotos(next);
+      } catch {
+        // Ignore invalid or unreadable image files
       }
-    } catch {
-      // Ignore invalid or unreadable image files
-    }
+    });
+    visorQueueRef.current = task.catch(() => undefined);
+    await task;
   }, []);
 
-  const handleClearVisorPhoto = useCallback(async () => {
-    const reqId = ++visorPhotoReqIdRef.current;
-    await clearVisorPhoto();
-    if (reqId === visorPhotoReqIdRef.current) {
-      setVisorPhotoUrl(null);
-    }
+  const handleAddVisorPhotos = useCallback(async (files: readonly File[]) => {
+    const task = visorQueueRef.current.then(async () => {
+      try {
+        const next = await addVisorPhotoFiles(files, visorPhotosRef.current);
+        visorPhotosRef.current = next;
+        setVisorPhotos(next);
+      } catch {
+        // Ignore invalid or unreadable image files
+      }
+    });
+    visorQueueRef.current = task.catch(() => undefined);
+    await task;
+  }, []);
+
+  const handleRemoveVisorPhoto = useCallback(async (id: string) => {
+    const task = visorQueueRef.current.then(async () => {
+      const next = await removeVisorPhoto(id, visorPhotosRef.current);
+      visorPhotosRef.current = next;
+      setVisorPhotos(next);
+    });
+    visorQueueRef.current = task.catch(() => undefined);
+    await task;
+  }, []);
+
+  const handleClearVisorPhotos = useCallback(async () => {
+    const task = visorQueueRef.current.then(async () => {
+      await clearVisorPhotos();
+      visorPhotosRef.current = [];
+      setVisorPhotos([]);
+    });
+    visorQueueRef.current = task.catch(() => undefined);
+    await task;
   }, []);
 
   useEffect(() => {
@@ -367,35 +401,28 @@ export function App() {
       if (e.code === 'F2' || e.code === 'Backquote') {
         e.preventDefault();
         setDebugOpen((prev) => !prev);
-      } else if (e.code === 'KeyM' && !inspectorOpen && gameStarted) {
-        e.preventDefault();
-        if (trackLoaderOpen) {
-          closeTrackLoader();
-        } else {
-          openTrackLoader(false);
-        }
       } else if (e.code === 'F4') {
         e.preventDefault();
         gameRef.current?.toggleAutopilot();
       } else if (e.code === 'Escape') {
         if (trackLoaderOpen) {
           e.preventDefault();
-          e.stopPropagation();
+          e.stopImmediatePropagation();
           closeTrackLoader();
         } else if (inspectorOpen) {
           e.preventDefault();
-          e.stopPropagation();
+          e.stopImmediatePropagation();
           setInspectorOpen(false);
         } else if (debugOpen) {
           e.preventDefault();
-          e.stopPropagation();
+          e.stopImmediatePropagation();
           setDebugOpen(false);
         }
       }
     };
     window.addEventListener('keydown', onKeyDown, { capture: true });
     return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
-  }, [inspectorOpen, trackLoaderOpen, debugOpen, gameStarted, openTrackLoader, closeTrackLoader]);
+  }, [inspectorOpen, trackLoaderOpen, debugOpen, closeTrackLoader]);
 
   const handleSelectTrack = useCallback(
     (item: PlaylistItem) => {
@@ -406,15 +433,6 @@ export function App() {
     [audio],
   );
 
-  const handleSelectPlaylistIndex = useCallback(
-    (index: number) => {
-      if (index === library.currentIndex) return;
-      const item = library.selectTrack(index);
-      handleSelectTrack(item);
-    },
-    [library, handleSelectTrack],
-  );
-
   const handleOpenDeckModal = useCallback(() => {
     openTrackLoader(false);
   }, [openTrackLoader]);
@@ -422,20 +440,6 @@ export function App() {
   const handleToggleAutoShiftCallback = useCallback(() => {
     gameRef.current?.toggleAutoShift();
   }, []);
-
-  const handlePrevTrack = useCallback(() => {
-    const len = library.items.length;
-    if (len <= 1) return;
-    const prevIdx = (library.currentIndex - 1 + len) % len;
-    handleSelectPlaylistIndex(prevIdx);
-  }, [library, handleSelectPlaylistIndex]);
-
-  const handleNextTrack = useCallback(() => {
-    const len = library.items.length;
-    if (len <= 1) return;
-    const nextIdx = (library.currentIndex + 1) % len;
-    handleSelectPlaylistIndex(nextIdx);
-  }, [library, handleSelectPlaylistIndex]);
 
   const handleUpdateBeatMap = (contentHash: string, updated: BeatMap) => {
     void library.updateBeatMap(contentHash, updated);
@@ -445,7 +449,8 @@ export function App() {
     }
   };
 
-  const gameplayInputEnabled = gameStarted && !trackLoaderOpen && !inspectorOpen;
+  const gameplayInputEnabled =
+    gameStarted && !isPaused && !trackLoaderOpen && !inspectorOpen && !runSummaryOpen;
 
   return (
     <main className="relative flex h-screen w-screen items-center justify-center overflow-hidden bg-[var(--ff-ink)]">
@@ -525,6 +530,7 @@ export function App() {
             if (trackLoaderOpen || inspectorOpen || !gameStarted || isInitialSelect) {
               game.setPaused(true);
             }
+            setIsPaused(game.paused);
             game.setInputLocked(!gameplayInputEnabled);
           }}
         />
@@ -534,7 +540,6 @@ export function App() {
           gameStarted={gameStarted}
           trackLoaderOpen={trackLoaderOpen}
           inspectorOpen={inspectorOpen}
-          cleanHud={cleanHud}
           crtEnabled={crtEnabled}
           hideBezel={noBezel}
           minimalPerfOnly={noHud}
@@ -543,15 +548,18 @@ export function App() {
           cockpitVisibility={cockpitVisibility}
           onToggleCockpitModule={handleToggleCockpitModule}
           onApplyCockpitPreset={handleApplyCockpitPreset}
-          visorPhotoUrl={visorPhotoUrl}
-          onUploadVisorPhoto={handleUploadVisorPhoto}
-          onClearVisorPhoto={handleClearVisorPhoto}
+          visorPhotos={visorPhotos}
+          onAddVisorPhoto={handleAddVisorPhoto}
+          onAddVisorPhotos={handleAddVisorPhotos}
+          onRemoveVisorPhoto={handleRemoveVisorPhoto}
+          onClearVisorPhotos={handleClearVisorPhotos}
           playlistItems={playlistItems}
-          onPrevTrack={handlePrevTrack}
-          onNextTrack={handleNextTrack}
-          onSelectPlaylistIndex={handleSelectPlaylistIndex}
+          library={library}
+          audio={audio}
+          onSelectTrack={handleSelectTrack}
+          onUpdateBeatMap={handleUpdateBeatMap}
+          onPreviewUnlocked={() => setAudioUnlocked(true)}
           onToggleCrt={() => setCrtEnabled((prev) => !prev)}
-          onToggleCleanHud={() => setCleanHud((prev) => !prev)}
           onTogglePause={() => gameRef.current?.togglePause()}
           onToggleAutoShift={handleToggleAutoShiftCallback}
           onToggleTofuMode={() => gameRef.current?.toggleTofuMode()}
@@ -569,6 +577,7 @@ export function App() {
           onRestartRun={() => gameRef.current?.restartPlaylistRun()}
           onOpenTrackLoader={() => openTrackLoader(false)}
           onSelectForkBranch={(branch) => gameRef.current?.selectForkBranch(branch)}
+          onRunSummaryOpenChange={setRunSummaryOpen}
         />
         <CRTOverlay enabled={crtEnabled} />
         <DebugPanel
@@ -598,8 +607,14 @@ export function App() {
             ready={preloadReady}
             audioUnlocked={audioUnlocked}
             currentTrackTitle={audio.beatMap.title}
-            currentTrackArtist={audio.beatMap.artist}
             currentTrackBpm={audio.beatMap.bpm}
+            playlistCount={playlistItems.length}
+            activeTrackIndex={library.currentIndex}
+            library={library}
+            audio={audio}
+            onSelectTrack={handleSelectTrack}
+            onUpdateBeatMap={handleUpdateBeatMap}
+            onPreviewUnlocked={() => setAudioUnlocked(true)}
             onStartDrive={handleStartDrive}
             onOpenCassetteDeck={() => openTrackLoader(true)}
             onUnlockAudio={() => {
@@ -617,16 +632,16 @@ export function App() {
             onCycleSodaSkin={() => {
               gameRef.current?.cycleSodaSkin();
             }}
-            cleanHud={cleanHud}
-            onToggleCleanHud={() => setCleanHud((prev) => !prev)}
             crtEnabled={crtEnabled}
             onToggleCrt={() => setCrtEnabled((prev) => !prev)}
             cockpitVisibility={cockpitVisibility}
-            visorPhotoUrl={visorPhotoUrl}
+            visorPhotos={visorPhotos}
             onToggleCockpitModule={handleToggleCockpitModule}
             onApplyCockpitPreset={handleApplyCockpitPreset}
-            onUploadVisorPhoto={handleUploadVisorPhoto}
-            onClearVisorPhoto={handleClearVisorPhoto}
+            onAddVisorPhoto={handleAddVisorPhoto}
+            onAddVisorPhotos={handleAddVisorPhotos}
+            onRemoveVisorPhoto={handleRemoveVisorPhoto}
+            onClearVisorPhotos={handleClearVisorPhotos}
           />
         )}
       </div>
