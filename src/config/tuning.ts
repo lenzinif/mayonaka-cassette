@@ -9,7 +9,7 @@ export const DEFAULT_TUNING = {
   // Camera & road
   fieldOfView: 100,
   cameraHeight: 1000,
-  drawDistance: 200,
+  drawDistance: 320,
   fogDensity: 5,
   roadWidth: 2000,
   roadFogStrength: 0.65,

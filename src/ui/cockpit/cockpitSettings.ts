@@ -14,6 +14,8 @@ export const COCKPIT_PRESET_LUXURY: CockpitVisibility = {
   showCassetteWidget: true,
 };
 
+export const COCKPIT_PRESET_CLUTTER: CockpitVisibility = COCKPIT_PRESET_LUXURY;
+
 export const COCKPIT_PRESET_CLEAN: CockpitVisibility = {
   showInstrumentCluster: true,
   showRadioConsole: false,
@@ -73,7 +75,6 @@ export function saveCockpitVisibility(visibility: CockpitVisibility): void {
 export function isLuxuryPreset(v: CockpitVisibility): boolean {
   return (
     v.showInstrumentCluster === COCKPIT_PRESET_LUXURY.showInstrumentCluster &&
-    v.showRadioConsole === COCKPIT_PRESET_LUXURY.showRadioConsole &&
     v.showSunVisor === COCKPIT_PRESET_LUXURY.showSunVisor &&
     v.showCassetteWidget === COCKPIT_PRESET_LUXURY.showCassetteWidget
   );
@@ -82,7 +83,6 @@ export function isLuxuryPreset(v: CockpitVisibility): boolean {
 export function isCleanPreset(v: CockpitVisibility): boolean {
   return (
     v.showInstrumentCluster === COCKPIT_PRESET_CLEAN.showInstrumentCluster &&
-    v.showRadioConsole === COCKPIT_PRESET_CLEAN.showRadioConsole &&
     v.showSunVisor === COCKPIT_PRESET_CLEAN.showSunVisor &&
     v.showCassetteWidget === COCKPIT_PRESET_CLEAN.showCassetteWidget
   );

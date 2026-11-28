@@ -1,58 +1,118 @@
+import type { BeatMap } from '@src/audio/BeatMap';
+import type { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
+import type { PlaylistItem, TrackLibrary } from '@src/audio/TrackLibrary';
 import type { PreloadProgress } from '@src/core/AssetPreloader';
 import type { SodaSkin } from '@src/entities/MelonSoda';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { CockpitVisibility } from './cockpit/cockpitSettings';
-import { DriverManualModal } from './DriverManualModal';
-import { QuickOptionsModal } from './QuickOptionsModal';
-import { CassetteReel, WalkmanLed, WalkmanScrew } from './walkman/WalkmanChrome';
+import {
+  COCKPIT_PRESET_CLUTTER,
+  type CockpitVisibility,
+} from './cockpit/cockpitSettings';
+import type { VisorPhotoItem } from './cockpit/visorPhotoStore';
+import { BackGuideSheet } from './components/BackGuideSheet';
+import { OptionsPanel } from './components/OptionsPanel';
+import { useGamepadMenuNav } from './hooks/useGamepadMenuNav';
+import { TrackLoader } from './TrackLoader';
+import { CassetteReel } from './walkman/WalkmanChrome';
+import './walkman/walkman.css';
 
 export interface MainMenuProps {
   progress: PreloadProgress;
   ready: boolean;
   audioUnlocked: boolean;
   currentTrackTitle?: string;
-  currentTrackArtist?: string;
   currentTrackBpm?: number;
+  playlistCount?: number;
+  activeTrackIndex?: number;
+  library?: TrackLibrary;
+  audio?: FunkAudioEngine;
+  onSelectTrack?: (item: PlaylistItem) => void;
+  onUpdateBeatMap?: (contentHash: string, updated: BeatMap) => void;
+  onPreviewUnlocked?: () => void;
   onStartDrive: () => void;
-  onOpenCassetteDeck: () => void;
+  onOpenCassetteDeck?: () => void;
   onUnlockAudio: () => void;
-  // Quick options state & toggles
   autoShift: boolean;
   onToggleAutoShift: () => void;
   tofuMode: boolean;
   onToggleTofuMode: () => void;
   sodaSkin: SodaSkin;
   onCycleSodaSkin: () => void;
-  cleanHud: boolean;
-  onToggleCleanHud: () => void;
   crtEnabled: boolean;
   onToggleCrt: () => void;
   cockpitVisibility?: CockpitVisibility;
-  visorPhotoUrl?: string | null;
+  visorPhotos?: readonly VisorPhotoItem[];
   onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
   onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
-  onUploadVisorPhoto?: (file: File) => void;
-  onClearVisorPhoto?: () => void;
+  onAddVisorPhotos?: (files: readonly File[]) => void;
+  onAddVisorPhoto?: (file: File) => void;
+  onRemoveVisorPhoto?: (id: string) => void;
+  onClearVisorPhotos?: () => void;
 }
 
-const MENU_ITEMS = [
-  { id: 'drive', label: 'DRIVE', glyph: '▶', code: '01' },
-  { id: 'cassette', label: 'CASSETTES', glyph: '⏏', code: '02' },
-  { id: 'options', label: 'OPTIONS', glyph: '≡', code: '03' },
-  { id: 'manual', label: 'GUIDE', glyph: '?', code: '04' },
+type DeckSubPanel = 'none' | 'tapes' | 'options';
+type InsertionPhase = 'idle' | 'eject' | 'insert-start' | 'insert' | 'latch';
+
+const MENU_KEYS = [
+  { id: 'play', label: 'PLAY', glyph: '▶' },
+  { id: 'tapes', label: 'TAPES', glyph: '⏏' },
+  { id: 'options', label: 'OPTIONS', glyph: '≡' },
+  { id: 'guide', label: 'GUIDE', glyph: '↻' },
 ] as const;
 
+function AnalogVuMeter({ level }: { level: number }) {
+  const angleDeg = -34 + Math.max(0, Math.min(1, level)) * 52;
+  return (
+    <div className="deck-vu-well relative h-10 w-16 overflow-hidden rounded-[2px] sm:h-12 sm:w-20">
+      <svg viewBox="0 0 80 48" className="h-full w-full" aria-hidden="true">
+        <path
+          d="M12 36 A32 32 0 0 1 68 36"
+          fill="none"
+          stroke="#3a2008"
+          strokeWidth="1.4"
+        />
+        <path
+          d="M54 22 A32 32 0 0 1 68 36"
+          fill="none"
+          stroke="#c82333"
+          strokeWidth="2.2"
+        />
+        <text
+          x="40"
+          y="39"
+          textAnchor="middle"
+          fill="#2d1704"
+          fontSize="7"
+          fontWeight="bold"
+          fontFamily="monospace"
+        >
+          VU
+        </text>
+        <g transform={`translate(40, 44) rotate(${angleDeg})`}>
+          <line x1="0" y1="0" x2="0" y2="-32" stroke="#1b0d03" strokeWidth="1.5" />
+        </g>
+        <circle cx="40" cy="44" r="3" fill="#1b0d03" />
+      </svg>
+    </div>
+  );
+}
+
 /**
- * Mayonaka Walkman Title & Transport Stage (City Pop Sleeve × Flat Matte Walkman).
- * Keeps the live pixel-art sky, moon, skyline, and cruising car unobstructed in the center.
+ * Title Screen — Front-Loading Stereo Cassette Tape Deck (`docs/UI.md §3`).
  */
 export function MainMenu({
   progress,
   ready,
   audioUnlocked,
   currentTrackTitle = 'Neon Horizon',
-  currentTrackArtist = 'Mayonaka FM',
   currentTrackBpm = 122,
+  playlistCount = 3,
+  activeTrackIndex = 0,
+  library,
+  audio,
+  onSelectTrack,
+  onUpdateBeatMap,
+  onPreviewUnlocked,
   onStartDrive,
   onOpenCassetteDeck,
   onUnlockAudio,
@@ -62,21 +122,53 @@ export function MainMenu({
   onToggleTofuMode,
   sodaSkin,
   onCycleSodaSkin,
-  cleanHud,
-  onToggleCleanHud,
   crtEnabled,
   onToggleCrt,
-  cockpitVisibility,
-  visorPhotoUrl,
-  onToggleCockpitModule,
-  onApplyCockpitPreset,
-  onUploadVisorPhoto,
-  onClearVisorPhoto,
+  cockpitVisibility = COCKPIT_PRESET_CLUTTER,
+  visorPhotos = [],
+  onToggleCockpitModule = () => {},
+  onApplyCockpitPreset = () => {},
+  onAddVisorPhotos,
+  onAddVisorPhoto = () => {},
+  onRemoveVisorPhoto = () => {},
+  onClearVisorPhotos = () => {},
 }: MainMenuProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [manualOpen, setManualOpen] = useState(false);
-  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [subPanel, setSubPanel] = useState<DeckSubPanel>('none');
+  const [guideFlipped, setGuideFlipped] = useState(false);
+  const [insertionPhase, setInsertionPhase] = useState<InsertionPhase>('idle');
   const navRef = useRef<HTMLElement | null>(null);
+  const guideBtnRef = useRef<HTMLButtonElement | null>(null);
+  const prevGuideFlippedRef = useRef(false);
+  const insertTimersRef = useRef<number[]>([]);
+
+  const clearInsertionTimers = useCallback(() => {
+    for (const id of insertTimersRef.current) {
+      window.clearTimeout(id);
+    }
+    insertTimersRef.current.length = 0;
+  }, []);
+
+  useEffect(() => {
+    return () => clearInsertionTimers();
+  }, [clearInsertionTimers]);
+
+  useEffect(() => {
+    if (prevGuideFlippedRef.current && !guideFlipped) {
+      guideBtnRef.current?.focus();
+    }
+    prevGuideFlippedRef.current = guideFlipped;
+  }, [guideFlipped]);
+
+  const triggerCassetteInsertion = useCallback(() => {
+    clearInsertionTimers();
+    setInsertionPhase('eject');
+    const t1 = window.setTimeout(() => setInsertionPhase('insert-start'), 160);
+    const t2 = window.setTimeout(() => setInsertionPhase('insert'), 195);
+    const t3 = window.setTimeout(() => setInsertionPhase('latch'), 480);
+    const t4 = window.setTimeout(() => setInsertionPhase('idle'), 630);
+    insertTimersRef.current.push(t1, t2, t3, t4);
+  }, [clearInsertionTimers]);
 
   const unlockIfNeeded = useCallback(() => {
     if (!audioUnlocked) {
@@ -84,48 +176,73 @@ export function MainMenu({
     }
   }, [audioUnlocked, onUnlockAudio]);
 
+  const closeSubPanel = useCallback(() => {
+    audio?.stopPreview(false, true);
+    setSubPanel('none');
+  }, [audio]);
+
   const executeAction = useCallback(
     (index: number) => {
       unlockIfNeeded();
       switch (index) {
         case 0:
-          if (ready) onStartDrive();
+          if (ready) {
+            audio?.stopPreview(false, false);
+            onStartDrive();
+          }
           break;
         case 1:
-          onOpenCassetteDeck();
+          if (library && onSelectTrack && onUpdateBeatMap) {
+            setGuideFlipped(false);
+            setSubPanel((prev) => {
+              if (prev === 'tapes') {
+                audio?.stopPreview(false, true);
+                return 'none';
+              }
+              return 'tapes';
+            });
+          } else {
+            onOpenCassetteDeck?.();
+          }
           break;
         case 2:
-          setOptionsOpen(true);
+          audio?.stopPreview(false, true);
+          setGuideFlipped(false);
+          setSubPanel((prev) => (prev === 'options' ? 'none' : 'options'));
           break;
         case 3:
-          setManualOpen(true);
+          audio?.stopPreview(false, true);
+          setSubPanel('none');
+          setGuideFlipped(true);
           break;
       }
     },
-    [ready, onStartDrive, onOpenCassetteDeck, unlockIfNeeded],
+    [ready, audio, onStartDrive, library, onSelectTrack, onUpdateBeatMap, onOpenCassetteDeck, unlockIfNeeded],
   );
 
-  // Keyboard navigation
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.code !== 'Escape') {
-        unlockIfNeeded();
-      }
+      if (e.defaultPrevented || guideFlipped) return;
 
-      if (manualOpen || optionsOpen) {
+      if (subPanel !== 'none') {
         if (e.code === 'Escape') {
-          setManualOpen(false);
-          setOptionsOpen(false);
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          closeSubPanel();
         }
         return;
       }
 
-      if (e.code === 'ArrowDown' || e.code === 'KeyS') {
+      if (e.code !== 'Escape') {
+        unlockIfNeeded();
+      }
+
+      if (e.code === 'ArrowRight' || e.code === 'ArrowDown' || e.code === 'KeyD' || e.code === 'KeyS') {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev + 1) % MENU_ITEMS.length);
-      } else if (e.code === 'ArrowUp' || e.code === 'KeyW') {
+        setSelectedIndex((prev) => (prev + 1) % MENU_KEYS.length);
+      } else if (e.code === 'ArrowLeft' || e.code === 'ArrowUp' || e.code === 'KeyA' || e.code === 'KeyW') {
         e.preventDefault();
-        setSelectedIndex((prev) => (prev - 1 + MENU_ITEMS.length) % MENU_ITEMS.length);
+        setSelectedIndex((prev) => (prev - 1 + MENU_KEYS.length) % MENU_KEYS.length);
       } else if (e.code === 'Enter' || e.code === 'Space') {
         const target = e.target;
         if (
@@ -158,293 +275,286 @@ export function MainMenu({
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedIndex, executeAction, manualOpen, optionsOpen, unlockIfNeeded]);
+  }, [selectedIndex, executeAction, guideFlipped, subPanel, closeSubPanel, unlockIfNeeded]);
+
+  useGamepadMenuNav({
+    enabled: !guideFlipped && subPanel === 'none',
+    onPrev: () => setSelectedIndex((prev) => (prev - 1 + MENU_KEYS.length) % MENU_KEYS.length),
+    onNext: () => setSelectedIndex((prev) => (prev + 1) % MENU_KEYS.length),
+    onConfirm: () => executeAction(selectedIndex),
+  });
+
+  useGamepadMenuNav({
+    enabled: guideFlipped || subPanel !== 'none',
+    onPrev: () => {},
+    onNext: () => {},
+    onConfirm: () => {},
+    onBack: () => {
+      if (guideFlipped) setGuideFlipped(false);
+      else closeSubPanel();
+    },
+  });
+
+  const doorOpen =
+    subPanel === 'tapes' ||
+    insertionPhase === 'eject' ||
+    insertionPhase === 'insert-start' ||
+    insertionPhase === 'insert';
+  const counterText = String(activeTrackIndex + 1).padStart(3, '0');
+  const vuLevel = insertionPhase !== 'idle' ? 0.65 : ready ? 0.42 : 0.18;
 
   return (
-    <>
+    <div
+      onClick={unlockIfNeeded}
+      className="pointer-events-auto absolute inset-0 z-40 flex flex-col items-center justify-between overflow-hidden px-4 py-3 text-[var(--wm-silk)] select-none sm:px-6 sm:py-4"
+    >
+      {/* Edge scrims keeping center moon & coupe vivid */}
       <div
-        onClick={unlockIfNeeded}
-        className="pointer-events-auto absolute inset-0 z-40 flex flex-col justify-between overflow-hidden px-4 py-3.5 text-[var(--wm-silk)] select-none sm:px-6 sm:py-5"
-      >
-        {/* Targeted edge-only framing gradients so moon, skyline & car stay vivid */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-[34%]"
-          style={{
-            background:
-              'linear-gradient(180deg, rgba(9,11,18,0.74) 0%, rgba(9,11,18,0.22) 68%, rgba(9,11,18,0) 100%)',
-          }}
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-[30%]"
-          style={{
-            background:
-              'linear-gradient(0deg, rgba(9,11,18,0.82) 0%, rgba(9,11,18,0.24) 68%, rgba(9,11,18,0) 100%)',
-          }}
-        />
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 h-[36%]"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(6,8,18,0.72) 0%, rgba(6,8,18,0.18) 70%, rgba(6,8,18,0) 100%)',
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[34%]"
+        style={{
+          background:
+            'linear-gradient(0deg, rgba(6,8,18,0.78) 0%, rgba(6,8,18,0.16) 72%, rgba(6,8,18,0) 100%)',
+        }}
+      />
 
-        {/* Top Editorial Hairline Tuner Bar */}
-        <header className="relative z-10 flex w-full items-center gap-3 border-b border-[var(--wm-line)] pb-2">
-          <div className="flex shrink-0 items-center gap-2 text-[10px] font-bold tracking-[0.2em] uppercase">
-            <WalkmanLed lit color="mint" />
-            <span className="ff-mono text-[var(--wm-silk)]">88.4 FM</span>
-            <span className="text-[var(--wm-silk-dim)]">· TOKYO BAY</span>
-          </div>
-
-          <div
-            aria-hidden="true"
-            className="hidden min-w-0 flex-1 items-center gap-2 opacity-60 sm:flex"
-          >
-            <span className="h-[1px] flex-1 bg-[var(--wm-line)]" />
-            <span className="ff-mono text-[9px] tracking-[0.24em] text-[var(--wm-silk-dim)] uppercase">
-              C-60 · CrO₂
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-[1px] bg-[var(--wm-silk-dim)]" />
-              <span className="h-1 w-[1px] bg-[var(--wm-silk-dim)]" />
-              <span className="h-2.5 w-[1.5px] bg-[var(--wm-amber)]" />
-              <span className="h-1 w-[1px] bg-[var(--wm-silk-dim)]" />
-              <span className="h-2 w-[1px] bg-[var(--wm-silk-dim)]" />
-            </span>
-            <span className="h-[1px] flex-1 bg-[var(--wm-line)]" />
-          </div>
-
-          {!audioUnlocked ? (
+      {/* Top Sky Area */}
+      {!guideFlipped && (
+        <div className="relative z-10 flex w-full flex-col items-center text-center">
+          {!audioUnlocked && (
             <button
               type="button"
-              onClick={onUnlockAudio}
-              className="wm-btn ml-auto flex shrink-0 cursor-pointer items-center gap-2 px-2.5 py-1 text-[10px] font-bold tracking-[0.16em] text-[var(--wm-silk)] uppercase sm:ml-0"
+              onClick={(e) => {
+                e.stopPropagation();
+                onUnlockAudio();
+              }}
+              className="wm-btn ff-mono absolute top-0 right-0 flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-[10px] font-black tracking-[0.14em] text-[var(--wm-play)] uppercase"
             >
-              <WalkmanLed lit={false} color="play" />
-              <svg
-                aria-hidden="true"
-                className="h-3 w-3"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#ff3b6b"
-                strokeWidth="2.2"
-                strokeLinecap="square"
-              >
-                <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                <path d="M22 9l-6 6M16 9l6 6" />
-              </svg>
-              <span className="ff-mono">SOUND</span>
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--wm-play)]" />
+              SOUND
             </button>
-          ) : (
-            <div className="wm-lcd ml-auto flex shrink-0 items-center gap-2 rounded-[2px] px-2.5 py-1 text-[10px] font-bold tracking-[0.16em] uppercase sm:ml-0">
-              <WalkmanLed lit color="mint" />
-              <svg
-                aria-hidden="true"
-                className="h-3 w-3"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="#2ee2be"
-                strokeWidth="2.2"
-                strokeLinecap="square"
-              >
-                <path d="M11 5L6 9H2v6h4l5 4V5z" />
-                <path d="M15.5 8.5a5 5 0 010 7" />
-                <path d="M18.8 5.2a9.5 9.5 0 010 13.6" />
-              </svg>
-              <span className="ff-mono text-[var(--wm-mint)]">STEREO</span>
-            </div>
           )}
-        </header>
 
-        {/* City Pop Sleeve Hero Title Lockup (Flat Ivory Silkscreen + Single Coral Accent) */}
-        <div className="relative z-10 mt-2 flex flex-col items-center text-center">
-          <h1
-            className="flex items-center gap-3 whitespace-nowrap sm:gap-4"
-            style={{ textShadow: '0 2px 0 #090b12' }}
-          >
-            <span className="text-3xl font-black tracking-[0.12em] text-[var(--wm-silk)] sm:text-4xl md:text-5xl">
+          <h1 className="flex items-center justify-center gap-2.5 whitespace-nowrap sm:gap-3.5">
+            <span className="ff-chrome-title text-3xl font-black tracking-[0.08em] sm:text-5xl">
               真夜中
             </span>
-            <span
-              aria-hidden="true"
-              className="inline-block h-6 w-[2px] bg-[var(--wm-play)] sm:h-8 md:h-10"
-            />
-            <span className="ff-display text-3xl font-black tracking-[0.14em] text-[var(--wm-silk)] uppercase sm:text-4xl md:text-5xl">
+            <span className="ff-display ff-chrome-title text-3xl font-black tracking-[0.08em] italic uppercase sm:text-5xl">
               CASSETTE
             </span>
           </h1>
+
+          <div className="ff-brush-accent -mt-1 text-base tracking-[0.16em] uppercase sm:-mt-1.5 sm:text-xl">
+            MIDNIGHT DRIVE
+          </div>
+
+          <p className="ff-mono mt-1 text-[10px] font-bold tracking-[0.2em] text-[#7ae7ff] uppercase sm:text-[11px]">
+            {currentTrackTitle.toUpperCase()} · {Math.round(currentTrackBpm)} BPM · {playlistCount}{' '}
+            {playlistCount === 1 ? 'TRACK' : 'TRACKS'}
+          </p>
         </div>
+      )}
 
-        {/* Open Middle Spacer: Moon, Skyline, Highway & Car remain unobstructed */}
-        <div className="flex-1" />
+      {/* Inline Sub-Panels */}
+      {subPanel !== 'none' && !guideFlipped && (
+        <div className="relative z-20 my-auto flex w-full justify-center px-2">
+          {subPanel === 'options' && (
+            <OptionsPanel
+              autoShift={autoShift}
+              onToggleAutoShift={onToggleAutoShift}
+              tofuMode={tofuMode}
+              onToggleTofuMode={onToggleTofuMode}
+              sodaSkin={sodaSkin}
+              onCycleSodaSkin={onCycleSodaSkin}
+              crtEnabled={crtEnabled}
+              onToggleCrt={onToggleCrt}
+              cockpitVisibility={cockpitVisibility}
+              onToggleCockpitModule={onToggleCockpitModule}
+              onApplyCockpitPreset={onApplyCockpitPreset}
+              visorPhotos={visorPhotos}
+              onAddVisorPhotos={onAddVisorPhotos}
+              onAddVisorPhoto={onAddVisorPhoto}
+              onRemoveVisorPhoto={onRemoveVisorPhoto}
+              onClearVisorPhotos={onClearVisorPhotos}
+              onClose={closeSubPanel}
+              maxHeightClass="max-h-[46vh]"
+            />
+          )}
 
-        {/* Bottom Asymmetric Walkman Control Deck */}
-        <div className="relative z-10 flex items-end justify-between gap-4">
-          {/* Bottom-Left: Flat Flush Walkman Membrane Transport Bank */}
-          <div className="wm-shell wm-faceplate w-52 shrink-0 p-2 sm:w-56">
-            <div className="mb-1.5 flex items-center justify-between border-b border-[var(--wm-line)] pb-1">
-              <div className="flex items-center gap-1.5">
-                <WalkmanScrew />
-                <span className="ff-mono text-[8px] font-bold tracking-[0.22em] text-[var(--wm-silk-dim)] uppercase">
-                  TRANSPORT
-                </span>
-              </div>
-              <WalkmanLed lit={ready} color={ready ? 'mint' : 'amber'} />
-            </div>
+          {subPanel === 'tapes' && library && onSelectTrack && onUpdateBeatMap && (
+            <TrackLoader
+              open
+              presentation="deck"
+              isInitialSelect
+              library={library}
+              audio={audio}
+              onSelectTrack={onSelectTrack}
+              onUpdateBeatMap={onUpdateBeatMap}
+              onPreviewUnlocked={onPreviewUnlocked}
+              onCassetteInserted={() => triggerCassetteInsertion()}
+              onStartDrive={() => {
+                audio?.stopPreview(false, false);
+                onStartDrive();
+              }}
+              onClose={closeSubPanel}
+            />
+          )}
+        </div>
+      )}
 
-            <nav ref={navRef} aria-label="Main Menu" className="wm-key-bank flex flex-col">
-              {MENU_ITEMS.map((item, index) => {
-                const isSelected = selectedIndex === index;
-                const isDriveItem = item.id === 'drive';
-                const labelText =
-                  isDriveItem && !ready ? `LOADING (${progress.percent}%)` : item.label;
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-disabled={isDriveItem && !ready ? true : undefined}
-                    data-pressed={isSelected ? 'true' : 'false'}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    onFocus={() => setSelectedIndex(index)}
-                    onClick={() => executeAction(index)}
-                    className={`flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left ${
-                      isDriveItem && !ready ? 'cursor-wait' : 'cursor-pointer'
-                    } ${
-                      isDriveItem && isSelected
-                        ? 'wm-btn-well wm-btn-play border-0'
-                        : isSelected
-                          ? 'wm-btn-well border-l-[3px] border-l-[var(--wm-mint)] bg-[#22283e] text-[var(--wm-silk)]'
-                          : 'wm-btn-well border-l-[3px] border-l-transparent text-[var(--wm-silk-dim)] hover:text-[var(--wm-silk)]'
-                    }`}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        className={`ff-mono text-[10px] font-black ${
-                          isSelected
-                            ? isDriveItem
-                              ? 'text-[var(--wm-silk)]'
-                              : 'text-[var(--wm-mint)]'
-                            : 'opacity-50'
-                        }`}
-                      >
-                        {item.glyph}
-                      </span>
-                      <span className="ff-mono truncate text-[11px] font-bold tracking-[0.14em] uppercase sm:text-xs">
-                        {labelText}
-                      </span>
-                    </span>
-
-                    <span className="flex shrink-0 items-center gap-1.5">
-                      <span className="ff-mono text-[9px] opacity-55">{item.code}</span>
-                      <WalkmanLed
-                        lit={isSelected}
-                        color={isDriveItem ? 'amber' : 'mint'}
-                      />
-                    </span>
-                  </button>
-                );
-              })}
-            </nav>
-
-            {!ready && (
-              <div className="wm-lcd mt-1.5 h-1.5 w-full overflow-hidden rounded-[1px] p-[1px]">
-                <div
-                  className="wm-accent-strip h-full transition-all duration-150"
-                  style={{ width: `${progress.percent}%` }}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Center Whisper Hint */}
-          <div className="hidden items-center gap-2 pb-1 text-[10px] font-semibold tracking-[0.16em] text-[#f4efe6]/65 uppercase md:flex">
-            <span className="wm-lcd ff-mono rounded-[1px] px-1.5 py-0.5 text-[var(--wm-silk)]">
-              ↑↓
-            </span>
-            <span>MOVE</span>
-            <span className="opacity-40">·</span>
-            <span className="wm-lcd ff-mono rounded-[1px] px-1.5 py-0.5 text-[var(--wm-silk)]">
-              ENTER
-            </span>
-            <span>SELECT</span>
-          </div>
-
-          {/* Bottom-Right: TDK/Sony-Style Walkman Cassette Door Preview */}
-          <button
-            type="button"
-            onClick={() => {
-              unlockIfNeeded();
-              onOpenCassetteDeck();
-            }}
-            className="wm-shell wm-faceplate group w-60 shrink-0 cursor-pointer overflow-hidden text-left transition hover:border-[var(--wm-line-hi)] focus-visible:outline-1 focus-visible:outline-[var(--wm-mint)] sm:w-72"
+      {/* Lower-Center Hero Object: 3D Flippable Front-Loading Stereo Cassette Tape Deck */}
+      <div
+        className={`hw-flip-scene relative z-10 w-full transition-[max-width] duration-300 ${
+          guideFlipped ? 'my-auto max-w-[740px]' : 'max-w-[540px]'
+        }`}
+      >
+        <div
+          className="hw-flip-card relative w-full"
+          data-flipped={guideFlipped ? 'true' : 'false'}
+        >
+          {/* FRONT FACE */}
+          <div
+            className={`hw-flip-face w-full overflow-hidden rounded-[6px] ${
+              guideFlipped
+                ? 'pointer-events-none absolute inset-x-0 bottom-0 motion-reduce:opacity-0'
+                : 'relative motion-reduce:opacity-100'
+            }`}
           >
-            {/* Ruled Paper Tape Label Top Strip */}
-            <div className="wm-paper-label flex items-center justify-between px-2.5 py-1 text-[10px] font-black tracking-[0.14em] text-[#131622] uppercase">
-              <span className="flex items-center gap-1.5">
-                <span className="inline-block h-1.5 w-1.5 rounded-full bg-[var(--wm-play)]" />
-                SIDE A
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="ff-mono font-bold">{Math.round(currentTrackBpm)} BPM</span>
-                <span className="text-[10px] font-black text-[#131622] transition group-hover:text-[var(--wm-play)]">
-                  ⏏
-                </span>
-              </div>
-            </div>
-            <div className="wm-accent-strip" />
-
-            {/* Smoked-Acrylic Cassette Window */}
-            <div className="p-2">
-              <div className="wm-window flex items-center justify-between gap-2.5 rounded-[2px] px-2.5 py-2">
-                <CassetteReel size={30} spinning packScale={0.82} accentColor="#2ee2be" />
-
-                <div className="min-w-0 flex-1 text-center">
-                  <div className="truncate text-xs font-extrabold tracking-tight text-[var(--wm-silk)]">
-                    {currentTrackTitle}
-                  </div>
-                  <div className="truncate text-[10px] font-medium text-[var(--wm-silk-dim)]">
-                    {currentTrackArtist}
-                  </div>
-                  <div
-                    aria-hidden="true"
-                    className="ff-mono mt-1 flex items-center justify-center gap-3 text-[7px] tracking-widest text-[var(--wm-silk-dim)]/65"
-                  >
-                    <span>0</span>
-                    <span>·</span>
-                    <span>50</span>
-                    <span>·</span>
-                    <span>100</span>
-                  </div>
+            <div className="deck-brushed-silver rounded-t-[6px] px-3 pt-2.5 pb-2 text-[#161822]">
+              <div className="flex items-center justify-between gap-3">
+                <div className="hidden flex-col items-center gap-1.5 sm:flex">
+                  <span className="h-3.5 w-3.5 rounded-[1px] border border-[#222733] bg-[#b4bcc8] shadow-inner" />
+                  <span className="ff-mono text-[7px] font-black tracking-[0.2em] text-[#222733]">
+                    真夜中
+                  </span>
                 </div>
 
-                <CassetteReel size={30} spinning packScale={0.58} accentColor="#f5b94c" />
+                {/* Smoked-Acrylic Cassette Bay with overflow-hidden */}
+                <button
+                  type="button"
+                  onClick={() => executeAction(1)}
+                  aria-label="Open tapes drawer"
+                  className="deck-bay-perspective group relative flex h-24 w-48 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-[3px] border-2 border-[#161922] bg-[#0a0c14] p-1.5 shadow-inner sm:h-28 sm:w-56"
+                >
+                  <div
+                    className="cassette-insert-anim relative flex h-full w-full flex-col justify-between rounded-[3px] border border-[#2b3040] bg-[#171b24] p-1.5"
+                    data-phase={insertionPhase}
+                  >
+                    <div className="wm-paper-label flex items-center justify-between rounded-[1px] px-1.5 py-0.5 text-[8px] font-black text-[#131622]">
+                      <span className="rounded-[1px] bg-[#131622] px-1 text-[#faf3e0]">SIDE A</span>
+                      <span className="max-w-[110px] truncate uppercase">{currentTrackTitle}</span>
+                    </div>
+
+                    <div className="flex items-center justify-around rounded-[2px] bg-[#0b0d14] py-1">
+                      <CassetteReel size={26} spinning={ready} packScale={0.8} accentColor="#ff7b25" />
+                      <div className="h-3 w-8 rounded-[1px] border border-white/10 bg-[#1a1f2e]" />
+                      <CassetteReel size={26} spinning={ready} packScale={0.62} accentColor="#2ee2be" />
+                    </div>
+                  </div>
+
+                  <div
+                    className="deck-acrylic-door pointer-events-none absolute inset-x-0 bottom-0 h-[62%] rounded-b-[2px] border-t border-white/25 bg-gradient-to-b from-white/10 to-[#0c101b]/55"
+                    data-open={doorOpen ? 'true' : 'false'}
+                  />
+                </button>
+
+                <div className="flex flex-1 items-center justify-end gap-2 sm:gap-2.5">
+                  <div className="hidden flex-col items-center gap-0.5 sm:flex">
+                    <span className="rounded-[2px] border border-[#161922] bg-[#0c0e14] px-1.5 py-0.5 font-mono text-[10px] font-bold tracking-[0.2em] text-[#f4efe6]">
+                      {counterText}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <AnalogVuMeter level={vuLevel} />
+                    <div className="hidden sm:block">
+                      <AnalogVuMeter level={vuLevel * 0.92} />
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </button>
+
+            {/* Lower Dark Piano-Key Menu Bank: label + key wrapped inside clickable button */}
+            <nav
+              ref={navRef}
+              aria-label="Main Menu"
+              className="deck-lower-bank rounded-b-[6px] px-3 pt-2 pb-3"
+            >
+              <div className="grid grid-cols-4 gap-2">
+                {MENU_KEYS.map((keyItem, index) => {
+                  const isSelected = selectedIndex === index;
+                  const isPlay = keyItem.id === 'play';
+                  const displayLabel =
+                    isPlay && !ready ? `LOAD ${progress.percent}%` : keyItem.label;
+                  const isActivePanel =
+                    (keyItem.id === 'tapes' && subPanel === 'tapes') ||
+                    (keyItem.id === 'options' && subPanel === 'options');
+
+                  return (
+                    <button
+                      key={keyItem.id}
+                      ref={keyItem.id === 'guide' ? guideBtnRef : undefined}
+                      type="button"
+                      aria-disabled={isPlay && !ready ? true : undefined}
+                      data-pressed={isSelected || isActivePanel ? 'true' : 'false'}
+                      onMouseEnter={() => setSelectedIndex(index)}
+                      onFocus={() => setSelectedIndex(index)}
+                      onClick={() => executeAction(index)}
+                      className={`group flex w-full flex-col items-center gap-1 focus-visible:outline-1 focus-visible:outline-[#2ee2be] ${
+                        isPlay && !ready ? 'cursor-wait' : 'cursor-pointer'
+                      }`}
+                    >
+                      <span
+                        className={`ff-mono text-[10px] font-black tracking-[0.14em] uppercase sm:text-[11px] ${
+                          isPlay
+                            ? 'text-[#ff5d6c]'
+                            : isSelected || isActivePanel
+                              ? 'text-[#2ee2be]'
+                              : 'text-[#d4dbe8] group-hover:text-white'
+                        }`}
+                      >
+                        {keyItem.glyph} {displayLabel}
+                      </span>
+
+                      <span
+                        aria-hidden="true"
+                        data-pressed={isSelected || isActivePanel ? 'true' : 'false'}
+                        className={`deck-piano-key block h-7 w-full ${
+                          isPlay ? 'deck-piano-key-play' : ''
+                        } ${isPlay && !ready ? 'opacity-75' : ''}`}
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+            </nav>
+          </div>
+
+          {/* BACK FACE: Always mounted inside 3D flip card for smooth 480ms flip & reduced-motion crossfade */}
+          <div
+            className={`hw-flip-face hw-flip-back w-full ${
+              !guideFlipped
+                ? 'pointer-events-none absolute inset-0 motion-reduce:opacity-0'
+                : 'relative motion-reduce:opacity-100'
+            }`}
+          >
+            <BackGuideSheet
+              variant="deck"
+              active={guideFlipped}
+              onFlipBack={() => setGuideFlipped(false)}
+            />
+          </div>
         </div>
       </div>
-
-      {/* Driver's Manual Modal */}
-      <DriverManualModal open={manualOpen} onClose={() => setManualOpen(false)} />
-
-      {/* Quick Options Modal */}
-      <QuickOptionsModal
-        open={optionsOpen}
-        onClose={() => setOptionsOpen(false)}
-        autoShift={autoShift}
-        onToggleAutoShift={onToggleAutoShift}
-        tofuMode={tofuMode}
-        onToggleTofuMode={onToggleTofuMode}
-        sodaSkin={sodaSkin}
-        onCycleSodaSkin={onCycleSodaSkin}
-        cleanHud={cleanHud}
-        onToggleCleanHud={onToggleCleanHud}
-        crtEnabled={crtEnabled}
-        onToggleCrt={onToggleCrt}
-        cockpitVisibility={cockpitVisibility}
-        visorPhotoUrl={visorPhotoUrl}
-        onToggleCockpitModule={onToggleCockpitModule}
-        onApplyCockpitPreset={onApplyCockpitPreset}
-        onUploadVisorPhoto={onUploadVisorPhoto}
-        onClearVisorPhoto={onClearVisorPhoto}
-      />
-    </>
+    </div>
   );
 }

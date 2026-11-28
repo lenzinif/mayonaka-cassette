@@ -284,18 +284,34 @@ describe('M6 — Stage Forks, 4-Bar DJ Crossfade, Outro Hold Loop & Run Completi
     expect(game.car.isOffRoad).toBe(false);
     expect(collisions.length).toBe(0);
 
-    // 2. Driving at x = 0.0 (inside the central V-chevron median island) must be OFF-ROAD!
+    // 2. Driving across x = 0.0 inside the attached dual-carriageway body must stay ON-ROAD
+    //    (zero central grass island blocking lane changes), while x = 1.65 outside outerLimit is OFF-ROAD.
     game.car.x = 0.0;
     game.car.prevX = 0.0;
     game.update(1 / 120);
-    expect(game.car.isOffRoad).toBe(true);
-    expect(game.car.offRoadDepth).toBeGreaterThan(0.5);
+    expect(game.car.isOffRoad).toBe(false);
 
-    // 3. In Phase 3 (t > 0.65), as the player drives forward, the chosen branch converges
-    //    smoothly back towards center (0.0). Car is smoothly guided inward.
-    game.position = forkStartZ + span * 0.70;
-    game.car.x = 1.05;
-    game.car.prevX = 1.05;
+    game.car.x = 1.65;
+    game.car.prevX = 1.65;
+    game.update(1 / 120);
+    expect(game.car.isOffRoad).toBe(true);
+    expect(game.car.offRoadDepth).toBeGreaterThan(0.1);
+
+    // 3. Switching across x = 0 remains free even at late fork progress (t = 0.85),
+    //    and in the final taper (t = 0.88) wide lateral positions are softly bounded inward.
+    game.position = forkStartZ + span * 0.85;
+    game.car.x = -0.65;
+    game.car.prevX = -0.65;
+    game.update(1 / 120);
+    expect(game.forkChoice).toBe('left');
+    game.car.x = 0.65;
+    game.car.prevX = 0.65;
+    game.update(1 / 120);
+    expect(game.forkChoice).toBe('right');
+
+    game.position = forkStartZ + span * 0.88;
+    game.car.x = 1.42;
+    game.car.prevX = 1.42;
     const prevX = game.car.x;
     for (let i = 0; i < 30; i++) {
       game.update(1 / 120);
@@ -423,8 +439,8 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
     expect(game.position).toBe(posAtPause);
     expect(game.car.speed).toBe(speedAtPause);
 
-    // 3. Resume via unpause press or setPaused(false)
-    input.press('accelerate');
+    // 3. Resume via explicit pause toggle (driving keys must NOT unpause while in Pause/Menus)
+    input.press('pause');
     game.update(1 / 60);
     expect(game.paused).toBe(false);
     expect(pauseEvents).toEqual([true, false]);
@@ -736,11 +752,11 @@ describe('Spacetime Hybrid Sync (A1 + A2)', () => {
 
     // Drive continuously for ~12 seconds across the final 4 bars of Stage 1 and first ~4 bars of Stage 2
     for (let step = 0; step < 720; step++) {
-      // Hold steady highway cruise speed (5th gear matches 9500 cruise) & Right lane entry
+      // Hold steady highway cruise speed (5th gear matches 9500 cruise) & Right carriageway
       game.car.speed = cruiseSpeed;
       if (game.car.gear < 5) game.car.gearbox.gear = 5;
-      if (library.currentIndex === 0 && game.forkProgress < 0.65) {
-        game.car.x = 0.95;
+      if (library.currentIndex === 0) {
+        game.car.x = 0.75;
       }
       const beforeStage = library.currentIndex;
       const beforePos = game.position;
@@ -1600,5 +1616,34 @@ describe('M5 — Live Stage Re-dressing Integrity (setStagePaletteIndex)', () =>
     } finally {
       tuning.maxSpeed = prevMaxSpeed;
     }
+  });
+});
+
+describe('Configuration Lock & Pause Input Isolation', () => {
+  it('stays paused when driving inputs arrive while paused and emits updates when toggling Tofu / soda skin', () => {
+    const input = new FakeInput();
+    const game = new Game({ input, audio: new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP) });
+    game.setPaused(true);
+    expect(game.paused).toBe(true);
+
+    input.setDown('accelerate', true);
+    input.setDown('brake', true);
+    input.setDown('drift', true);
+    input.press('accelerate', 100);
+    input.press('brake', 110);
+    input.press('drift', 120);
+    input.press('shiftUp', 130);
+
+    game.update(1 / 60);
+    expect(game.paused).toBe(true);
+
+    const initialTofu = game.melonSoda.active;
+    const initialSkin = game.melonSoda.skin;
+    game.toggleTofuMode();
+    game.cycleSodaSkin();
+
+    expect(game.melonSoda.active).toBe(!initialTofu);
+    expect(game.melonSoda.skin).not.toBe(initialSkin);
+    expect(game.paused).toBe(true);
   });
 });

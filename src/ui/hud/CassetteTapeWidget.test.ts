@@ -1,97 +1,68 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { CassetteTapeWidget } from './CassetteTapeWidget';
 
 function renderClean(element: React.ReactElement): string {
   return renderToString(element).replace(/<!--.*?-->/g, '');
 }
 
-describe('CassetteTapeWidget', () => {
+describe('CassetteTapeWidget (Top-Left Cassette + Adjacent Playlist — docs/UI.md §5.2.1)', () => {
   const defaultProps = {
-    trackArtist: 'Plastic Love Band',
     trackTitle: 'Midnight Drive',
-    bpm: 124,
     barIndex: 8,
     beatInBar: 1,
-    sectionRole: 'drop' as const,
-    barEnergy: 0.8,
     grooveTier: 'HIGH' as const,
-    tofuMode: true,
     roadBarIndex: 8,
     totalBars: 32,
+    playlistIndex: 1,
+    playlistItems: [
+      { id: '1', title: 'Neon Horizon', artist: 'Mayonaka FM', bpm: 122 },
+      { id: '2', title: 'Midnight Drive', artist: 'Plastic Love', bpm: 124 },
+      { id: '3', title: 'Melon Sunset', artist: 'Kissaten', bpm: 118 },
+    ],
+    stageAccentColor: '#ff7b25',
     isSlack: false,
     visible: true,
-    onToggleVisible: vi.fn(),
   };
 
-  it('renders tape details, label, spools, and physical tape grade when visible', () => {
-    const text = renderClean(createElement(CassetteTapeWidget, defaultProps));
+  it('renders track title, monochrome theme progress bar, and adjacent read-only playlist without AI-slop copy', () => {
+    const html = renderToString(createElement(CassetteTapeWidget, defaultProps));
+    const text = html.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('Plastic Love Band — Midnight Drive');
-    expect(text).toContain('METAL · TYPE IV');
-    expect(text).toContain('124.0 BPM');
-    expect(text).toContain('BAR 009.2');
-    expect(text).toContain('TOFU ×2');
-    expect(text).not.toContain('LPF');
-    expect(text).not.toContain('DOLBY');
+    expect(text).toContain('Midnight Drive');
+    expect(text).toContain('01 Neon Horizon');
+    expect(text).toContain('02 Midnight Drive');
+    expect(text).toContain('03 Melon Sunset');
+    expect(html).toContain('background-color:#ff7b25');
+
+    expect(text).not.toContain('WM-86');
+    expect(text).not.toContain('METAL · TYPE IV');
+    expect(text).not.toContain('TOFU ×2');
+    expect(text).not.toContain('BAR ');
+    expect(text).not.toContain('BPM');
+    expect(html).not.toContain('<button');
   });
 
-  it('renders slack animation when damaged or soda spills', () => {
-    const text = renderClean(
+  it('renders wavy tape slack ribbon when damaged or spilled', () => {
+    const html = renderClean(
       createElement(CassetteTapeWidget, {
         ...defaultProps,
         isSlack: true,
       }),
     );
 
-    expect(text).toContain('TAPE SLACK');
-    expect(text).toContain('<svg');
+    expect(html).toContain('<path d="M 0,6 Q 25,12 50,2 Q 75,12 100,6"');
   });
 
-  it('renders compact toggle button when hidden', () => {
-    const text = renderClean(
+  it('returns null when hidden (configuration locked during driving)', () => {
+    const html = renderToString(
       createElement(CassetteTapeWidget, {
         ...defaultProps,
         visible: false,
       }),
     );
 
-    expect(text).toContain('⏏ Midnight Drive [C]');
-    expect(text).not.toContain('METAL · TYPE IV');
-  });
-
-  it('renders Master Overdrive variant on OVERDRIVE tier', () => {
-    const text = renderClean(
-      createElement(CassetteTapeWidget, {
-        ...defaultProps,
-        grooveTier: 'OVERDRIVE',
-      }),
-    );
-
-    expect(text).toContain('GOLD · OVERDRIVE');
-  });
-
-  it('renders playlist track badge when multiple tracks exist in playlist', () => {
-    const text = renderClean(
-      createElement(CassetteTapeWidget, {
-        ...defaultProps,
-        playlistIndex: 1,
-        playlistLength: 4,
-      }),
-    );
-
-    expect(text).toContain('[2/4]');
-  });
-
-  it('renders groove section role badge cleanly', () => {
-    const text = renderClean(
-      createElement(CassetteTapeWidget, {
-        ...defaultProps,
-        sectionRole: 'groove',
-      }),
-    );
-
-    expect(text).toContain('groove');
+    expect(html).toBe('');
   });
 });

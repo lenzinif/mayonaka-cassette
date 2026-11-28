@@ -112,6 +112,27 @@ describe('InputManager (Keyboard + Gamepad API M8)', () => {
     input.dispose();
   });
 
+  it('locks live configuration hotkeys (KeyG, KeyT, KeyV) during driving per docs/UI.md §1.2', () => {
+    const target = new MockEventTarget() as unknown as Window;
+    const input = new InputManager(target);
+
+    for (const code of ['KeyG', 'KeyT', 'KeyV']) {
+      target.dispatchEvent({
+        type: 'keydown',
+        code,
+        timeStamp: 510,
+        preventDefault: () => {},
+      } as unknown as Event);
+    }
+
+    expect(input.isDown('autoShift')).toBe(false);
+    expect(input.isDown('tofuMode')).toBe(false);
+    expect(input.isDown('cycleSodaSkin')).toBe(false);
+    expect(input.consumePresses()).toHaveLength(0);
+
+    input.dispose();
+  });
+
   it('ignores keyboard events when defaultPrevented is true (modal Escape close)', () => {
     const target = new MockEventTarget() as unknown as Window;
     const input = new InputManager(target);

@@ -152,18 +152,22 @@ describe('MelonSoda & Tofu Mode (M5)', () => {
     expect(soda.effectivePeakAngle).toBeLessThan(tuning.sodaSpillThreshold);
   });
 
-  it('draws static skin header instead of SPILL! -GROOVE / CREST! / SLOSH popup text', () => {
+  it('renders bottom-right Tofu Mode cup with strictly zero text (docs/UI.md §5.2.3)', () => {
     const soda = new MelonSoda();
     soda.setActive(true);
     soda.sloshState = 'SPILLING';
     soda.spillFlash = 0.5;
 
     const fillTextCalls: string[] = [];
+    const strokeTextCalls: string[] = [];
+    const translateCalls: Array<[number, number]> = [];
     const noop = vi.fn();
     const mockCtx = {
       save: noop,
       restore: noop,
-      translate: noop,
+      translate: vi.fn((x: number, y: number) => {
+        translateCalls.push([x, y]);
+      }),
       rotate: noop,
       fillRect: noop,
       strokeRect: noop,
@@ -179,26 +183,21 @@ describe('MelonSoda & Tofu Mode (M5)', () => {
       fillText: vi.fn((text: string) => {
         fillTextCalls.push(text);
       }),
+      strokeText: vi.fn((text: string) => {
+        strokeTextCalls.push(text);
+      }),
     } as unknown as CanvasRenderingContext2D;
 
-    drawMelonSodaInset(mockCtx, soda, 360, 1);
-
-    expect(fillTextCalls).toEqual(['SODA // x2']);
-    expect(fillTextCalls.join(' ')).not.toContain('SPILL!');
-    expect(fillTextCalls.join(' ')).not.toContain('GROOVE');
-    expect(fillTextCalls.join(' ')).not.toContain('CREST!');
-    expect(fillTextCalls.join(' ')).not.toContain('SLOSH');
-
-    fillTextCalls.length = 0;
     for (const skin of SODA_SKINS) {
       soda.skin = skin;
-      drawMelonSodaInset(mockCtx, soda, 360, 1);
+      drawMelonSodaInset(mockCtx, soda, 640, 360, 1);
     }
-    expect(fillTextCalls).toEqual([
-      'SODA // x2',
-      'TOFU CUP // x2',
-      'POCARI // x2',
-      'BOSS CAN // x2',
-    ]);
+    expect(translateCalls.length).toBe(SODA_SKINS.length);
+    for (const [cx, cy] of translateCalls) {
+      expect(cx).toBeGreaterThan(320);
+      expect(cy).toBeGreaterThan(180);
+    }
+    expect(fillTextCalls).toEqual([]);
+    expect(strokeTextCalls).toEqual([]);
   });
 });

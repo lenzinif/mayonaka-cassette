@@ -3,23 +3,14 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { PauseMenu } from './PauseMenu';
 
-describe('PauseMenu (UI Layer)', () => {
+describe('PauseMenu (Right-Edge Portable Player — docs/UI.md §4)', () => {
   const defaultProps = {
     open: true,
-    stageNumber: 1,
-    stagePaletteName: 'SUNSET BOULEVARD',
-    stageScore: 12500,
-    lap: 2,
-    lapTime: 45.67,
     trackTitle: 'Neon Horizon',
     trackArtist: 'Mayonaka FM',
     bpm: 122,
-    groove: 75,
-    grooveTier: 'HIGH' as const,
     tofuMode: false,
     sodaSkin: 'melon-soda' as const,
-    sodaSpills: 0,
-    cleanHud: false,
     showPerfHud: false,
     autoShift: false,
     autopilotActive: false,
@@ -31,11 +22,11 @@ describe('PauseMenu (UI Layer)', () => {
     onToggleDebug: vi.fn(),
     onToggleTofuMode: vi.fn(),
     onCycleSodaSkin: vi.fn(),
-    onToggleCleanHud: vi.fn(),
     onTogglePerfHud: vi.fn(),
     onToggleAutoShift: vi.fn(),
     onToggleAutopilot: vi.fn(),
     onToggleCrt: vi.fn(),
+    onReturnToMainMenu: vi.fn(),
   };
 
   it('renders null when open is false', () => {
@@ -43,129 +34,66 @@ describe('PauseMenu (UI Layer)', () => {
     expect(html).toBe('');
   });
 
-  it('renders J-Card pause menu with header, session strip, actions, and dev bar', () => {
+  it('renders MAYONAKA portable player with strictly 5 side menu items and zero real-world brands', () => {
     const rawHtml = renderToString(createElement(PauseMenu, defaultProps));
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
+    const text = rawHtml.replace(/<!--.*?-->/g, '').replace(/&#x27;/g, "'");
 
-    expect(text).toContain('PAUSED');
-    expect(text).toContain('STAGE 01');
-    expect(text).toContain('122.0 BPM');
-
-    expect(text).toContain('Mayonaka FM — Neon Horizon');
-    expect(text).toContain('GROOVE 75%');
-    expect(text).toContain('HIGH');
-    expect(text).toContain((12500).toLocaleString());
-    expect(text).toContain('PTS');
-    expect(text).toContain('LAP 2');
-    expect(text).toContain('00:45.67');
-
-    expect(text).toContain('RESUME [P]');
+    expect(text).toContain('MAYONAKA');
+    expect(text).toContain('Neon Horizon');
+    expect(text).toContain('RESUME');
     expect(text).toContain('RESTART');
-    expect(text).toContain('CASSETTES [M]');
     expect(text).toContain('OPTIONS');
-    expect(text).toContain('CONTROLS');
+    expect(text).toContain('GUIDE');
+    expect(text).toContain('EXIT TO TITLE');
 
-    expect(text).toContain('DEV');
-    expect(text).toContain('[F2] TUNING');
-    expect(text).toContain('[F3] PERF: OFF');
-    expect(text).toContain('[F4] AUTO: OFF');
-    expect(text).toContain('BEATMAP LAB');
+    expect(text).not.toContain('SONY');
+    expect(text).not.toContain('WALKMAN');
+    expect(text).not.toContain('WM-86');
+    expect(text).not.toContain('SERVICE BUS');
   });
 
-  it('renders personal best and last lap time when available in session stats', () => {
-    const rawHtml = renderToString(
-      createElement(PauseMenu, {
-        ...defaultProps,
-        bestSongGrade: 'S',
-        bestSongScore: 54000,
-        lastLapTime: 42.15,
-      }),
-    );
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
-    expect(text).toContain(`BEST S · ${(54000).toLocaleString()}`);
-    expect(text).toContain('LAST 00:42.15');
-  });
-
-  it('renders EXIT TO TITLE button when onReturnToMainMenu is provided', () => {
-    const onReturn = vi.fn();
-    const rawHtml = renderToString(
-      createElement(PauseMenu, { ...defaultProps, onReturnToMainMenu: onReturn }),
-    );
-    expect(rawHtml).toContain('EXIT TO TITLE');
-  });
-
-  it('renders options sub-view with toggle rows and back button', () => {
+  it('renders shared OptionsPanel docked left when initialView is options', () => {
     const rawHtml = renderToString(
       createElement(PauseMenu, {
         ...defaultProps,
         initialView: 'options',
         tofuMode: true,
-        sodaSpills: 3,
         autoShift: true,
-        cleanHud: true,
-        crtEnabled: true,
+        sodaSkin: 'pocari',
       }),
     );
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
+    const text = rawHtml.replace(/<!--.*?-->/g, '').replace(/&#x27;/g, "'");
 
-    expect(text).toContain('OPTIONS');
-    expect(text).toContain('BACK [ESC]');
-    expect(text).toContain('GEARBOX [G]');
-    expect(text).toContain('AUTO-SHIFT');
-    expect(text).toContain('TOFU MODE [T]');
-    expect(text).toContain('ON (×2) [3]');
-    expect(text).toContain('DASHBOARD CUP [V]');
-    expect(text).toContain('MELON SODA');
-    expect(text).toContain('HUD [H]');
-    expect(text).toContain('MINIMAL');
-    expect(text).toContain('CRT SCANLINES');
-    expect(text).toContain('ON');
-    expect(text).not.toContain('BACK TO PAUSE');
+    expect(text).toContain('GEARBOX');
+    expect(text).toContain('AUTO');
+    expect(text).toContain('TOFU CUP');
+    expect(text).toContain('DRINK');
+    expect(text).toContain('ION DRINK');
+    expect(text).toContain('CRT');
+    expect(text).toContain('DASH');
+    expect(text).toContain('TAPE + LIST');
+    expect(text).toContain('VISOR (0/5)');
+    expect(text).toContain('+ LOAD CASSETTE');
+    expect(text).not.toContain('POCARI');
+    expect(text).not.toContain('GEARBOX [G]');
+    expect(text).not.toContain('TOFU MODE [T]');
   });
 
-  it('renders cockpit module switches and presets in options view when cockpit handlers are provided', () => {
+  it('renders handwritten BackGuideSheet when initialView is guide', () => {
     const rawHtml = renderToString(
       createElement(PauseMenu, {
         ...defaultProps,
-        initialView: 'options',
-        onToggleCockpitModule: vi.fn(),
-        onApplyCockpitPreset: vi.fn(),
+        initialView: 'guide',
       }),
     );
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
+    const text = rawHtml.replace(/<!--.*?-->/g, '').replace(/&#x27;/g, "'");
 
-    expect(text).toContain('COCKPIT MODULES');
-    expect(text).toContain('LUXURY FULL');
-    expect(text).toContain('CLEAN DRIVE');
-    expect(text).toContain('INSTRUMENTS (VFD)');
-    expect(text).toContain('AUTORADIO PLAYLIST');
-    expect(text).toContain('SUN VISOR PHOTO');
-    expect(text).toContain('CASSETTE DECK [C]');
-    expect(text).toContain('VISOR PHOTO');
-  });
-
-  it('renders controls sub-view with 2-column reference card', () => {
-    const rawHtml = renderToString(
-      createElement(PauseMenu, {
-        ...defaultProps,
-        initialView: 'controls',
-      }),
-    );
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
-
+    expect(text).toContain("DRIVER'S");
+    expect(text).toContain('GUIDE');
+    expect(text).toContain('BEAT-SHIFT');
+    expect(text).toContain('DRIFT');
+    expect(text).toContain('TOFU CUP');
     expect(text).toContain('CONTROLS');
     expect(text).toContain('BACK [ESC]');
-    expect(text).toContain('WASD / ARROWS');
-    expect(text).toContain('Steer &amp; Gas');
-    expect(text).toContain('S / DOWN + STEER');
-    expect(text).toContain('Drift');
-    expect(text).toContain('SPACE / SHIFT');
-    expect(text).toContain('Shift Up/Down');
-    expect(text).toContain('Auto-Shift');
-    expect(text).toContain('Tofu Mode');
-    expect(text).toContain('Cup Skin');
-    expect(text).toContain('Tape Widget');
-    expect(text).toContain('Minimal HUD');
-    expect(text).not.toContain('BACK TO PAUSE');
   });
 });

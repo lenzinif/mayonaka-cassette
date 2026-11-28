@@ -11,9 +11,9 @@ export const SODA_SKINS: readonly SodaSkin[] = [
 
 export const SODA_SKIN_LABELS: Readonly<Record<SodaSkin, string>> = {
   'melon-soda': 'MELON SODA',
-  'tofu-cup': 'TOFU WATER CUP',
-  pocari: 'POCARI SWEAT',
-  'boss-coffee': 'BOSS COFFEE',
+  'tofu-cup': 'WATER CUP',
+  pocari: 'ION DRINK',
+  'boss-coffee': 'CANNED COFFEE',
 };
 
 export type SodaSloshState = 'CALM' | 'SLOSHING' | 'CRESTING' | 'SPILLING';
@@ -429,13 +429,6 @@ export class MelonSoda {
 
 const ICE_POSITIONS = [-8, 7] as const;
 
-const SODA_FASCIA_LABELS: Readonly<Record<SodaSkin, string>> = {
-  'melon-soda': 'SODA // x2',
-  'tofu-cup': 'TOFU CUP // x2',
-  pocari: 'POCARI // x2',
-  'boss-coffee': 'BOSS CAN // x2',
-};
-
 function computeWaveYAt(
   xNorm: number,
   baseLevelY: number,
@@ -454,17 +447,16 @@ function computeWaveYAt(
 }
 
 /**
- * Renders the diegetic 80s JDM dashboard cup-holder shelf & Melon Cream Soda cup
- * physically resting at bottom-left of the `<canvas>` ONLY when Tofu Mode (`soda.active`)
- * is enabled (AGENTS.md §4.9, docs/DESIGN.md §5).
+ * Renders the diegetic 80s JDM dashboard cup-holder shelf & drink container
+ * physically resting at bottom-right of the `<canvas>` ONLY when Tofu Mode (`soda.active`)
+ * is enabled (AGENTS.md §4.9, docs/DESIGN.md §5, docs/UI.md §5.2.3).
  *
- * Uses multi-mode wave interpolation (`theta`, `crestWave`, `heaveY`, `floatY`, `floatTilt`)
- * so the liquid surface, foam crest, ice cubes, vanilla float, and droplets animate at full
- * display refresh rate with zero heap allocations.
+ * Strictly zero text, labels, badges, or numeric bars — pure physical hardware & liquid dynamics.
  */
 export function drawMelonSodaInset(
   ctx: CanvasRenderingContext2D,
   soda: MelonSoda,
+  canvasWidth: number,
   canvasHeight: number,
   alpha = 1,
 ): void {
@@ -484,80 +476,48 @@ export function drawMelonSodaInset(
   const isSpilling = soda.spillFlash > 0.05 || soda.sloshState === 'SPILLING';
   const isCresting = soda.sloshState === 'CRESTING';
 
+  const shelfWidth = 196;
+  const shelfLeftX = canvasWidth - shelfWidth;
   const shelfTopY = canvasHeight - 36;
-  const shelfRightX = 132;
-  const cx = 64;
+  const cx = canvasWidth - 134;
   const cupScale = 1.18;
   const cy = canvasHeight - 48;
 
   ctx.save();
 
-  // 1. Sculpted 80s JDM Luxury GT left-side dashboard ledge (leather brow + woodgrain fascia)
+  // 1. Sculpted 80s JDM Luxury GT right-side dashboard ledge (leather brow + woodgrain fascia, zero text)
   ctx.fillStyle = isSpilling ? '#26101c' : '#141118';
   ctx.beginPath();
-  ctx.moveTo(0, shelfTopY);
-  ctx.lineTo(shelfRightX - 16, shelfTopY);
-  ctx.lineTo(shelfRightX, shelfTopY + 14);
-  ctx.lineTo(shelfRightX, canvasHeight);
-  ctx.lineTo(0, canvasHeight);
+  ctx.moveTo(shelfLeftX + 16, shelfTopY);
+  ctx.lineTo(canvasWidth, shelfTopY);
+  ctx.lineTo(canvasWidth, canvasHeight);
+  ctx.lineTo(shelfLeftX, canvasHeight);
+  ctx.lineTo(shelfLeftX, shelfTopY + 14);
   ctx.closePath();
   ctx.fill();
 
   // Leather upper bevel highlight & warm saddle stitch ticks
   ctx.fillStyle = isSpilling ? '#441a2e' : '#241e2b';
-  ctx.fillRect(0, shelfTopY, shelfRightX - 16, 2);
+  ctx.fillRect(shelfLeftX + 16, shelfTopY, shelfWidth - 16, 2);
   ctx.fillStyle = isSpilling ? '#ff4778' : 'rgba(214, 174, 114, 0.42)';
-  for (let sx = 4; sx < shelfRightX - 20; sx += 7) {
+  for (let sx = shelfLeftX + 20; sx < canvasWidth - 4; sx += 7) {
     ctx.fillRect(sx, shelfTopY + 3, 4, 1);
   }
 
   // Warm woodgrain fascia strip along the front face of the dash shelf
   const woodY = canvasHeight - 22;
   ctx.fillStyle = '#3a1f16';
-  ctx.fillRect(0, woodY, shelfRightX - 4, 18);
+  ctx.fillRect(shelfLeftX + 4, woodY, shelfWidth - 4, 18);
   ctx.fillStyle = '#4e2a1e';
-  for (let wx = 6; wx < shelfRightX - 10; wx += 12) {
+  for (let wx = shelfLeftX + 10; wx < canvasWidth - 6; wx += 12) {
     ctx.fillRect(wx, woodY + 2, 4, 14);
   }
 
   // Satin brass trim line (turns coral/amber when cresting/spilling)
   ctx.fillStyle = isSpilling ? '#ff4778' : isCresting ? '#ffbd4a' : '#d9a75c';
-  ctx.fillRect(0, woodY, shelfRightX - 4, 1);
+  ctx.fillRect(shelfLeftX + 4, woodY, shelfWidth - 4, 1);
   ctx.fillStyle = 'rgba(217, 167, 92, 0.35)';
-  ctx.fillRect(0, canvasHeight - 4, shelfRightX, 1);
-
-  // Recessed nameplate & integrated LED danger bar + spill pips on woodgrain fascia
-  ctx.fillStyle = '#070b10';
-  ctx.fillRect(4, woodY + 3, shelfRightX - 12, 13);
-  ctx.strokeStyle = isSpilling ? '#ff4778' : 'rgba(217, 167, 92, 0.38)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(4.5, woodY + 3.5, shelfRightX - 13, 12);
-
-  ctx.fillStyle = isSpilling ? '#ffffff' : isCresting ? '#ffbd4a' : '#f4ead8';
-  ctx.font = 'bold 8px monospace';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillText(SODA_FASCIA_LABELS[soda.skin] ?? SODA_FASCIA_LABELS['melon-soda'], 8, woodY + 12);
-
-  // Micro LED danger meter in fascia right side
-  const meterW = 30;
-  const meterX = shelfRightX - meterW - 12;
-  const meterY = woodY + 6;
-  ctx.fillStyle = '#121722';
-  ctx.fillRect(meterX, meterY, meterW, 4);
-  ctx.fillStyle = danger >= 0.95 ? '#ff4778' : danger >= 0.7 ? '#ffbd4a' : '#38f2c8';
-  ctx.fillRect(
-    meterX,
-    meterY,
-    Math.min(meterW, Math.round(meterW * Math.min(1, danger))),
-    4,
-  );
-
-  // Compact spill counter pips beneath the LED bar (up to 5 pips)
-  for (let p = 0; p < 5; p++) {
-    ctx.fillStyle = p < soda.spillCount ? '#ff4778' : '#2a1c22';
-    ctx.fillRect(meterX + p * 6, meterY + 6, 4, 2);
-  }
+  ctx.fillRect(shelfLeftX, canvasHeight - 4, shelfWidth, 1);
 
   // 2. Cup-holder rubber coaster & brass well on top of the dash shelf
   const coasterY = shelfTopY + 8;

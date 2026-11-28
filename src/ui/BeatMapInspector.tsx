@@ -542,7 +542,7 @@ export function BeatMapInspector({ onClose }: BeatMapInspectorProps) {
 
   return (
     <div
-      className="pointer-events-auto absolute inset-0 z-30 flex flex-col overflow-hidden bg-[#070112]/95 font-mono text-xs text-fuchsia-100 backdrop-blur-md"
+      className="pointer-events-auto absolute inset-0 z-30 flex flex-col overflow-hidden bg-[#070112]/96 font-mono text-xs text-fuchsia-100"
       style={{ colorScheme: 'dark', scrollbarColor: '#e879f9 #1a0633', scrollbarWidth: 'thin' }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {

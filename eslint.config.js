@@ -18,7 +18,7 @@ const PURE_LAYERS = [
 ];
 
 export default defineConfig(
-  { ignores: ['dist', 'node_modules', 'scripts', '**/*.cjs'] },
+  { ignores: ['dist', 'node_modules', 'scripts', 'audit-out', '**/*.cjs'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
