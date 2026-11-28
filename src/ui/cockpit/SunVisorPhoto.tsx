@@ -8,8 +8,67 @@ export interface SunVisorPhotoProps {
   photoUrl?: string | null;
 }
 
-const CHAIN_TILTS = ['-3.5deg', '3deg', '-2deg', '4deg', '-2.5deg'] as const;
-const CHAIN_OFFSETS = ['-4px', '6px', '-6px', '7px', '-2px'] as const;
+interface ChainSlotConfig {
+  offsetX: string;
+  tiltDeg: string;
+  origin: string;
+  fastener: 'double-tape' | 'tape' | 'paperclip';
+  fastenerPosClass: string;
+  fastenerRotateDeg: number;
+  secondaryPosClass?: string;
+  secondaryRotateDeg?: number;
+}
+
+/**
+ * Physically-coupled attachment progression (`docs/UI.md §5.2.4`):
+ * - Slot 0 sits neatly pinned with two corner masking-tape strips (shifted slightly right).
+ * - Subsequent slots hang from single off-center paperclips or single tape strips,
+ *   growing progressively more crooked (`0.5° -> -2.5° -> +4.5° -> -6° -> +7.5°`).
+ */
+const CHAIN_SLOTS: readonly ChainSlotConfig[] = [
+  {
+    offsetX: '3.4cqh',
+    tiltDeg: '0.5deg',
+    origin: '50% 0%',
+    fastener: 'double-tape',
+    fastenerPosClass: 'left-[6%]',
+    fastenerRotateDeg: -26,
+    secondaryPosClass: 'right-[6%]',
+    secondaryRotateDeg: 22,
+  },
+  {
+    offsetX: '1.2cqh',
+    tiltDeg: '-2.5deg',
+    origin: '62% 0%',
+    fastener: 'paperclip',
+    fastenerPosClass: 'left-[62%]',
+    fastenerRotateDeg: 3,
+  },
+  {
+    offsetX: '-1.6cqh',
+    tiltDeg: '4.5deg',
+    origin: '16% 0%',
+    fastener: 'tape',
+    fastenerPosClass: 'left-[10%]',
+    fastenerRotateDeg: -26,
+  },
+  {
+    offsetX: '-2.6cqh',
+    tiltDeg: '-6deg',
+    origin: '72% 0%',
+    fastener: 'paperclip',
+    fastenerPosClass: 'left-[72%]',
+    fastenerRotateDeg: -5,
+  },
+  {
+    offsetX: '-0.8cqh',
+    tiltDeg: '7.5deg',
+    origin: '18% 0%',
+    fastener: 'tape',
+    fastenerPosClass: 'left-[12%]',
+    fastenerRotateDeg: -31,
+  },
+] as const;
 
 function DefaultVisorPostcard() {
   const skyGradId = useId();
@@ -46,25 +105,60 @@ function DefaultVisorPostcard() {
   );
 }
 
-function PaperclipGlyph() {
+function MaskingTapeStrip({ rotateDeg }: { rotateDeg: number }) {
   return (
     <svg
       aria-hidden="true"
-      className="pointer-events-none h-7 w-4 drop-shadow-[0_2px_2px_rgba(0,0,0,0.65)]"
+      viewBox="0 0 64 20"
+      style={{ transform: `rotate(${rotateDeg}deg)` }}
+      className="pointer-events-none h-[2.0cqh] w-[6.4cqh] drop-shadow-[0_2px_3px_rgba(0,0,0,0.45)]"
+      preserveAspectRatio="none"
+    >
+      <path
+        d="M2 2 L14 1 L32 2 L50 1 L62 2.5 L60 7 L63 12 L61 18.5 L44 17.5 L22 19 L3 17.5 L1 12 L3 7 Z"
+        fill="rgba(243, 227, 174, 0.84)"
+      />
+      <path
+        d="M3 4.5 L60 4.8"
+        stroke="rgba(255, 250, 232, 0.45)"
+        strokeWidth="1.1"
+      />
+      <path
+        d="M2 16.5 L61 16.2"
+        stroke="rgba(168, 138, 72, 0.28)"
+        strokeWidth="1"
+      />
+    </svg>
+  );
+}
+
+function PaperclipGlyph({ rotateDeg = 0 }: { rotateDeg?: number }) {
+  return (
+    <svg
+      aria-hidden="true"
+      style={{ transform: `rotate(${rotateDeg}deg)` }}
+      className="pointer-events-none h-[4.2cqh] w-[2.4cqh] drop-shadow-[0_2px_2px_rgba(0,0,0,0.68)]"
       viewBox="0 0 18 32"
       fill="none"
     >
       <path
-        d="M5 24 V8 C5 4, 13 4, 13 8 V25 C13 29, 4 29, 4 24 V10 C4 7.5, 10 7.5, 10 10 V22"
-        stroke="#d8dee9"
-        strokeWidth="2.1"
+        d="M5 18 V7 C5 3.5, 13 3.5, 13 7 V25 C13 29, 4.5 29, 4.5 25 V11.5 C4.5 9, 10 9, 10 11.5 V22.5"
+        stroke="#3b4252"
+        strokeWidth="3.0"
         strokeLinecap="round"
       />
       <path
-        d="M5 24 V8 C5 4, 13 4, 13 8 V25 C13 29, 4 29, 4 24 V10 C4 7.5, 10 7.5, 10 10 V22"
-        stroke="#4c566a"
-        strokeWidth="0.6"
+        d="M5 18 V7 C5 3.5, 13 3.5, 13 7 V25 C13 29, 4.5 29, 4.5 25 V11.5 C4.5 9, 10 9, 10 11.5 V22.5"
+        stroke="#d8dee9"
+        strokeWidth="1.9"
         strokeLinecap="round"
+      />
+      <path
+        d="M5.4 16 V7.4 C5.4 4.8, 12.2 4.8, 12.2 7.4 V24.5"
+        stroke="#ffffff"
+        strokeWidth="0.65"
+        strokeLinecap="round"
+        opacity="0.7"
       />
     </svg>
   );
@@ -86,65 +180,80 @@ export const SunVisorPhoto = memo(function SunVisorPhoto({
         : [];
 
   return (
-    <div className="pointer-events-none relative flex origin-top-right scale-90 flex-col items-end select-none sm:scale-100 [contain:layout]">
+    <div className="pointer-events-none relative flex origin-top-right flex-col items-center select-none [contain:layout]">
       {/* Dual roof visor hinge brackets */}
-      <div className="flex w-52 justify-between px-6 sm:w-64">
-        <span className="h-2 w-6 rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.45)] bg-[#231d29]" />
-        <span className="h-2 w-6 rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.45)] bg-[#231d29]" />
+      <div className="flex w-[52cqh] justify-between px-[6cqh]">
+        <span className="h-[1.6cqh] w-[4.4cqh] rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.45)] bg-[#231d29]" />
+        <span className="h-[1.6cqh] w-[4.4cqh] rounded-b-[1px] border-x border-b border-[rgba(217,167,92,0.45)] bg-[#231d29]" />
       </div>
 
       {/* Oversized folded dark-leather sun visor flap */}
-      <div className="ck-visor-shell relative h-12 w-52 rounded-b-[10px] sm:h-14 sm:w-64">
+      <div className="ck-visor-shell relative h-[12.5cqh] w-[52cqh] rounded-b-[1.6cqh]">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-4 bottom-2 h-0 border-b border-dashed border-[rgba(214,174,114,0.3)]"
+          className="pointer-events-none absolute inset-x-[2.5cqh] bottom-[1.4cqh] h-0 border-b border-dashed border-[rgba(214,174,114,0.3)]"
         />
       </div>
 
-      {/* Cascading Polaroid / Postcard Stack hanging along far-right windshield edge */}
-      <div className="-mt-6 mr-1 flex flex-col items-center sm:mr-2">
+      {/* Cascading Polaroid / Postcard Stack hanging sloppily from visor */}
+      <div className="-mt-[5.6cqh] flex flex-col items-center">
         {effectivePhotos.length === 0 ? (
-          <div className="relative -rotate-2 rounded-[2px] border-[4px] border-b-[12px] border-[#efe7d6] bg-[#efe7d6] shadow-[0_6px_16px_rgba(0,0,0,0.72)]">
-            <span
-              aria-hidden="true"
-              className="absolute -top-2 -left-3 z-20 h-3 w-10 -rotate-30 bg-[#f5e7b8]/85 shadow-sm"
-            />
-            <div className="h-[80px] w-[128px] overflow-hidden bg-[#110c19] sm:h-[88px] sm:w-[140px]">
+          <div
+            style={{
+              transform: 'translateX(3.2cqh) rotate(0.5deg)',
+              transformOrigin: '50% 0%',
+            }}
+            className="relative rounded-[2px] border-[0.55cqh] border-b-[1.6cqh] border-[#f1ead9] bg-[#f1ead9] shadow-[0_8px_18px_rgba(0,0,0,0.75)]"
+          >
+            <div className="absolute -top-[1.4cqh] left-[6%] z-20">
+              <MaskingTapeStrip rotateDeg={-26} />
+            </div>
+            <div className="absolute -top-[1.4cqh] right-[6%] z-20">
+              <MaskingTapeStrip rotateDeg={22} />
+            </div>
+            <div className="h-[17cqh] w-[27.5cqh] overflow-hidden bg-[#110c19] shadow-[inset_0_0_2px_rgba(0,0,0,0.45)]">
               <DefaultVisorPostcard />
             </div>
           </div>
         ) : (
           effectivePhotos.map((item, idx) => {
-            const tilt = CHAIN_TILTS[idx % CHAIN_TILTS.length]!;
-            const offset = CHAIN_OFFSETS[idx % CHAIN_OFFSETS.length]!;
-            const usePaperclip = idx % 2 === 1;
+            const slot = CHAIN_SLOTS[idx % CHAIN_SLOTS.length]!;
 
             return (
               <div
                 key={item.id}
-                style={{ transform: `translateX(${offset}) rotate(${tilt})` }}
-                className={`relative rounded-[2px] border-[4px] border-b-[12px] border-[#efe7d6] bg-[#efe7d6] shadow-[0_6px_16px_rgba(0,0,0,0.75)] ${
-                  idx === 0 ? '' : '-mt-2.5'
+                style={{
+                  transform: `translateX(${slot.offsetX}) rotate(${slot.tiltDeg})`,
+                  transformOrigin: slot.origin,
+                }}
+                className={`relative rounded-[2px] border-[0.55cqh] border-b-[1.6cqh] border-[#f1ead9] bg-[#f1ead9] shadow-[0_8px_18px_rgba(0,0,0,0.78)] ${
+                  idx === 0 ? '' : '-mt-[2.1cqh]'
                 }`}
               >
-                {usePaperclip ? (
-                  <div className="absolute -top-4 left-1/2 z-30 -translate-x-1/2">
-                    <PaperclipGlyph />
+                {slot.fastener === 'paperclip' ? (
+                  <div
+                    className={`absolute -top-[2.4cqh] z-30 -translate-x-1/2 ${slot.fastenerPosClass}`}
+                  >
+                    <PaperclipGlyph rotateDeg={slot.fastenerRotateDeg} />
                   </div>
                 ) : (
-                  <span
-                    aria-hidden="true"
-                    className={`absolute -top-2 z-20 h-3 w-9 bg-[#f5e7b8]/85 shadow-sm ${
-                      idx % 4 === 0 ? '-left-3 -rotate-28' : '-right-3 rotate-28'
-                    }`}
-                  />
+                  <>
+                    <div className={`absolute -top-[1.5cqh] z-20 ${slot.fastenerPosClass}`}>
+                      <MaskingTapeStrip rotateDeg={slot.fastenerRotateDeg} />
+                    </div>
+                    {slot.fastener === 'double-tape' && slot.secondaryPosClass && (
+                      <div className={`absolute -top-[1.5cqh] z-20 ${slot.secondaryPosClass}`}>
+                        <MaskingTapeStrip rotateDeg={slot.secondaryRotateDeg ?? 20} />
+                      </div>
+                    )}
+                  </>
                 )}
 
-                <div className="h-[76px] w-[94px] overflow-hidden bg-[#110c19] sm:h-[84px] sm:w-[106px]">
+                <div className="inline-block overflow-hidden bg-[#110c19] shadow-[inset_0_0_2px_rgba(0,0,0,0.45)]">
                   <img
                     src={item.dataUrl}
                     alt={`Pinned visor photo ${idx + 1}`}
-                    className="h-full w-full object-cover"
+                    className="block h-auto w-auto max-h-[18.6cqh] max-w-[31cqh]"
                   />
                 </div>
               </div>

@@ -26,8 +26,11 @@ describe('SunVisorPhoto (Top-Right Cascading Clutter — docs/UI.md §5.2.4)', (
     expect(html).toContain('Pinned visor photo 1');
     expect(html).toContain('Pinned visor photo 5');
     expect(html).not.toContain('Pinned visor photo 6');
-    expect(html).toContain('-mt-2.5');
-    expect(html).toContain('translateX(-4px) rotate(-3.5deg)');
+    expect(html).toContain('-mt-[2.1cqh]');
+    expect(html).toContain('translateX(3.4cqh) rotate(0.5deg)');
+    expect(html).toContain('translateX(-0.8cqh) rotate(7.5deg)');
+    expect(html).toContain('max-h-[18.6cqh] max-w-[31cqh]');
+    expect(html).not.toContain('object-cover');
     expect(html).not.toContain('<button');
   });
 });
