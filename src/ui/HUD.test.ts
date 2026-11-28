@@ -49,7 +49,9 @@ function createMockSnapshot(overrides: Partial<TelemetrySnapshot> = {}): Telemet
     sodaSpills: 1,
     activeParticles: 18,
     stageNumber: 2,
-    stagePaletteName: 'MIDNIGHT BAY',
+    stagePaletteId: 'og_future_funk',
+    stagePaletteName: 'SUNSET BOULEVARD',
+    stageAccentColor: '#ff7b25',
     playlistIndex: 1,
     playlistLength: 3,
     stageScore: 48200,
@@ -95,25 +97,20 @@ function createMockSnapshot(overrides: Partial<TelemetrySnapshot> = {}): Telemet
   };
 }
 
-describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
-  it('renders harmonized cassette widget, tofu strip, and VFD digidash without FPS clutter or alert popups', () => {
+describe('HUD (4-Quadrant Luxurious Clutter — docs/UI.md §5)', () => {
+  it('renders 4-quadrant clutter HUD with monochrome accent, bottom-left VFD, top-right visor, and zero interactive buttons', () => {
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
-    const snap = createMockSnapshot({
-      gear: 4,
-      rpm: 0.98,
-      isOffRoad: true,
-      isLugging: true,
-      isRedlining: true,
-      isOverdrive: true,
-      isDrifting: true,
-      lastShiftTier: 'PERFECT',
-    });
+    const snap = createMockSnapshot({ gear: 4, rpm: 0.92 });
     bridge.publish(() => snap);
 
     const rawHtml = renderToString(
       createElement(HUD, {
         bridge,
         debugOpen: false,
+        playlistItems: [
+          { id: '1', title: 'Neon Horizon', artist: 'Mayonaka FM', bpm: 122 },
+          { id: '2', title: 'Plastic Love Night', artist: 'Mayonaka FM', bpm: 126 },
+        ],
         onToggleDebug: vi.fn(),
         onOpenTrackLoader: vi.fn(),
         onOpenInspector: vi.fn(),
@@ -122,58 +119,34 @@ describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('Mayonaka FM — Plastic Love Night');
-    expect(text).toContain('2/3');
-    expect(text).toContain('126.0 BPM');
-    expect(text).toContain('BAR 016.1');
-    expect(text).toContain('GOLD · OVERDRIVE');
-    expect(text).toContain('88%');
+    // Top-left cassette + adjacent playlist + monochrome theme accent
+    expect(text).toContain('Plastic Love Night');
+    expect(text).toContain('01 Neon Horizon');
+    expect(text).toContain('02 Plastic Love Night');
+    expect(rawHtml).toContain('background-color:#ff7b25');
 
-    expect(text).toContain('TOFU ×2');
-    expect(text).not.toContain('1 SPILL');
-    expect(text).toContain('GP');
-
-    expect(text).toContain('88.4 FM · DIN TUNER');
-    expect(text).toContain('SUN VISOR');
-    expect(text).toContain('GROOVE');
+    // Bottom-left VFD speedometer & tachometer
     expect(text).toContain('214');
     expect(text).toContain('KM/H');
-    expect(text).toContain('OVERDRIVE');
-    expect(text).toContain('SHIFT BEAT');
+    expect(text).toContain('RPM');
+    expect(text).toContain('GROOVE');
+    expect(text).toContain('4');
 
-    expect(text).not.toContain('120 FPS');
-    expect(text).not.toContain('GROOVE FLUX');
-    expect(text).not.toContain('72–90% BEAT ZONE');
-    expect(text).not.toContain('🤖');
-    expect(text).not.toContain('OFF-ROAD');
-    expect(text).not.toContain('DRIFTING 1.4S');
-    expect(text).not.toContain('BOGGING! DOWNSHIFT');
-    expect(text).not.toContain('REV LIMIT! SHIFT UP');
-    expect(text).not.toContain('SHIFT ON BEAT [SPACE]');
-    expect(text).not.toContain('LAST SHIFT:');
-    expect(text).not.toContain('PRESS ANY KEY OR DRIVE TO START SYNTH AUDIO');
+    // Top-right Sun Visor
+    expect(rawHtml).toContain('Default retro manga Tokyo night postcard');
+
+    // Strictly zero interactive buttons & zero AI-slop copy during driving
+    expect(rawHtml).not.toContain('<button');
+    expect(text).not.toContain('DIGITAL COCKPIT');
+    expect(text).not.toContain('GT-APEX');
+    expect(text).not.toContain('SHIFT BEAT');
+    expect(text).not.toContain('WM-86');
+    expect(text).not.toContain('88.4 FM');
+    expect(text).not.toContain('SUN VISOR');
+    expect(text).not.toContain('HUD H');
   });
 
-  it('does not render audio unlock banner when audioUnlocked is false', () => {
-    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
-    const snap = createMockSnapshot({ audioUnlocked: false });
-    bridge.publish(() => snap);
-
-    const rawHtml = renderToString(
-      createElement(HUD, {
-        bridge,
-        debugOpen: false,
-        onToggleDebug: vi.fn(),
-        onOpenTrackLoader: vi.fn(),
-        onOpenInspector: vi.fn(),
-        onRestartRun: vi.fn(),
-      }),
-    );
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
-    expect(text).not.toContain('PRESS ANY KEY OR DRIVE TO START SYNTH AUDIO');
-  });
-
-  it('renders session telemetry and personal best inside PauseMenu when paused', () => {
+  it('renders right-edge MAYONAKA PauseMenu when paused', () => {
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
     const snap = createMockSnapshot({ isPaused: true });
     bridge.publish(() => snap);
@@ -190,13 +163,12 @@ describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('PAUSED');
-    expect(text).toContain('STAGE 02');
-    expect(text).toContain((48200).toLocaleString());
-    expect(text).toContain(`BEST S · ${(52000).toLocaleString()}`);
-    expect(text).toContain('LAP 2');
-    expect(text).toContain('01:03.45');
-    expect(text).toContain('LAST 00:58.12');
+    expect(text).toContain('MAYONAKA');
+    expect(text).toContain('RESUME');
+    expect(text).toContain('RESTART');
+    expect(text).toContain('OPTIONS');
+    expect(text).toContain('GUIDE');
+    expect(text).toContain('EXIT TO TITLE');
   });
 
   it('does not render PauseMenu when trackLoaderOpen is true even if isPaused is true', () => {
@@ -217,10 +189,10 @@ describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
     );
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).not.toContain('RESUME [P]');
+    expect(text).not.toContain('EXIT TO TITLE');
   });
 
-  it('renders null when gameStarted is false, preventing premature in-game overlay and pause menu', () => {
+  it('renders null when gameStarted is false', () => {
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
     const snap = createMockSnapshot({ isPaused: true });
     bridge.publish(() => snap);
@@ -245,7 +217,7 @@ describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
     const snap = createMockSnapshot();
     bridge.publish(() => snap);
 
-    const text = renderToString(
+    const rawHtml = renderToString(
       createElement(HUD, {
         bridge,
         debugOpen: false,
@@ -260,36 +232,11 @@ describe('HUD (Mayonaka Hi-Fi Cockpit Overlay)', () => {
         onOpenInspector: vi.fn(),
         onRestartRun: vi.fn(),
       }),
-    ).replace(/<!--.*?-->/g, '');
+    );
+    const text = rawHtml.replace(/<!--.*?-->/g, '');
 
-    expect(text).toContain('Mayonaka FM — Plastic Love Night');
-    expect(text).not.toContain('88.4 FM · DIN TUNER');
-    expect(text).not.toContain('SUN VISOR');
-    expect(text).not.toContain('KM/H');
-  });
-
-  it('hides all cockpit modules including CassetteTapeWidget when cleanHud [H] is enabled', () => {
-    const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
-    const snap = createMockSnapshot();
-    bridge.publish(() => snap);
-
-    const text = renderToString(
-      createElement(HUD, {
-        bridge,
-        debugOpen: false,
-        cleanHud: true,
-        onToggleDebug: vi.fn(),
-        onOpenTrackLoader: vi.fn(),
-        onOpenInspector: vi.fn(),
-        onRestartRun: vi.fn(),
-      }),
-    ).replace(/<!--.*?-->/g, '');
-
-    expect(text).toContain('FULL H');
-    expect(text).not.toContain('WM-86 · STEREO CASSETTE');
-    expect(text).not.toContain('Plastic Love Night [C]');
-    expect(text).not.toContain('88.4 FM · DIN TUNER');
-    expect(text).not.toContain('SUN VISOR');
+    expect(text).toContain('Plastic Love Night');
+    expect(rawHtml).not.toContain('Default retro manga Tokyo night postcard');
     expect(text).not.toContain('KM/H');
   });
 });

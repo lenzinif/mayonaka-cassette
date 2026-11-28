@@ -4,7 +4,7 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { TrackLoader } from './TrackLoader';
 
-describe('TrackLoader (UI Layer — Cassette Deck & Playlist)', () => {
+describe('TrackLoader (Tapes Drawer & Optional Mixing — docs/UI.md §3.3–3.4)', () => {
   it('renders null when open is false', () => {
     const library = new TrackLibrary();
     const html = renderToString(
@@ -19,7 +19,7 @@ describe('TrackLoader (UI Layer — Cassette Deck & Playlist)', () => {
     expect(html).toBe('');
   });
 
-  it('renders stage playlist with English remove buttons and restore defaults button', () => {
+  it('renders crisp TAPES header, + ADD TRACKS, manual PREVIEW, and collapsed MIX toggle by default', () => {
     const library = new TrackLibrary();
     const html = renderToString(
       createElement(TrackLoader, {
@@ -32,27 +32,31 @@ describe('TrackLoader (UI Layer — Cassette Deck & Playlist)', () => {
     );
     const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
 
-    expect(text).toContain('STAGE PLAYLIST (3 TRACKS)');
-    expect(text).toContain('RESTORE DEFAULTS');
+    expect(text).toContain('TAPES');
+    expect(text).toContain('+ ADD TRACKS');
+    expect(text).toContain('PREVIEW');
+    expect(text).toContain('MIX');
+    expect(text).toContain('PLAYLIST');
     expect(text).toContain('Neon Horizon');
     expect(text).toContain("Midnight Wangan '88");
     expect(text).toContain('Melon Soda Sunset');
-    expect(text).not.toContain('(Synth Fallback)');
-    expect(text).not.toContain('(Synth VIP)');
-    expect(text).not.toContain('(Synth Mix)');
 
-    expect(html).toContain('aria-label="Remove Neon Horizon from playlist"');
-    expect(html).toContain('aria-label="Remove Midnight Wangan &#x27;88 from playlist"');
-    expect(html).toContain('aria-label="Remove Melon Soda Sunset from playlist"');
-    expect(html).toContain('title="Remove &quot;Neon Horizon&quot; from playlist"');
-    expect(text).toContain('✕');
+    // MIX controls are hidden by default until user toggles MIX
+    expect(text).not.toContain('BEAT -1');
+    expect(text).not.toContain('BEAT +1');
+    expect(text).not.toContain('CLICK: OFF');
+
+    // Forbidden AI-slop copy purged
+    expect(text).not.toContain('WM-86');
+    expect(text).not.toContain('Your music generates the road');
+    expect(text).not.toContain('Drop audio files to make a new road');
+    expect(text).not.toContain('DOUBLE-CLICK TO DRIVE');
   });
 
-  it('renders remove button as disabled when only 1 track remains', () => {
+  it('disables remove button when only 1 track remains', () => {
     const library = new TrackLibrary();
     library.removeTrack(0);
     library.removeTrack(0);
-    expect(library.items.length).toBe(1);
 
     const html = renderToString(
       createElement(TrackLoader, {
@@ -63,40 +67,26 @@ describe('TrackLoader (UI Layer — Cassette Deck & Playlist)', () => {
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
-
-    expect(text).toContain('STAGE PLAYLIST (1 TRACK)');
     expect(html).toContain('disabled=""');
-    expect(html).toContain('Cannot remove the last remaining track');
+    expect(html).toContain('Cannot remove the last track');
   });
 
-  it('renders initial soundtrack selection mode without bottom slop footer', () => {
+  it('renders ▶ PLAY when isInitialSelect is true and ▶ RESUME when mid-run', () => {
     const library = new TrackLibrary();
-    const onStartDrive = vi.fn();
-    const html = renderToString(
+    const initHtml = renderToString(
       createElement(TrackLoader, {
         open: true,
         library,
         isInitialSelect: true,
-        onStartDrive,
+        onStartDrive: vi.fn(),
         onSelectTrack: vi.fn(),
         onUpdateBeatMap: vi.fn(),
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
+    expect(initHtml).toContain('▶ PLAY');
 
-    expect(text).toContain('CASSETTE DECK');
-    expect(text).toContain('Your music generates the road');
-    expect(text).toContain('DRIVE [ENTER]');
-    expect(text).toContain('BACK [ESC]');
-    expect(text).not.toContain('START DRIVE [ENTER]');
-    expect(text).not.toContain('Selected Tape:');
-  });
-
-  it('renders RESUME [ENTER] alongside BACK [ESC] when opened mid-run with onResumeDrive', () => {
-    const library = new TrackLibrary();
-    const html = renderToString(
+    const midRunHtml = renderToString(
       createElement(TrackLoader, {
         open: true,
         library,
@@ -107,79 +97,6 @@ describe('TrackLoader (UI Layer — Cassette Deck & Playlist)', () => {
         onClose: vi.fn(),
       }),
     );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
-
-    expect(text).toContain('CASSETTE DECK');
-    expect(text).toContain('RESUME [ENTER]');
-    expect(text).toContain('BACK [ESC]');
-    expect(text).not.toContain('RESUME DRIVE [ENTER]');
-  });
-
-  it('renders unified BACK [ESC] button in header and no bottom slop footer when isInitialSelect is false', () => {
-    const library = new TrackLibrary();
-    const html = renderToString(
-      createElement(TrackLoader, {
-        open: true,
-        library,
-        isInitialSelect: false,
-        onSelectTrack: vi.fn(),
-        onUpdateBeatMap: vi.fn(),
-        onClose: vi.fn(),
-      }),
-    );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
-
-    expect(text).toContain('CASSETTE DECK');
-    expect(text).toContain('BACK [ESC]');
-    expect(text).not.toContain('RESUME DRIVE [ENTER]');
-    expect(text).not.toContain('CLOSE [ESC]');
-    expect(text).not.toContain('Selected Tape:');
-  });
-
-  it('renders clean English ADD TRACKS button and "No file selected" status', () => {
-    const library = new TrackLibrary();
-    const html = renderToString(
-      createElement(TrackLoader, {
-        open: true,
-        library,
-        onSelectTrack: vi.fn(),
-        onUpdateBeatMap: vi.fn(),
-        onClose: vi.fn(),
-      }),
-    );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
-
-    expect(text).toContain('ADD TRACKS');
-    expect(text).toContain('No file selected');
-    expect(text).not.toContain('SCEGLI FILE');
-    expect(text).not.toContain('Nessun file');
-    expect(text).not.toContain('Rimuovi');
-    expect(text).not.toContain('IDB CACHE HIT');
-    expect(html).toContain('type="file"');
-    expect(html).toContain('class="sr-only"');
-  });
-
-  it('renders Cassette Deck preview transport, 4-beat LEDs, beat click toggle, scrubber, and row preview buttons', () => {
-    const library = new TrackLibrary();
-    const html = renderToString(
-      createElement(TrackLoader, {
-        open: true,
-        library,
-        onSelectTrack: vi.fn(),
-        onUpdateBeatMap: vi.fn(),
-        onClose: vi.fn(),
-      }),
-    );
-    const text = html.replace(/<!--.*?-->/g, '').replace(/&amp;/g, '&').replace(/&#x27;/g, "'");
-
-    expect(text).toContain('PLAY PREVIEW');
-    expect(text).toContain('SKIP TO DROP');
-    expect(text).toContain('BEAT CLICK: OFF');
-    expect(text).toContain('SYNTH');
-    expect(html).toContain('aria-label="4-beat bar indicator"');
-    expect(html).toContain('aria-label="Track preview position"');
-    expect(html).toContain('aria-label="Preview Neon Horizon"');
-    expect(html).toContain('aria-label="Preview Midnight Wangan &#x27;88"');
-    expect(html).toContain('title="Explain what BPM, Tap Tempo, and Beat -1 / +1 do"');
+    expect(midRunHtml).toContain('▶ RESUME');
   });
 });

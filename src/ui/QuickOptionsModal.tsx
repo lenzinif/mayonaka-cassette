@@ -1,11 +1,11 @@
-import { SODA_SKIN_LABELS, type SodaSkin } from '@src/entities/MelonSoda';
-import { useEffect, useId } from 'react';
-import { CockpitOptionsSection } from './cockpit/CockpitOptionsSection';
+import type { SodaSkin } from '@src/entities/MelonSoda';
+import { useEffect } from 'react';
 import {
-  COCKPIT_PRESET_LUXURY,
+  COCKPIT_PRESET_CLUTTER,
   type CockpitVisibility,
 } from './cockpit/cockpitSettings';
-import { WalkmanModalFrame, WalkmanSwitchRow } from './walkman/WalkmanChrome';
+import type { VisorPhotoItem } from './cockpit/visorPhotoStore';
+import { OptionsPanel } from './components/OptionsPanel';
 
 export interface QuickOptionsModalProps {
   open: boolean;
@@ -16,20 +16,20 @@ export interface QuickOptionsModalProps {
   onToggleTofuMode: () => void;
   sodaSkin: SodaSkin;
   onCycleSodaSkin: () => void;
-  cleanHud: boolean;
-  onToggleCleanHud: () => void;
   crtEnabled: boolean;
   onToggleCrt: () => void;
   cockpitVisibility?: CockpitVisibility;
-  visorPhotoUrl?: string | null;
+  visorPhotos?: readonly VisorPhotoItem[];
   onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
   onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
-  onUploadVisorPhoto?: (file: File) => void;
-  onClearVisorPhoto?: () => void;
+  onAddVisorPhotos?: (files: readonly File[]) => void;
+  onAddVisorPhoto?: (file: File) => void;
+  onRemoveVisorPhoto?: (id: string) => void;
+  onClearVisorPhotos?: () => void;
 }
 
 /**
- * Mayonaka Walkman Hardware DIP Switches & Settings Modal (`WM-86 DIP SWITCHES`).
+ * Modal wrapper around the shared `OptionsPanel` (`docs/UI.md §4.3`).
  */
 export function QuickOptionsModal({
   open,
@@ -40,30 +40,29 @@ export function QuickOptionsModal({
   onToggleTofuMode,
   sodaSkin,
   onCycleSodaSkin,
-  cleanHud,
-  onToggleCleanHud,
   crtEnabled,
   onToggleCrt,
-  cockpitVisibility = COCKPIT_PRESET_LUXURY,
-  visorPhotoUrl = null,
-  onToggleCockpitModule,
-  onApplyCockpitPreset,
-  onUploadVisorPhoto,
-  onClearVisorPhoto,
+  cockpitVisibility = COCKPIT_PRESET_CLUTTER,
+  visorPhotos = [],
+  onToggleCockpitModule = () => {},
+  onApplyCockpitPreset = () => {},
+  onAddVisorPhotos,
+  onAddVisorPhoto = () => {},
+  onRemoveVisorPhoto = () => {},
+  onClearVisorPhotos = () => {},
 }: QuickOptionsModalProps) {
-  const titleId = useId();
-
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (e.key === 'Escape' || e.code === 'Escape') {
         e.preventDefault();
         e.stopImmediatePropagation();
         onClose();
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, { capture: true });
+    return () => window.removeEventListener('keydown', onKeyDown, { capture: true });
   }, [open, onClose]);
 
   if (!open) return null;
@@ -73,84 +72,30 @@ export function QuickOptionsModal({
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
-      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#070911]/82 p-4 text-[var(--wm-silk)] select-none"
+      className="pointer-events-auto fixed inset-0 z-50 flex items-center justify-center bg-[#070911]/82 p-4 select-none"
       role="dialog"
       aria-modal="true"
-      aria-labelledby={titleId}
+      aria-label="Options"
     >
-      <WalkmanModalFrame
-        title="OPTIONS"
-        jpSubtitle="設定スイッチ"
-        modelTag="WM-86 DIP SWITCHES"
-        titleId={titleId}
-        maxWidthClass="max-w-md"
-        maxHeightClass="max-h-[90vh]"
-        headerRight={
-          <button
-            type="button"
-            onClick={onClose}
-            className="wm-btn ff-mono cursor-pointer px-2.5 py-1 text-[10px] font-black tracking-wider text-[var(--wm-silk)] uppercase hover:text-[var(--wm-play)]"
-          >
-            BACK [ESC]
-          </button>
-        }
-      >
-        <div className="ff-scroll overflow-y-auto p-4">
-          <div className="wm-key-bank flex flex-col text-xs">
-            <WalkmanSwitchRow
-              label="GEARBOX [G]"
-              valueLabel={autoShift ? 'AUTO-SHIFT' : 'MANUAL'}
-              active
-              accent={autoShift ? 'amber' : 'mint'}
-              onClick={onToggleAutoShift}
-            />
-
-            <WalkmanSwitchRow
-              label="TOFU MODE [T]"
-              valueLabel={tofuMode ? 'ON (×2)' : 'OFF'}
-              active={tofuMode}
-              accent="mint"
-              onClick={onToggleTofuMode}
-            />
-
-            <WalkmanSwitchRow
-              label="DASHBOARD CUP [V]"
-              valueLabel={SODA_SKIN_LABELS[sodaSkin]}
-              active
-              accent="amber"
-              variant="cycle"
-              onClick={onCycleSodaSkin}
-            />
-
-            <WalkmanSwitchRow
-              label="HUD [H]"
-              valueLabel={cleanHud ? 'MINIMAL' : 'FULL'}
-              active={cleanHud}
-              accent="mint"
-              onClick={onToggleCleanHud}
-            />
-
-            <WalkmanSwitchRow
-              label="CRT SCANLINES"
-              valueLabel={crtEnabled ? 'ON' : 'OFF'}
-              active={crtEnabled}
-              accent="play"
-              onClick={onToggleCrt}
-            />
-          </div>
-
-          {onToggleCockpitModule && onApplyCockpitPreset && (
-            <CockpitOptionsSection
-              visibility={cockpitVisibility}
-              onToggleModule={onToggleCockpitModule}
-              onApplyPreset={onApplyCockpitPreset}
-              visorPhotoUrl={visorPhotoUrl}
-              onUploadVisorPhoto={onUploadVisorPhoto}
-              onClearVisorPhoto={onClearVisorPhoto}
-            />
-          )}
-        </div>
-      </WalkmanModalFrame>
+      <OptionsPanel
+        autoShift={autoShift}
+        onToggleAutoShift={onToggleAutoShift}
+        tofuMode={tofuMode}
+        onToggleTofuMode={onToggleTofuMode}
+        sodaSkin={sodaSkin}
+        onCycleSodaSkin={onCycleSodaSkin}
+        crtEnabled={crtEnabled}
+        onToggleCrt={onToggleCrt}
+        cockpitVisibility={cockpitVisibility}
+        onToggleCockpitModule={onToggleCockpitModule}
+        onApplyCockpitPreset={onApplyCockpitPreset}
+        visorPhotos={visorPhotos}
+        onAddVisorPhotos={onAddVisorPhotos}
+        onAddVisorPhoto={onAddVisorPhoto}
+        onRemoveVisorPhoto={onRemoveVisorPhoto}
+        onClearVisorPhotos={onClearVisorPhotos}
+        onClose={onClose}
+      />
     </div>
   );
 }

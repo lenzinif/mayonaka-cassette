@@ -28,6 +28,7 @@ import {
   type TrafficProfile,
 } from './RoadChunks';
 import { easeIn, easeInOut } from './RoadProjection';
+import { isPropAllowedInEnv, PROP_REGISTRY } from './PropRegistry';
 import {
   createPoint,
   isOverheadProp,
@@ -1635,10 +1636,39 @@ function emitPropRules(
         }
 
         const segIdx =
-          startSeg + Math.min(segCount - 1, Math.max(0, Math.round(mBeat * segmentsPerBeat)));
+          rule.kind === 'suspension-tower'
+            ? startSeg +
+              Math.min(
+                segCount - 1,
+                Math.max(0, Math.round((mBeat + (segCount / Math.max(1, segmentsPerBeat) <= 18 ? 8 : 4)) * segmentsPerBeat)),
+              )
+            : startSeg + Math.min(segCount - 1, Math.max(0, Math.round(mBeat * segmentsPerBeat)));
         const seg = segments[segIdx];
         if (!seg || seg.env === 'tunnel') continue;
-        if (rule.maxAbsCurve !== undefined && Math.abs(seg.curve) > rule.maxAbsCurve) continue;
+        const segEnv: SegmentEnvironment = seg.env ?? 'standard';
+        if (!isPropAllowedInEnv(rule.kind, segEnv)) continue;
+
+        const regMaxCurve = PROP_REGISTRY[rule.kind].maxAbsCurve;
+        const effectiveMaxCurve =
+          rule.maxAbsCurve !== undefined && regMaxCurve !== undefined
+            ? Math.min(rule.maxAbsCurve, regMaxCurve)
+            : (rule.maxAbsCurve ?? regMaxCurve);
+        if (effectiveMaxCurve !== undefined && Math.abs(seg.curve) > effectiveMaxCurve) continue;
+
+        // Guarantee suspension towers sit strictly inside bridge interior (>= 12 segs from abutments)
+        if (rule.kind === 'suspension-tower') {
+          let interiorSafe = segIdx >= 12 && segIdx + 12 < segments.length;
+          if (interiorSafe) {
+            for (let d = -12; d <= 12; d++) {
+              if ((segments[segIdx + d]?.env ?? 'standard') !== 'bridge') {
+                interiorSafe = false;
+                break;
+              }
+            }
+          }
+          if (!interiorSafe) continue;
+        }
+
         if (keepProbabilityFn) {
           const p = keepProbabilityFn(segIdx);
           if (p < 1 && rng.next() >= p) continue;
@@ -1773,33 +1803,73 @@ function resolveTrackPropOverlaps(segments: RoadSegment[]): void {
     }
   }
 
-  // Pass 2: Intra-segment and ±2 neighbor prop overlap resolution
+  // Pass 2: Intra-segment and ±6 neighbor prop overlap resolution (including overhead clearance)
+  const extraWindow: (RoadSprite[] | undefined)[] = [undefined, undefined, undefined, undefined];
   for (let i = 0; i < n; i++) {
     const prev1 = i >= 1 ? segments[i - 1]!.sprites : undefined;
     const prev2 = i >= 2 ? segments[i - 2]!.sprites : undefined;
-    resolveSegmentPropOverlaps(segments[i]!.sprites, prev1, prev2);
+    extraWindow[0] = i >= 3 ? segments[i - 3]!.sprites : undefined;
+    extraWindow[1] = i >= 4 ? segments[i - 4]!.sprites : undefined;
+    extraWindow[2] = i >= 5 ? segments[i - 5]!.sprites : undefined;
+    extraWindow[3] = i >= 6 ? segments[i - 6]!.sprites : undefined;
+    resolveSegmentPropOverlaps(segments[i]!.sprites, prev1, prev2, extraWindow);
   }
 }
 
+const STATIC_PORTAL_CLEAR_RADIUS = 8;
+
 /**
- * Guarantees zero freestanding props inside tunnel bores (curve guidance is rendered flush on walls)
- * and clears Band A/B and overhead props from open segments directly adjacent to tunnel portals.
+ * Guarantees zero freestanding props inside tunnel bores (curve guidance is rendered flush on walls),
+ * clears Band A/B and overhead props from open segments within ±8 segs of tunnel portals,
+ * and keeps ±4 segs around bridge/viaduct abutments clear of overhanging clutter.
  */
 function clearTunnelAndPortalProps(segments: RoadSegment[]): void {
   const n = segments.length;
   for (let i = 0; i < n; i++) {
     const seg = segments[i]!;
-    if (seg.env === 'tunnel') {
+    const env = seg.env ?? 'standard';
+    if (env === 'tunnel') {
       seg.sprites.length = 0;
       continue;
     }
-    const nearPortal =
-      (i + 1 < n && segments[i + 1]!.env === 'tunnel') ||
-      (i + 2 < n && segments[i + 2]!.env === 'tunnel') ||
-      (i - 1 >= 0 && segments[i - 1]!.env === 'tunnel');
-    if (nearPortal && seg.sprites.length > 0) {
+    if (seg.sprites.length === 0) continue;
+
+    let nearTunnel = false;
+    for (let d = -STATIC_PORTAL_CLEAR_RADIUS; d <= STATIC_PORTAL_CLEAR_RADIUS; d++) {
+      if (d === 0) continue;
+      const nb = segments[i + d];
+      if (nb && nb.env === 'tunnel') {
+        nearTunnel = true;
+        break;
+      }
+    }
+    if (nearTunnel) {
       seg.sprites = seg.sprites.filter(
         (sp) => !isOverheadProp(sp.kind) && Math.abs(sp.offset) >= 3.0,
+      );
+      continue;
+    }
+
+    let nearSpanBoundary = false;
+    for (let d = -4; d <= 4; d++) {
+      if (d === 0) continue;
+      const nb = segments[i + d];
+      if (!nb) continue;
+      const nEnv = nb.env ?? 'standard';
+      if ((env === 'bridge' || env === 'viaduct') && nEnv === 'standard') {
+        nearSpanBoundary = true;
+        break;
+      }
+      if (env === 'standard' && (nEnv === 'bridge' || nEnv === 'viaduct')) {
+        nearSpanBoundary = true;
+        break;
+      }
+    }
+    if (nearSpanBoundary) {
+      seg.sprites = seg.sprites.filter(
+        (sp) =>
+          !isOverheadProp(sp.kind) &&
+          (sp.kind === 'lamp' || sp.kind === 'shrub' || Math.abs(sp.offset) >= 1.85),
       );
     }
   }

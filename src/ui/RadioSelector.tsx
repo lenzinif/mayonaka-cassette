@@ -10,6 +10,7 @@ export interface RadioSelectorProps {
   onRestartRun: () => void;
   onOpenTrackLoader: () => void;
   onSelectForkBranch?: (branch: 'left' | 'right') => void;
+  onRunSummaryOpenChange?: (open: boolean) => void;
 }
 
 const GRADE_BADGE_STYLES: Readonly<Record<RunGrade, string>> = {
@@ -30,6 +31,7 @@ export function RadioSelector({
   onRestartRun,
   onOpenTrackLoader,
   onSelectForkBranch,
+  onRunSummaryOpenChange,
 }: RadioSelectorProps) {
   const getRadioSnap = useCallback((): TelemetrySnapshot | null => {
     const s = bridge.getSnapshot();
@@ -55,6 +57,7 @@ export function RadioSelector({
 
   useEffect(() => {
     const dialog = dialogRef.current;
+    onRunSummaryOpenChange?.(Boolean(runSummary));
     if (!dialog) return;
     if (runSummary) {
       if (!dialog.open && typeof dialog.showModal === 'function') {
@@ -68,13 +71,14 @@ export function RadioSelector({
         dialog.close();
       }
     };
-  }, [runSummary]);
+  }, [runSummary, onRunSummaryOpenChange]);
 
   const forkActive = snap?.forkActive ?? false;
   const forkChoice = snap?.forkChoice ?? 'right';
   const forkProgress = snap?.forkProgress ?? 0;
   const leftOpt = snap?.forkLeftOption ?? null;
   const rightOpt = snap?.forkRightOption ?? null;
+  const stageAccentColor = snap?.stageAccentColor ?? '#00f0b5';
 
   return (
     <>
@@ -82,22 +86,25 @@ export function RadioSelector({
       {forkActive && leftOpt && rightOpt && (
         <div className="pointer-events-none absolute inset-x-0 top-20 z-10 flex justify-center px-4 select-none [contain:layout_style_paint] [transform:translateZ(0)]">
           <div className="wm-shell wm-faceplate pointer-events-auto w-full max-w-xl overflow-hidden text-[var(--wm-silk)]">
-            <div className="wm-accent-strip" />
+            <div className="h-[2px] w-full" style={{ backgroundColor: stageAccentColor }} />
             <div className="p-3">
               <div className="flex items-center justify-between text-[10px] font-bold tracking-[0.18em] uppercase">
                 <span className="flex items-center gap-1.5 text-[var(--wm-amber)]">
                   <WalkmanLed lit color="amber" />
-                  NEXT STAGE — STEER OR PRESS 1 / 2
+                  NEXT STAGE — STEER OR 1 / 2
                 </span>
-                <span className="ff-mono text-[var(--wm-mint)]">
+                <span className="ff-mono" style={{ color: stageAccentColor }}>
                   {Math.round(forkProgress * 100)}%
                 </span>
               </div>
 
               <div className="wm-lcd mt-1.5 h-1.5 w-full overflow-hidden rounded-[1px] p-[1px]">
                 <div
-                  className="wm-accent-strip h-full w-full origin-left will-change-transform"
-                  style={{ transform: `scaleX(${Math.max(0, Math.min(1, forkProgress))})` }}
+                  className="h-full w-full origin-left will-change-transform"
+                  style={{
+                    backgroundColor: stageAccentColor,
+                    transform: `scaleX(${Math.max(0, Math.min(1, forkProgress))})`,
+                  }}
                 />
               </div>
 
@@ -200,6 +207,10 @@ export function RadioSelector({
         onClick={(e) => {
           if (e.target === e.currentTarget) setRunSummary(null);
         }}
+        onCancel={(e) => {
+          e.preventDefault();
+          setRunSummary(null);
+        }}
         onClose={() => {
           if (dialogRef.current) {
             dialogRef.current.returnValue = '';
@@ -212,9 +223,7 @@ export function RadioSelector({
         {runSummary && (
           <WalkmanModalFrame
             title="STAGE RECORDS"
-            subtitle="88.4 FM · RUN COMPLETE"
-            jpSubtitle="走行記録"
-            modelTag="WM-86 TAPE LOG"
+            accentColor={stageAccentColor}
             titleId={dialogTitleId}
             maxWidthClass="max-w-2xl"
             maxHeightClass="max-h-[90vh]"
@@ -337,7 +346,7 @@ export function RadioSelector({
                     }}
                     className="wm-btn-well cursor-pointer px-3 py-1.5 text-[var(--wm-silk)] hover:text-[var(--wm-mint)]"
                   >
-                    CASSETTES [M]
+                    TAPES
                   </button>
                   <button
                     type="button"

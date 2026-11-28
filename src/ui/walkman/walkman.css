@@ -265,23 +265,244 @@
     transform: translateX(12px);
   }
 
-  .wm-accent-strip {
-    height: 2px;
-    width: 100%;
-    background: linear-gradient(
-      90deg,
-      var(--wm-play) 0% 34%,
-      var(--wm-amber) 34% 67%,
-      var(--wm-mint) 67% 100%
-    );
-  }
-
   .wm-spin-slow {
     animation: wmSpinReel 5.5s linear infinite;
   }
 
   .wm-modal-seat {
     animation: wmModalSeat 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* ------------------------------------------------------------------
+   * Vaporwave / Synth Title Typography & 3D Flippable Hardware Units
+   * ------------------------------------------------------------------ */
+  .ff-chrome-title {
+    background: linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #d6eeff 34%,
+      #7fb5e6 52%,
+      #274175 54%,
+      #6cb8ff 82%,
+      #eefaff 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    -webkit-text-stroke: 1px rgba(10, 18, 42, 0.85);
+    filter: drop-shadow(0 3px 0 #090d1f) drop-shadow(0 0 12px rgba(46, 226, 190, 0.35));
+  }
+
+  .ff-brush-accent {
+    font-family: 'Permanent Marker', 'Archivo Black', cursive, sans-serif;
+    color: #ff3b8e;
+    text-shadow:
+      0 2px 0 #14051f,
+      0 0 14px rgba(255, 59, 142, 0.55);
+  }
+
+  /* Front-loading Stereo Cassette Deck */
+  .deck-brushed-silver {
+    background: linear-gradient(
+      180deg,
+      #d2d7df 0%,
+      #b7bec9 22%,
+      #9ea6b3 74%,
+      #858d9a 100%
+    );
+    background-image:
+      repeating-linear-gradient(
+        180deg,
+        rgba(255, 255, 255, 0.08) 0px,
+        rgba(255, 255, 255, 0.08) 1px,
+        rgba(0, 0, 0, 0.03) 1px,
+        rgba(0, 0, 0, 0.03) 2px
+      ),
+      linear-gradient(180deg, #d2d7df 0%, #b7bec9 22%, #9ea6b3 74%, #858d9a 100%);
+    border: 1px solid rgba(255, 255, 255, 0.42);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.65),
+      inset 0 -2px 0 rgba(35, 42, 56, 0.5),
+      0 18px 42px rgba(4, 6, 14, 0.82);
+  }
+
+  .deck-lower-bank {
+    background: linear-gradient(180deg, #272b36 0%, #171a23 100%);
+    border-top: 2px solid #0b0d14;
+  }
+
+  .deck-piano-key {
+    background: linear-gradient(180deg, #656c7a 0%, #4b515e 45%, #373c48 100%);
+    border: 1px solid #12151e;
+    border-top: 2px solid rgba(255, 255, 255, 0.3);
+    border-radius: 2px;
+    box-shadow:
+      0 4px 0 #161922,
+      inset 0 1px 0 rgba(255, 255, 255, 0.25);
+    transition:
+      transform 110ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 110ms cubic-bezier(0.22, 1, 0.36, 1),
+      filter 90ms ease;
+  }
+
+  .deck-piano-key:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+
+  .deck-piano-key[data-pressed='true'],
+  .deck-piano-key:active:not(:disabled) {
+    transform: translateY(3px);
+    box-shadow:
+      0 1px 0 #161922,
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  .deck-piano-key-play {
+    background: linear-gradient(180deg, #ff5d6c 0%, #e03a4b 55%, #b52635 100%);
+    border-top: 2px solid rgba(255, 210, 214, 0.55);
+    box-shadow:
+      0 4px 0 #5a121a,
+      inset 0 1px 0 rgba(255, 220, 224, 0.38);
+  }
+
+  .deck-piano-key-play[data-pressed='true'],
+  .deck-piano-key-play:active:not(:disabled) {
+    box-shadow:
+      0 1px 0 #5a121a,
+      inset 0 1px 0 rgba(255, 220, 224, 0.3);
+  }
+
+  .deck-vu-well {
+    background: radial-gradient(ellipse at 50% 68%, #ffd782 0%, #eca240 62%, #b0671c 100%);
+    border: 2px solid #161922;
+    box-shadow:
+      inset 0 2px 6px rgba(32, 14, 2, 0.65),
+      0 0 10px rgba(245, 185, 76, 0.22);
+  }
+
+  /* Deck & Portable Cassette Insertion Animation */
+  .deck-bay-perspective {
+    perspective: 700px;
+  }
+
+  .deck-acrylic-door {
+    transform-origin: bottom center;
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .deck-acrylic-door[data-open='true'] {
+    transform: rotateX(-24deg) translateY(2px);
+  }
+
+  .cassette-insert-anim[data-phase='eject'] {
+    transform: translateY(-65%) scale(0.95);
+    opacity: 0;
+    transition:
+      transform 160ms ease-in,
+      opacity 150ms ease-in;
+  }
+
+  .cassette-insert-anim[data-phase='insert-start'] {
+    transform: translateY(-62%) scale(0.97);
+    opacity: 0.25;
+    transition: none;
+  }
+
+  .cassette-insert-anim[data-phase='insert'],
+  .cassette-insert-anim[data-phase='latch'],
+  .cassette-insert-anim[data-phase='idle'] {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+    transition:
+      transform 280ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 220ms ease-out;
+  }
+
+  /* Portable Vertical Cassette Player (Pause Menu — Zero Real Brands) */
+  .portable-blue-body {
+    background: linear-gradient(155deg, #3c69a8 0%, #26487a 52%, #193158 100%);
+    border: 1px solid rgba(164, 200, 255, 0.28);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.28),
+      inset -2px 0 6px rgba(7, 13, 28, 0.65),
+      0 20px 44px rgba(3, 5, 12, 0.85);
+  }
+
+  .portable-silver-rail {
+    background: linear-gradient(90deg, #cfd5de 0%, #a5aebc 52%, #7f8897 100%);
+    border-right: 1px solid rgba(15, 20, 32, 0.7);
+    box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.55);
+  }
+
+  .portable-side-key {
+    background: linear-gradient(90deg, #dce1e9 0%, #a6afbd 65%, #828b9a 100%);
+    border: 1px solid #262c3a;
+    border-right: 0;
+    border-radius: 3px 0 0 3px;
+    box-shadow:
+      -3px 2px 0 #151a26,
+      inset 1px 1px 0 rgba(255, 255, 255, 0.55);
+    transition:
+      transform 110ms cubic-bezier(0.22, 1, 0.36, 1),
+      background 110ms ease,
+      box-shadow 110ms ease;
+  }
+
+  .portable-side-key[data-selected='true'] {
+    background: linear-gradient(90deg, #64f5db 0%, #24b6a0 70%, #178979 100%);
+    transform: translateX(3px);
+    box-shadow:
+      -1px 1px 0 #0c2624,
+      0 0 12px rgba(46, 226, 190, 0.45);
+  }
+
+  .portable-door-vertical {
+    transform-origin: right center;
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .portable-door-vertical[data-open='true'] {
+    transform: perspective(600px) rotateY(22deg);
+  }
+
+  /* 3D Hardware Back-Flip */
+  .hw-flip-scene {
+    perspective: 1200px;
+  }
+
+  .hw-flip-card {
+    transform-style: preserve-3d;
+    transition: transform 480ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .hw-flip-card[data-flipped='true'] {
+    transform: rotateY(180deg);
+  }
+
+  .hw-flip-face {
+    backface-visibility: hidden;
+  }
+
+  .hw-flip-back {
+    transform: rotateY(180deg);
+  }
+
+  /* Handwritten Funky Zine Guide Paper */
+  .guide-zine-paper {
+    background-color: #faf3e0;
+    background-image: radial-gradient(rgba(19, 22, 34, 0.04) 1px, transparent 0);
+    background-size: 14px 14px;
+    color: #161822;
+    box-shadow: 0 6px 18px rgba(6, 8, 16, 0.42);
+  }
+
+  .guide-hand-title {
+    font-family: 'Permanent Marker', 'Archivo Black', cursive, sans-serif;
+    letter-spacing: 0.04em;
+  }
+
+  .guide-hand-body {
+    font-family: 'Patrick Hand', 'Space Grotesk', sans-serif;
   }
 }
 
@@ -295,8 +516,32 @@
   .wm-btn,
   .wm-btn-well,
   .wm-btn-play,
-  .wm-btn-mint {
-    transition: none;
+  .wm-btn-mint,
+  .deck-piano-key,
+  .deck-acrylic-door,
+  .cassette-insert-anim,
+  .portable-side-key,
+  .portable-door-vertical,
+  .hw-flip-card {
+    transition: opacity 140ms linear;
+  }
+
+  .hw-flip-card[data-flipped='true'] {
+    transform: none;
+  }
+
+  .hw-flip-back {
+    transform: none;
+  }
+
+  .hw-flip-face {
+    backface-visibility: visible;
+    transition: opacity 150ms linear;
+  }
+
+  .cassette-insert-anim[data-phase='eject'],
+  .cassette-insert-anim[data-phase='insert-start'] {
+    transform: none;
   }
 }
 

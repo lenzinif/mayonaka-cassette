@@ -3,7 +3,7 @@ import { renderToString } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { QuickOptionsModal } from './QuickOptionsModal';
 
-describe('QuickOptionsModal (UI Layer)', () => {
+describe('QuickOptionsModal / Shared OptionsPanel (docs/UI.md §4.3)', () => {
   const defaultProps = {
     open: true,
     onClose: vi.fn(),
@@ -13,8 +13,6 @@ describe('QuickOptionsModal (UI Layer)', () => {
     onToggleTofuMode: vi.fn(),
     sodaSkin: 'melon-soda' as const,
     onCycleSodaSkin: vi.fn(),
-    cleanHud: false,
-    onToggleCleanHud: vi.fn(),
     crtEnabled: true,
     onToggleCrt: vi.fn(),
   };
@@ -24,38 +22,28 @@ describe('QuickOptionsModal (UI Layer)', () => {
     expect(html).toBe('');
   });
 
-  it('renders J-Card header with single BACK [ESC] button and clean toggle rows', () => {
+  it('renders brand-free shared options without live shortcut hints or AI-slop headers', () => {
     const rawHtml = renderToString(createElement(QuickOptionsModal, defaultProps));
     const text = rawHtml.replace(/<!--.*?-->/g, '');
 
     expect(text).toContain('OPTIONS');
     expect(text).toContain('BACK [ESC]');
-    expect(text).toContain('GEARBOX [G]');
-    expect(text).toContain('TOFU MODE [T]');
-    expect(text).toContain('DASHBOARD CUP [V]');
-    expect(text).toContain('HUD [H]');
-    expect(text).toContain('CRT SCANLINES');
-    expect(text).not.toContain('[ESC · BACK]');
-    const matches = text.match(/BACK/g);
-    expect(matches).toHaveLength(1);
-  });
+    expect(text).toContain('GEARBOX');
+    expect(text).toContain('MANUAL');
+    expect(text).toContain('TOFU CUP');
+    expect(text).toContain('DRINK');
+    expect(text).toContain('MELON SODA');
+    expect(text).toContain('CRT');
+    expect(text).toContain('HUD');
+    expect(text).toContain('DASH');
+    expect(text).toContain('TAPE + LIST');
+    expect(text).toContain('VISOR (0/5)');
 
-  it('renders cockpit module toggles and preserves single BACK button when cockpit handlers are provided', () => {
-    const rawHtml = renderToString(
-      createElement(QuickOptionsModal, {
-        ...defaultProps,
-        onToggleCockpitModule: vi.fn(),
-        onApplyCockpitPreset: vi.fn(),
-      }),
-    );
-    const text = rawHtml.replace(/<!--.*?-->/g, '');
-
-    expect(text).toContain('COCKPIT MODULES');
-    expect(text).toContain('LUXURY FULL');
-    expect(text).toContain('CLEAN DRIVE');
-    expect(text).toContain('AUTORADIO PLAYLIST');
-    expect(text).toContain('SUN VISOR PHOTO');
-    const matches = text.match(/BACK/g);
-    expect(matches).toHaveLength(1);
+    expect(text).not.toContain('WM-86');
+    expect(text).not.toContain('[G]');
+    expect(text).not.toContain('[T]');
+    expect(text).not.toContain('[V]');
+    expect(text).not.toContain('[H]');
+    expect(text).not.toContain('[C]');
   });
 });

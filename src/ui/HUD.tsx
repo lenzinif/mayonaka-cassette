@@ -1,20 +1,23 @@
-import type { SectionRole } from '@src/audio/BeatMap';
+import type { BeatMap } from '@src/audio/BeatMap';
+import type { FunkAudioEngine } from '@src/audio/FunkAudioEngine';
+import type { PlaylistItem, TrackLibrary } from '@src/audio/TrackLibrary';
 import type { TelemetryBridge } from '@src/core/TelemetryBridge';
 import type { GameEvent, TelemetrySnapshot } from '@src/engine/Game';
 import type { SodaSkin } from '@src/entities/MelonSoda';
-import type { GrooveTier } from '@src/entities/PlayerCar';
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
-  COCKPIT_PRESET_LUXURY,
+  COCKPIT_PRESET_CLUTTER,
   type CockpitVisibility,
 } from './cockpit/cockpitSettings';
-import { RadioConsole, type RadioPlaylistEntry } from './cockpit/RadioConsole';
 import { SunVisorPhoto } from './cockpit/SunVisorPhoto';
-import { CassetteTapeWidget } from './hud/CassetteTapeWidget';
+import type { VisorPhotoItem } from './cockpit/visorPhotoStore';
+import {
+  CassetteTapeWidget,
+  type RadioPlaylistEntry,
+} from './hud/CassetteTapeWidget';
 import { RhythmBezel } from './hud/RhythmBezel';
 import { VfdDigidash } from './hud/VfdDigidash';
 import { PauseMenu } from './PauseMenu';
-import { WalkmanLed } from './walkman/WalkmanChrome';
 
 export interface HUDProps {
   bridge: TelemetryBridge<TelemetrySnapshot, GameEvent>;
@@ -27,8 +30,6 @@ export interface HUDProps {
   gameStarted?: boolean;
   onRestartRun?: () => void;
   onReturnToMainMenu?: () => void;
-  cleanHud?: boolean;
-  onToggleCleanHud?: () => void;
   onTogglePause?: () => void;
   onToggleAutoShift?: () => void;
   onToggleTofuMode?: () => void;
@@ -43,19 +44,21 @@ export interface HUDProps {
   cockpitVisibility?: CockpitVisibility;
   onToggleCockpitModule?: (key: keyof CockpitVisibility) => void;
   onApplyCockpitPreset?: (preset: CockpitVisibility) => void;
-  visorPhotoUrl?: string | null;
-  onUploadVisorPhoto?: (file: File) => void;
-  onClearVisorPhoto?: () => void;
+  visorPhotos?: readonly VisorPhotoItem[];
+  onAddVisorPhotos?: (files: readonly File[]) => void;
+  onAddVisorPhoto?: (file: File) => void;
+  onRemoveVisorPhoto?: (id: string) => void;
+  onClearVisorPhotos?: () => void;
   playlistItems?: readonly RadioPlaylistEntry[];
-  onPrevTrack?: () => void;
-  onNextTrack?: () => void;
-  onSelectPlaylistIndex?: (index: number) => void;
+  library?: TrackLibrary;
+  audio?: FunkAudioEngine;
+  onSelectTrack?: (item: PlaylistItem) => void;
+  onUpdateBeatMap?: (contentHash: string, updated: BeatMap) => void;
+  onPreviewUnlocked?: () => void;
 }
 
 /**
- * React HUD overlay (`z-index: 2`, `pointer-events-none`, AGENTS.md §2).
- * Re-renders at most `TELEMETRY_HZ` (15 Hz) via `useSyncExternalStore` + discrete events.
- * Harmonized under the 7-token Mayonaka Hi-Fi palette with zero GPU blur overhead.
+ * React HUD overlay (`z-index: 2`, `pointer-events-none`, `docs/UI.md §1.2 & §5`).
  */
 export function HUD({
   bridge,
@@ -68,8 +71,6 @@ export function HUD({
   onOpenInspector,
   onRestartRun,
   onReturnToMainMenu,
-  cleanHud,
-  onToggleCleanHud,
   onTogglePause,
   onToggleAutoShift,
   onToggleTofuMode,
@@ -81,88 +82,43 @@ export function HUD({
   minimalPerfOnly = false,
   hideCassette = false,
   hideVfd = false,
-  cockpitVisibility,
+  cockpitVisibility = COCKPIT_PRESET_CLUTTER,
   onToggleCockpitModule,
   onApplyCockpitPreset,
-  visorPhotoUrl = null,
-  onUploadVisorPhoto,
-  onClearVisorPhoto,
+  visorPhotos = [],
+  onAddVisorPhotos,
+  onAddVisorPhoto,
+  onRemoveVisorPhoto,
+  onClearVisorPhotos,
   playlistItems,
-  onPrevTrack,
-  onNextTrack,
-  onSelectPlaylistIndex,
+  library,
+  audio,
+  onSelectTrack,
+  onUpdateBeatMap,
+  onPreviewUnlocked,
 }: HUDProps) {
   const snap = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot, bridge.getSnapshot);
-  const [internalCleanHud, setInternalCleanHud] = useState(false);
   const [showPerfHud, setShowPerfHud] = useState(false);
-  const [internalCockpit, setInternalCockpit] = useState<CockpitVisibility>(COCKPIT_PRESET_LUXURY);
   const [isTapeSlack, setIsTapeSlack] = useState(false);
 
-  const effectiveCleanHud = cleanHud ?? internalCleanHud;
-  const effectiveCockpit = cockpitVisibility ?? internalCockpit;
-  const handleToggleCleanHud = useCallback(() => {
-    if (onToggleCleanHud) onToggleCleanHud();
-    else setInternalCleanHud((prev) => !prev);
-  }, [onToggleCleanHud]);
-  const handleToggleCockpitModule = useCallback(
-    (key: keyof CockpitVisibility) => {
-      if (onToggleCockpitModule) {
-        onToggleCockpitModule(key);
-      } else {
-        setInternalCockpit((prev) => {
-          const nextVal = !prev[key];
-          if (nextVal) setInternalCleanHud(false);
-          return { ...prev, [key]: nextVal };
-        });
-      }
-    },
-    [onToggleCockpitModule],
-  );
-  const handleApplyCockpitPreset = useCallback(
-    (preset: CockpitVisibility) => {
-      if (onApplyCockpitPreset) {
-        onApplyCockpitPreset(preset);
-      } else {
-        setInternalCleanHud(false);
-        setInternalCockpit(preset);
-      }
-    },
-    [onApplyCockpitPreset],
-  );
-  const handleToggleCassetteDeck = useCallback(
-    () => handleToggleCockpitModule('showCassetteWidget'),
-    [handleToggleCockpitModule],
-  );
-  const handleToggleAutoShift = useCallback(() => {
-    onToggleAutoShift?.();
-  }, [onToggleAutoShift]);
-
-  // Keyboard shortcut listeners
+  // Dev-only F3 Perf Ribbon toggle
   useEffect(() => {
     if (!gameStarted || trackLoaderOpen || inspectorOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
-      if (e.code === 'KeyH') {
-        e.preventDefault();
-        handleToggleCleanHud();
-      } else if (e.code === 'KeyC') {
-        e.preventDefault();
-        handleToggleCassetteDeck();
-      } else if (e.code === 'F3') {
+      if (e.code === 'F3') {
         e.preventDefault();
         setShowPerfHud((prev) => !prev);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [gameStarted, trackLoaderOpen, inspectorOpen, handleToggleCleanHud, handleToggleCassetteDeck]);
+  }, [gameStarted, trackLoaderOpen, inspectorOpen]);
 
-  // Telemetry event listeners & tape slack triggers
   useEffect(() => {
     let slackTimerId = 0;
-
     const triggerSlackAnimation = () => {
       window.clearTimeout(slackTimerId);
       setIsTapeSlack(true);
@@ -183,49 +139,35 @@ export function HUD({
     };
   }, [bridge]);
 
-  // Telemetry values (quantize high-frequency continuous floats to avoid 15 Hz React.memo churn)
-  const speedKmh = snap?.speedKmh ?? 0;
-  const speedRatio = Math.round((snap?.speedRatio ?? 0) * 100) / 100;
-  const lap = snap?.lap ?? 1;
-  const lapTime = snap?.lapTime ?? 0;
-  const lastLapTime = snap?.lastLapTime ?? null;
-  const fps = snap?.fps ?? 0;
+  if (!gameStarted) return null;
 
+  const speedKmh = snap?.speedKmh ?? 0;
+  const fps = snap?.fps ?? 0;
   const bpm = snap?.bpm ?? 122;
   const barIndex = snap?.barIndex ?? 0;
   const beatInBar = snap?.beatInBar ?? 0;
   const beatPulse = snap?.beatPulse ?? 0;
-  const sectionRole: SectionRole = snap?.sectionRole ?? 'intro';
-  const barEnergy = Math.round((snap?.barEnergy ?? 0.5) * 50) / 50;
   const trackTitle = snap?.trackTitle ?? 'Neon Horizon';
   const trackArtist = snap?.trackArtist ?? 'Mayonaka FM';
   const roadBarIndex = snap?.roadBarIndex ?? 0;
   const totalBars = Math.max(1, snap?.totalBars ?? 64);
 
-  // M5 & M6 Telemetry
   const gear = snap?.gear ?? 1;
   const rpm = Math.round((snap?.rpm ?? 0) * 100) / 100;
   const isLugging = snap?.isLugging ?? false;
   const autoShift = snap?.autoShift ?? false;
   const groove = snap?.groove ?? 15;
-  const grooveTier: GrooveTier = snap?.grooveTier ?? 'LOW';
+  const grooveTier = snap?.grooveTier ?? 'LOW';
   const tofuMode = snap?.tofuMode ?? false;
   const sodaSkin: SodaSkin = snap?.sodaSkin ?? 'melon-soda';
-  const sodaSpills = snap?.sodaSpills ?? 0;
-  const stageNumber = snap?.stageNumber ?? 1;
-  const stagePaletteName = snap?.stagePaletteName ?? 'MAYONAKA BAY';
+  const stageAccentColor = snap?.stageAccentColor ?? '#00f0b5';
   const playlistIndex = snap?.playlistIndex ?? 0;
-  const playlistLength = snap?.playlistLength ?? 1;
-  const stageScore = snap?.stageScore ?? 0;
-  const bestSongScore = snap?.bestSongScore ?? null;
-  const bestSongGrade = snap?.bestSongGrade ?? null;
   const isPaused = snap?.isPaused ?? false;
-  const gamepadConnected = snap?.gamepadConnected ?? false;
 
-  const cassetteVisible = !hideCassette && effectiveCockpit.showCassetteWidget && !effectiveCleanHud;
-  const visorVisible = effectiveCockpit.showSunVisor && !effectiveCleanHud;
-  const radioVisible = effectiveCockpit.showRadioConsole && !effectiveCleanHud;
-  const vfdVisible = !hideVfd && effectiveCockpit.showInstrumentCluster && !effectiveCleanHud;
+  const cassetteVisible = !hideCassette && cockpitVisibility.showCassetteWidget;
+  const visorVisible = cockpitVisibility.showSunVisor;
+  const vfdVisible = !hideVfd && cockpitVisibility.showInstrumentCluster;
+
   const effectivePlaylistItems: readonly RadioPlaylistEntry[] =
     playlistItems && playlistItems.length > 0
       ? playlistItems
@@ -237,8 +179,6 @@ export function HUD({
             bpm,
           },
         ];
-
-  if (!gameStarted) return null;
 
   if (minimalPerfOnly) {
     return (
@@ -252,8 +192,7 @@ export function HUD({
   }
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between p-3 text-[var(--ff-cream)] select-none sm:p-5">
-      {/* Downbeat Rhythm Bezel light pulse */}
+    <div className="pointer-events-none absolute inset-0 z-2 flex flex-col justify-between overflow-hidden p-3 text-[var(--ff-cream)] select-none sm:p-4">
       {!hideBezel && (
         <RhythmBezel
           beatPulse={beatPulse}
@@ -263,229 +202,107 @@ export function HUD({
         />
       )}
 
-      {/* TOP BAR: Left Cassette Tape Deck + Center-Right Sun Visor + Right Controls */}
-      <div className="relative z-1 flex items-start justify-between gap-2.5 sm:gap-3">
-        <div className="flex min-w-0 items-start [contain:layout_style_paint] [transform:translateZ(0)]">
-          {!hideCassette && !effectiveCleanHud && (
-            <CassetteTapeWidget
-              trackArtist={trackArtist}
-              trackTitle={trackTitle}
-              bpm={bpm}
-              barIndex={barIndex}
-              beatInBar={beatInBar}
-              sectionRole={sectionRole}
-              barEnergy={barEnergy}
-              grooveTier={grooveTier}
-              tofuMode={tofuMode}
-              roadBarIndex={roadBarIndex}
-              totalBars={totalBars}
-              playlistIndex={playlistIndex}
-              playlistLength={playlistLength}
-              isSlack={isTapeSlack}
-              visible={effectiveCockpit.showCassetteWidget}
-              onToggleVisible={handleToggleCassetteDeck}
-            />
-          )}
+      {/* TOP-RIGHT: Oversized Sun Visor + Cascading Clipped/Taped Photos */}
+      {visorVisible && (
+        <div className="pointer-events-none absolute top-0 right-2 z-2 sm:right-3">
+          <SunVisorPhoto photos={visorPhotos} />
         </div>
+      )}
 
-        {/* Center-Right RHD Driver Sun Visor hanging from windshield top edge */}
-        {visorVisible && (
-          <div className="-mt-5 hidden shrink-0 lg:ml-auto lg:mr-3 lg:flex">
-            <SunVisorPhoto
-              photoUrl={visorPhotoUrl}
-              onUploadPhoto={onUploadVisorPhoto}
-              onClearPhoto={onClearVisorPhoto}
-            />
-          </div>
+      {/* TOP-LEFT: Cassette Window + Monochrome Theme Progress Bar + Adjacent Playlist */}
+      <div className="relative z-1 flex items-start justify-start">
+        {cassetteVisible && (
+          <CassetteTapeWidget
+            trackTitle={trackTitle}
+            barIndex={barIndex}
+            beatInBar={beatInBar}
+            grooveTier={grooveTier}
+            roadBarIndex={roadBarIndex}
+            totalBars={totalBars}
+            playlistIndex={playlistIndex}
+            playlistItems={effectivePlaylistItems}
+            stageAccentColor={stageAccentColor}
+            isSlack={isTapeSlack}
+            visible={cockpitVisibility.showCassetteWidget}
+          />
         )}
-
-        {/* Right: Walkman Tactile Status & Transport Controls */}
-        <div className="pointer-events-auto flex items-center gap-1.5 [contain:layout_style_paint] [transform:translateZ(0)]">
-          {snap?.autopilotActive && (
-            <span
-              className="wm-lcd ff-mono inline-flex h-7 items-center gap-1.5 rounded-[2px] px-2 text-[10px] font-bold tracking-wider text-[var(--wm-mint)] uppercase"
-              title={`Autopilot: ${snap.autopilotMode?.toUpperCase() ?? 'ON'}`}
-            >
-              <WalkmanLed lit color="mint" />
-              AUTO
-            </span>
-          )}
-
-          {gamepadConnected && (
-            <span
-              className="wm-lcd ff-mono inline-flex h-7 items-center gap-1 rounded-[2px] px-2 text-[10px] font-black text-[var(--wm-mint)]"
-              title="Gamepad connected"
-            >
-              GP
-            </span>
-          )}
-
-          <div className="wm-key-bank flex items-center">
-            <button
-              type="button"
-              aria-pressed={effectiveCleanHud}
-              onClick={(e) => {
-                handleToggleCleanHud();
-                e.currentTarget.blur();
-              }}
-              className={`wm-btn-well ff-mono flex h-[26px] cursor-pointer items-center justify-center gap-1.5 px-2.5 text-[10px] font-bold tracking-[0.14em] uppercase ${
-                effectiveCleanHud
-                  ? 'text-[var(--wm-play)]'
-                  : 'text-[var(--wm-silk)] hover:text-[var(--wm-mint)]'
-              }`}
-              title="Toggle minimal HUD [H]"
-            >
-              <WalkmanLed lit={effectiveCleanHud} color="play" />
-              {effectiveCleanHud ? 'FULL H' : 'HUD H'}
-            </button>
-
-            <button
-              type="button"
-              onClick={(e) => {
-                onTogglePause?.();
-                e.currentTarget.blur();
-              }}
-              className="wm-btn-well wm-btn-play ff-mono flex h-[26px] cursor-pointer items-center justify-center gap-1.5 px-2.5 text-[10px] font-black tracking-[0.14em] uppercase"
-              title="Pause [ESC] or [P]"
-            >
-              {isPaused ? '▶ RESUME' : '⏸ PAUSE'}
-            </button>
-          </div>
-        </div>
       </div>
 
-      {/* On-Demand Performance Profiler Ribbon (F3) */}
+      {/* On-Demand Developer Performance Profiler Ribbon (F3) */}
       {showPerfHud && (
         <div
-          className={`wm-lcd ff-mono pointer-events-none absolute top-11 z-2 flex flex-wrap items-center justify-end gap-2.5 rounded-[2px] px-3 py-1 text-[10px] text-[var(--wm-silk)] sm:top-13 [contain:layout_style_paint] [transform:translateZ(0)] ${
-            debugOpen
-              ? cassetteVisible
-                ? 'right-[calc(376px+1.25rem)] max-w-[calc(100%-376px-2.5rem)] sm:right-[calc(376px+1.75rem)] lg:max-w-[min(46rem,calc(100%-760px))]'
-                : 'right-[calc(376px+1.25rem)] max-w-[min(46rem,calc(100%-376px-2.5rem))] sm:right-[calc(376px+1.75rem)]'
-              : 'right-3 max-w-[min(46rem,calc(100%-1.5rem))] sm:right-5'
+          className={`wm-lcd ff-mono pointer-events-none absolute top-2 z-2 flex flex-wrap items-center justify-end gap-2.5 rounded-[2px] px-3 py-1 text-[10px] text-[var(--wm-silk)] ${
+            debugOpen ? 'right-[396px]' : 'right-3 sm:right-5'
           }`}
         >
-          <span className="font-bold tracking-widest text-[var(--wm-play)] uppercase">PERF MON</span>
-          <span className="font-bold text-[var(--wm-mint)]">
+          <span className="font-bold tracking-widest text-[var(--wm-play)] uppercase">PERF</span>
+          <span className="font-bold text-[#2ee2be]">
             {fps} FPS (MIN {snap?.minFps ?? fps})
           </span>
           <span className="text-[var(--wm-silk-dim)]">
-            FRAME: <strong className="text-[var(--wm-silk)]">{snap?.frameTimeMs ?? 16.7}ms</strong> (P95{' '}
+            FR: <strong className="text-[var(--wm-silk)]">{snap?.frameTimeMs ?? 16.7}ms</strong> (P95{' '}
             {snap?.p95FrameMs ?? 16.7})
           </span>
           <span className="text-[var(--wm-play)]">
-            JS: <strong className="text-[var(--wm-silk)]">{snap?.renderTimeMs ?? 1.2}ms</strong>{' '}
-            [BG {snap?.bgRenderMs ?? 0} / SL {snap?.roadSlicesMs ?? 0} / PR {snap?.roadPropsMs ?? 0} / CAR{' '}
-            {snap?.carOverlayMs ?? 0}]
+            JS: <strong className="text-[var(--wm-silk)]">{snap?.renderTimeMs ?? 1.2}ms</strong>
           </span>
           <span className="text-[var(--wm-amber)]">
             GAP: <strong className="text-[var(--wm-silk)]">{snap?.compositorGapMs ?? 0}ms</strong>
           </span>
           <span className="text-[var(--wm-play)]">
-            DROPS: <strong className="text-[var(--wm-silk)]">{snap?.droppedFrames ?? 0}</strong>
+            DRP: <strong className="text-[var(--wm-silk)]">{snap?.droppedFrames ?? 0}</strong>
           </span>
-          <span className="text-[var(--wm-mint)]">
-            PHYS: <strong className="text-[var(--wm-silk)]">{snap?.simTimeMs ?? 0.3}ms</strong> (x
-            {snap?.fixedStepsLastFrame ?? 1})
-          </span>
-          <span className="text-[var(--wm-silk-dim)]">
-            SEGS: <strong className="text-[var(--wm-silk)]">{snap?.drawnSegments ?? 0}</strong>
-          </span>
-          <span className="text-[var(--wm-amber)]">
-            PROPS: <strong className="text-[var(--wm-silk)]">{snap?.drawnProps ?? 0}</strong>
-          </span>
-          <span className="text-[var(--wm-silk-dim)]">
-            TRUCKS: <strong className="text-[var(--wm-silk)]">{snap?.drawnTrucks ?? 0}</strong>
-          </span>
-          <span className="text-[var(--wm-play)]">
-            PARTS: <strong className="text-[var(--wm-silk)]">{snap?.activeParticles ?? 0}</strong>
-          </span>
-          {snap?.memoryMb !== null && snap?.memoryMb !== undefined && (
-            <span className="text-[var(--wm-mint)]">
-              HEAP: <strong className="text-[var(--wm-silk)]">{snap.memoryMb}MB</strong>
-            </span>
-          )}
         </div>
       )}
 
-      {/* BOTTOM BAR: Left Autoradio DIN Console (clearing canvas Tofu shelf) + Right JDM VFD Digidash */}
-      <div className="relative z-1 flex items-end justify-between gap-4">
-        <div className="flex min-w-0 items-end">
-          {radioVisible && (
-            <RadioConsole
-              items={effectivePlaylistItems}
-              activeIndex={playlistIndex}
-              trackTitle={trackTitle}
-              trackArtist={trackArtist}
-              bpm={bpm}
-              tofuMode={tofuMode}
-              onPrevTrack={onPrevTrack}
-              onNextTrack={onNextTrack}
-              onSelectIndex={onSelectPlaylistIndex}
-              onOpenDeck={onOpenTrackLoader}
-            />
-          )}
-        </div>
-
-        {/* Bottom-Right: 80s JDM Luxury GT VFD Binnacle */}
+      {/* BOTTOM-LEFT: Speedometer & Tachometer */}
+      <div className="relative z-1 flex items-end justify-start">
         {vfdVisible && (
-          <div className="[contain:layout_style_paint] [transform:translateZ(0)]">
-            <VfdDigidash
-              speedKmh={speedKmh}
-              speedRatio={speedRatio}
-              gear={gear}
-              rpm={rpm}
-              groove={groove}
-              grooveTier={grooveTier}
-              isLugging={isLugging}
-              autoShift={autoShift}
-              onToggleAutoShift={handleToggleAutoShift}
-            />
-          </div>
+          <VfdDigidash
+            speedKmh={speedKmh}
+            gear={gear}
+            rpm={rpm}
+            groove={groove}
+            grooveTier={grooveTier}
+            isLugging={isLugging}
+            stageAccentColor={stageAccentColor}
+          />
         )}
       </div>
 
-      {/* Pause Menu Hub */}
+      {/* Right-Edge Portable Cassette Player Pause Menu */}
       <PauseMenu
         open={gameStarted && isPaused && !trackLoaderOpen && !inspectorOpen}
-        stageNumber={stageNumber}
-        stagePaletteName={stagePaletteName}
-        stageScore={stageScore}
-        bestSongGrade={bestSongGrade}
-        bestSongScore={bestSongScore}
-        lap={lap}
-        lapTime={lapTime}
-        lastLapTime={lastLapTime}
         trackTitle={trackTitle}
-        trackArtist={trackArtist}
-        bpm={bpm}
-        groove={groove}
-        grooveTier={grooveTier}
         tofuMode={tofuMode}
         sodaSkin={sodaSkin}
-        sodaSpills={sodaSpills}
-        cleanHud={effectiveCleanHud}
         showPerfHud={showPerfHud}
         autoShift={autoShift}
         autopilotActive={snap?.autopilotActive ?? false}
         crtEnabled={crtEnabled}
-        cockpitVisibility={effectiveCockpit}
-        visorPhotoUrl={visorPhotoUrl}
-        onToggleCockpitModule={handleToggleCockpitModule}
-        onApplyCockpitPreset={handleApplyCockpitPreset}
-        onUploadVisorPhoto={onUploadVisorPhoto}
-        onClearVisorPhoto={onClearVisorPhoto}
+        cockpitVisibility={cockpitVisibility}
+        visorPhotos={visorPhotos}
+        library={library}
+        audio={audio}
+        onSelectTrack={onSelectTrack}
+        onUpdateBeatMap={onUpdateBeatMap}
+        onPreviewUnlocked={onPreviewUnlocked}
+        onToggleCockpitModule={onToggleCockpitModule}
+        onApplyCockpitPreset={onApplyCockpitPreset}
+        onAddVisorPhotos={onAddVisorPhotos}
+        onAddVisorPhoto={onAddVisorPhoto}
+        onRemoveVisorPhoto={onRemoveVisorPhoto}
+        onClearVisorPhotos={onClearVisorPhotos}
         onResume={() => onTogglePause?.()}
         onRestartRun={onRestartRun}
         onOpenTrackLoader={onOpenTrackLoader}
         onOpenInspector={onOpenInspector}
         onToggleDebug={onToggleDebug}
-        onToggleTofuMode={() => onToggleTofuMode?.()}
-        onCycleSodaSkin={() => onCycleSodaSkin?.()}
-        onToggleCleanHud={handleToggleCleanHud}
+        onToggleTofuMode={onToggleTofuMode}
+        onCycleSodaSkin={onCycleSodaSkin}
         onTogglePerfHud={() => setShowPerfHud((prev) => !prev)}
-        onToggleAutoShift={() => onToggleAutoShift?.()}
-        onToggleAutopilot={() => onToggleAutopilot?.()}
+        onToggleAutoShift={onToggleAutoShift}
+        onToggleAutopilot={onToggleAutopilot}
         onToggleCrt={onToggleCrt}
         onReturnToMainMenu={onReturnToMainMenu}
       />

@@ -4,10 +4,9 @@ import type { RunGrade, TrackLibrary } from '@src/audio/TrackLibrary';
 import { FORK_APPROACH_BARS } from '@src/config/constants';
 import type { PlayerCar } from '@src/entities/PlayerCar';
 import {
-  FORK_SPLIT_END_T,
-  getChosenForkCenter,
-  getChosenForkHalfWidth,
+  FORK_TAPER_START_T,
   getForkCrossSection,
+  getForkOuterLimit,
   type ForkCrossSection,
   type Track,
 } from '@src/road/RoadSegment';
@@ -117,7 +116,8 @@ export class StageForkController {
   }
 
   /**
-   * Smoothly aligns `car.x` with the chosen fork branch as it converges back to center in Phase 3.
+   * Softly bounds `car.x` within the narrowing single carriageway during the final fork taper
+   * (`t >= FORK_TAPER_START_T`) without forcing the player onto a specific side before finish.
    */
   alignCarInConvergence(
     car: PlayerCar,
@@ -135,20 +135,11 @@ export class StageForkController {
       return;
     }
     const span = Math.max(1, trackLength - forkZoneStartZ);
-    const tPrev = Math.max(0, Math.min(1, (position - forkZoneStartZ) / span));
     const tNext = Math.max(0, Math.min(1, (nextPos - forkZoneStartZ) / span));
-    if (tNext > FORK_SPLIT_END_T) {
-      const centerPrev = getChosenForkCenter(tPrev, this.forkChoice);
-      const centerNext = getChosenForkCenter(tNext, this.forkChoice);
-      const deltaCenter = centerNext - centerPrev;
-      car.x += deltaCenter;
-      car.prevX += deltaCenter;
-
-      const halfW = getChosenForkHalfWidth(tNext);
-      const maxOffset = halfW * 0.85;
-      const relX = car.x - centerNext;
-      if (Math.abs(relX) > maxOffset) {
-        const pull = (Math.sign(relX) * maxOffset - relX) * Math.min(1, dt * 5.0);
+    if (tNext > FORK_TAPER_START_T) {
+      const maxOffset = Math.max(0.75, getForkOuterLimit(tNext) - 0.18);
+      if (Math.abs(car.x) > maxOffset) {
+        const pull = (Math.sign(car.x) * maxOffset - car.x) * Math.min(1, dt * 6.0);
         car.x += pull;
         car.prevX += pull;
       }
@@ -217,21 +208,21 @@ export class StageForkController {
         Math.min(1, (position - forkStartZ) / Math.max(1, trackLength - forkStartZ)),
       );
 
-      if (this.forkProgress < FORK_SPLIT_END_T || this.forkLastSign === 0) {
-        if (this.forkManualLock === 'left' && carX > 0.3) {
+      if (this.forkProgress < 1 || this.forkLastSign === 0) {
+        if (this.forkManualLock === 'left' && carX > 0.25) {
           this.forkManualLock = null;
-        } else if (this.forkManualLock === 'right' && carX < -0.3) {
+        } else if (this.forkManualLock === 'right' && carX < -0.25) {
           this.forkManualLock = null;
         }
 
         const nextChoice: 'left' | 'right' =
           this.forkManualLock ??
           (this.forkLastSign > 0
-            ? carX < -0.1
+            ? carX < -0.08
               ? 'left'
               : 'right'
             : this.forkLastSign < 0
-              ? carX > 0.1
+              ? carX > 0.08
                 ? 'right'
                 : 'left'
               : carX < 0

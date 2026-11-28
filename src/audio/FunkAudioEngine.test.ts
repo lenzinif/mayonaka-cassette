@@ -348,4 +348,29 @@ describe('FunkAudioEngine — Memory LRU, Wow & Flutter, and Fork FX', () => {
 
     engine.dispose();
   });
+
+  it('snapshots gameplay state when seekPreview is called while preview is stopped and restores it on stopPreview', async () => {
+    const engine = new FunkAudioEngine(DEFAULT_SYNTH_BEATMAP);
+    await engine.unlock();
+    const ctx = lastCreatedCtx!;
+    const userBuf = ctx.createBuffer(2, 44100 * 60, 44100) as unknown as AudioBuffer;
+    engine.loadTrack(DEFAULT_SYNTH_BEATMAP, userBuf);
+
+    for (let i = 0; i < 60; i++) {
+      ctx.currentTime += 0.2;
+      engine.update(0.2, { speedRatio: 0.7, isDrifting: false, isOffRoad: false });
+    }
+    const gameplaySec = engine.samplePreview().trackTimeSec;
+    expect(gameplaySec).toBeGreaterThan(5);
+
+    expect(engine.isPreviewPlaying).toBe(false);
+    engine.seekPreview(45);
+    expect(engine.isPreviewPlaying).toBe(false);
+    expect(engine.samplePreview().trackTimeSec).toBeCloseTo(45, 1);
+
+    engine.stopPreview(true, true);
+    expect(engine.samplePreview().trackTimeSec).toBeCloseTo(gameplaySec, 1);
+
+    engine.dispose();
+  });
 });

@@ -139,12 +139,12 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     const mock = createMockCanvasContext();
     for (const skin of SODA_SKINS) {
       soda.skin = skin;
-      drawMelonSodaInset(mock.ctx, soda, 360, 0.5);
+      drawMelonSodaInset(mock.ctx, soda, 640, 360, 0.5);
     }
     expect(mock.fillRectCalls).toBeGreaterThan(40);
   });
 
-  it('integrates M7 particles, skin cycling, and full canvas render in Game', () => {
+  it('integrates M7 particles, skin cycling via cycleSodaSkin(), and full canvas render in Game', () => {
     const input = new FakeInput();
     const bridge = new TelemetryBridge<TelemetrySnapshot, GameEvent>(15);
     const audio = new FunkAudioEngine();
@@ -154,9 +154,8 @@ describe('M7 — Drift & Collision Particles & Pixel-Art Sprites', () => {
     const events: GameEvent[] = [];
     bridge.onEvent((ev) => events.push(ev));
 
-    // Press 'cycleSodaSkin' (KeyV) -> cycles skin and emits event
-    input.press('cycleSodaSkin');
-    game.update(1 / 60);
+    // Cycle skin via Game API (configuration locked from live driving keys per docs/UI.md §1.2)
+    game.cycleSodaSkin();
     expect(game.melonSoda.skin).toBe('tofu-cup');
     expect(events).toContainEqual({ type: 'sodaSkinChanged', skin: 'tofu-cup' });
 
